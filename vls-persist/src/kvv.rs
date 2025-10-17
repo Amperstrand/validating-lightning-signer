@@ -224,8 +224,12 @@ impl<S: KVVStore, F: ValueFormat> Persist for KVVPersister<S, F> {
         channel_id: &ChannelId,
     ) -> Result<ChannelEntry, Error> {
         let key = make_key2(CHANNEL_PREFIX, &node_id.serialize(), channel_id.as_slice());
-        let value = self.get(&key)?.expect("channel not found").1;
-        let entry: ChannelEntry = F::de_value(&value)?;
+        let (_version, bytes) =
+            self.get(&key)?.ok_or_else(|| Error::NotFound("channel not found".to_string()))?;
+        if bytes.is_empty() {
+            return Err(Error::NotFound("channel deleted".to_string()));
+        }
+        let entry: ChannelEntry = F::de_value(&bytes)?;
         Ok(entry.into())
     }
 
