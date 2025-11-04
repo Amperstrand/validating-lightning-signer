@@ -813,6 +813,19 @@ pub struct SignHtlcTxMingleReply {
     pub psbt: WithSize<PsbtWrapper>,
 }
 
+#[derive(SerBolt, Debug, Encodable, Decodable)]
+#[message_id(61)]
+pub struct CheckChannelStateSync {
+    pub node_channel_entry_json: WireString,
+}
+
+#[derive(SerBolt, Debug, Encodable, Decodable)]
+#[message_id(161)]
+pub struct CheckChannelStateSyncReply {
+    pub state_matches: bool,
+    pub signer_channel_entry_json: Option<WireString>,
+}
+
 /// Ping request
 /// LDK only
 #[derive(SerBolt, Debug, Encodable, Decodable)]
@@ -1190,6 +1203,10 @@ pub enum Message {
     SignAnchorspendReply(SignAnchorspendReply),
     SignHtlcTxMingle(SignHtlcTxMingle),
     SignHtlcTxMingleReply(SignHtlcTxMingleReply),
+
+    CheckChannelStateSync(CheckChannelStateSync),
+    CheckChannelStateSyncReply(CheckChannelStateSyncReply),
+
     #[cfg(feature = "developer")]
     HsmdDevPreinit(HsmdDevPreinit),
     #[cfg(feature = "developer")]
