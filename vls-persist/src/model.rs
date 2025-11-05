@@ -17,15 +17,13 @@ use lightning_signer::bitcoin::blockdata::block::Header as BlockHeader;
 use lightning_signer::bitcoin::hash_types::FilterHeader;
 use lightning_signer::bitcoin::hashes::Hash;
 use lightning_signer::channel::ChannelId;
-use lightning_signer::channel::ChannelSetup;
 use lightning_signer::monitor::ChainMonitor;
 use lightning_signer::monitor::State as ChainMonitorState;
 use lightning_signer::node::{NodeState, PaymentState};
-use lightning_signer::persist::model::ChannelEntry as CoreChannelEntry;
 use lightning_signer::persist::ChainTrackerListenerEntry;
-use lightning_signer::policy::validator::{EnforcementState, ValidatorFactory};
+use lightning_signer::policy::validator::ValidatorFactory;
 use lightning_signer::policy::DEFAULT_FEE_VELOCITY_CONTROL;
-use lightning_signer::util::ser_util::{ChannelIdHandler, OutPointReversedDef};
+use lightning_signer::util::ser_util::OutPointReversedDef;
 use lightning_signer::util::velocity::VelocityControl as CoreVelocityControl;
 
 #[derive(Serialize, Deserialize)]
@@ -107,31 +105,6 @@ impl From<&NodeState> for NodeStateEntry {
 pub struct NodeEntry {
     pub key_derivation_style: u8,
     pub network: String,
-}
-
-#[serde_as]
-#[derive(Serialize, Deserialize)]
-pub struct ChannelEntry {
-    pub channel_value_satoshis: u64,
-    pub channel_setup: Option<ChannelSetup>,
-    // Permanent channel ID if different from the initial channel ID
-    #[serde_as(as = "IfIsHumanReadable<Option<ChannelIdHandler>>")]
-    pub id: Option<ChannelId>,
-    pub enforcement_state: EnforcementState,
-    // birth blockheight for stub, None for channel
-    pub blockheight: Option<u32>,
-}
-
-impl From<ChannelEntry> for CoreChannelEntry {
-    fn from(e: ChannelEntry) -> Self {
-        CoreChannelEntry {
-            channel_value_satoshis: e.channel_value_satoshis,
-            channel_setup: e.channel_setup,
-            id: e.id,
-            enforcement_state: e.enforcement_state,
-            blockheight: e.blockheight,
-        }
-    }
 }
 
 #[serde_as]

@@ -13,7 +13,7 @@ use vls_protocol_signer::lightning_signer;
 
 use lightning_signer::persist::{
     self,
-    model::{ChannelEntry as CoreChannelEntry, NodeEntry as CoreNodeEntry},
+    model::{ChannelEntry, NodeEntry as CoreNodeEntry},
     Persist,
 };
 use lightning_signer::{
@@ -26,9 +26,7 @@ use lightning_signer::{
     policy::validator::{EnforcementState, ValidatorFactory},
     prelude::*,
 };
-use vls_persist::model::{
-    AllowlistItemEntry, ChainTrackerEntry, ChannelEntry, NodeEntry, NodeStateEntry,
-};
+use vls_persist::model::{AllowlistItemEntry, ChainTrackerEntry, NodeEntry, NodeStateEntry};
 use vls_protocol_signer::lightning_signer::persist::{ChainTrackerListenerEntry, SignerId};
 
 use crate::setup::SetupFS;
@@ -409,14 +407,14 @@ impl Persist for FatJsonPersister {
         &self,
         node_id: &PublicKey,
         channel_id: &ChannelId,
-    ) -> Result<CoreChannelEntry, persist::Error> {
+    ) -> Result<ChannelEntry, persist::Error> {
         unimplemented!();
     }
 
     fn get_node_channels(
         &self,
         _node_id: &PublicKey,
-    ) -> Result<Vec<(ChannelId, CoreChannelEntry)>, persist::Error> {
+    ) -> Result<Vec<(ChannelId, ChannelEntry)>, persist::Error> {
         info!("get_node_channels");
         let mut res = vec![];
         for key in self.list_keys(&Self::channel_bucket_path()).map_err(|err| err.into())? {

@@ -13,9 +13,7 @@ use lightning_signer::chain::tracker::ChainTracker;
 use lightning_signer::channel::{Channel, ChannelId, ChannelStub};
 use lightning_signer::monitor::ChainMonitor;
 use lightning_signer::node::{Allowable, NodeConfig, NodeState};
-use lightning_signer::persist::model::{
-    ChannelEntry as CoreChannelEntry, NodeEntry as CoreNodeEntry,
-};
+use lightning_signer::persist::model::{ChannelEntry, NodeEntry as CoreNodeEntry};
 use lightning_signer::persist::{ChainTrackerListenerEntry, Error, Persist, SignerId};
 use lightning_signer::policy::validator::{EnforcementState, ValidatorFactory};
 use lightning_signer::prelude::*;
@@ -224,7 +222,7 @@ impl<S: KVVStore, F: ValueFormat> Persist for KVVPersister<S, F> {
         &self,
         node_id: &PublicKey,
         channel_id: &ChannelId,
-    ) -> Result<CoreChannelEntry, Error> {
+    ) -> Result<ChannelEntry, Error> {
         let key = make_key2(CHANNEL_PREFIX, &node_id.serialize(), channel_id.as_slice());
         let value = self.get(&key)?.expect("channel not found").1;
         let entry: ChannelEntry = F::de_value(&value)?;
@@ -234,7 +232,7 @@ impl<S: KVVStore, F: ValueFormat> Persist for KVVPersister<S, F> {
     fn get_node_channels(
         &self,
         node_id: &PublicKey,
-    ) -> Result<Vec<(ChannelId, CoreChannelEntry)>, Error> {
+    ) -> Result<Vec<(ChannelId, ChannelEntry)>, Error> {
         let prefix = make_key(CHANNEL_PREFIX, &node_id.serialize()) + SEPARATOR;
         let mut res = Vec::new();
         for kvv in self.get_prefix(&prefix)? {
