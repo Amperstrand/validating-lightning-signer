@@ -11,8 +11,8 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-no-std = ["vls-protocol/no-std", "vls-core/no-std"]
-std = ["vls-protocol/std", "vls-core/std"]
+no-std = ["vls-protocol/no-std", "vls-core/no-std", "serde_json/alloc"]
+std = ["vls-protocol/std", "vls-core/std", "serde_json/std"]
 secp-lowmemory = ["vls-core/secp-lowmemory"]
 use_backtrace = ["vls-core/use_backtrace"]
 tracker_size_workaround = ["vls-core/tracker_size_workaround"]
@@ -26,8 +26,10 @@ developer = ["vls-protocol/developer"]
 vls-core = { path = "../vls-core", version = "0.15.0-rc.1", default-features = false }
 vls-common = { path = "../vls-common", version = "0.15.0-rc.1", default-features = false }
 vls-protocol = { path = "../vls-protocol", version = "0.15.0-rc.1", default-features = false }
+vls-persist = { path = "../vls-persist", version = "0.15.0-rc.1", default-features = false }
 log = { version = "0.4", default-features = false }
 bit-vec = { version = "0.6", default-features = false }
+serde_json = { workspace  = true }
 
 [dev-dependencies]
 vls-core = { path = "../vls-core", version = "0.15.0-rc.1", features = ["test_utils"] }

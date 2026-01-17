@@ -3688,6 +3688,7 @@ dependencies = [
  "bit-vec",
  "env_logger",
  "log",
+ "serde_json",
  "test-log",
  "vls-common",
  "vls-core",
