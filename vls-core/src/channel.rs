@@ -11,16 +11,19 @@ use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::sighash::SighashCache;
 use bitcoin::{Amount, Network, OutPoint, Script, ScriptBuf, Transaction, Txid};
 use lightning::chain;
-use lightning::ln::chan_utils;
+use lightning::ln::chan_utils::{self, build_htlc_input_witness};
 use lightning::ln::chan_utils::{
     build_htlc_transaction, derive_private_key, get_htlc_redeemscript, make_funding_redeemscript,
     ChannelPublicKeys, ChannelTransactionParameters, ClosingTransaction, CommitmentTransaction,
     CounterpartyChannelTransactionParameters, HTLCOutputInCommitment, HolderCommitmentTransaction,
-    TxCreationKeys,
+    TrustedCommitmentTransaction, TxCreationKeys,
 };
 use lightning::ln::channel_keys::{DelayedPaymentKey, RevocationKey};
 use lightning::sign::ecdsa::EcdsaChannelSigner;
-use lightning::sign::{ChannelSigner, EntropySource, InMemorySigner, SignerProvider};
+use lightning::sign::{
+    ChannelDerivationParameters, ChannelSigner, EntropySource, HTLCDescriptor, InMemorySigner,
+    SignerProvider,
+};
 use lightning::types::features::ChannelTypeFeatures;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use serde_derive::{Deserialize, Serialize};
@@ -1364,36 +1367,23 @@ impl Channel {
         Ok(sig)
     }
 
-    /// Sign a holder commitment and HTLCs when recovering from node failure
-    /// Also returns the revocable scriptPubKey so we can identify our outputs
-    /// Also returns the unilateral close key material
-    pub fn sign_holder_commitment_tx_for_recovery(
-        &mut self,
-        fee_rate: u32,
-        fee_utxo: &[InputUtxo],
-    ) -> Result<
-        (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
-        Status,
-    > {
+    /// Reconstruct the current holder commitment transaction without signing it.
+    pub fn get_current_holder_commitment_transaction(
+        &self,
+    ) -> Result<CommitmentTransaction, Status> {
         let info2 = self
             .enforcement_state
             .current_holder_commit_info
             .as_ref()
-            .ok_or_else(|| internal_error("channel was not open - commit info"))?;
-        let cp_sigs = self
-            .enforcement_state
-            .current_counterparty_signatures
-            .as_ref()
-            .ok_or_else(|| internal_error("channel was not open - counterparty sigs"))?;
-        let commitment_number = self.enforcement_state.next_holder_commit_num - 1;
-        warn!("force-closing channel for recovery at commitment number {}", commitment_number);
+            .ok_or_else(|| internal_error("channel was not open - commit info missing"))?;
 
-        let htlcs = Self::htlcs_info2_to_oic(&info2.offered_htlcs, &info2.received_htlcs);
+        let commitment_number = self.enforcement_state.next_holder_commit_num - 1;
         let per_commitment_point = self.get_per_commitment_point(commitment_number)?;
 
         let build_feerate = if self.setup.is_zero_fee_htlc() { 0 } else { info2.feerate_per_kw };
         let txkeys = self.make_holder_tx_keys(&per_commitment_point);
-        // policy-onchain-format-standard
+        let htlcs = Self::htlcs_info2_to_oic(&info2.offered_htlcs, &info2.received_htlcs);
+
         let recomposed_tx = self.make_holder_commitment_tx(
             commitment_number,
             &txkeys,
@@ -1403,19 +1393,39 @@ impl Channel {
             htlcs,
         );
 
-        // We provide a dummy signature for the remote, since we don't require that sig
-        // to be passed in to this call.  It would have been better if HolderCommitmentTransaction
-        // didn't require the remote sig.
-        // TODO consider if we actually want the sig for policy checks
-        let htlcs_len = recomposed_tx.htlcs().len();
-        let mut htlc_dummy_sigs = Vec::with_capacity(htlcs_len);
-        htlc_dummy_sigs.resize(htlcs_len, Self::dummy_sig());
+        Ok(recomposed_tx)
+    }
 
+    /// Sign a holder commitment and HTLCs when recovering from node failure.
+    ///
+    /// Also returns the revocable scriptPubKey so we can identify our outputs
+    /// and the unilateral close key material.
+    ///
+    /// The `spent_htlc_indices` parameter allows skipping already-spent HTLCs
+    /// to avoid building invalid transactions during repeated recovery attempts.
+    pub fn sign_holder_commitment_tx_for_recovery(
+        &mut self,
+        spent_htlc_indices: &[bool],
+    ) -> Result<
+        (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
+        Status,
+    > {
+        let cp_sigs = self
+            .enforcement_state
+            .current_counterparty_signatures
+            .as_ref()
+            .ok_or_else(|| internal_error("channel was not open - counterparty sigs"))?;
+        let commitment_number = self.enforcement_state.next_holder_commit_num - 1;
+        warn!("force-closing channel for recovery at commitment number {}", commitment_number);
+
+        let recomposed_tx = self.get_current_holder_commitment_transaction()?;
+        let per_commitment_point = self.get_per_commitment_point(commitment_number)?;
+        let txkeys = self.make_holder_tx_keys(&per_commitment_point);
         // Holder commitments need an extra wrapper for the LDK signature routine.
         let recomposed_holder_tx = HolderCommitmentTransaction::new(
             recomposed_tx,
-            Self::dummy_sig(),
-            htlc_dummy_sigs,
+            cp_sigs.0.clone(),
+            cp_sigs.1.clone(),
             &self.keys.pubkeys().funding_pubkey,
             &self.counterparty_pubkeys().funding_pubkey,
         );
@@ -1439,6 +1449,16 @@ impl Channel {
         );
 
         add_holder_sig(&mut tx, sig, cp_sigs.0, &holder_funding_key, &counterparty_funding_key);
+
+        let commitment_txid = tx.compute_txid();
+        let htlc_txs = self.sign_holder_htlc_txs_for_recovery(
+            &holder_tx,
+            &commitment_txid,
+            &txkeys,
+            &cp_sigs.1,
+            spent_htlc_indices,
+        )?;
+
         self.enforcement_state.channel_closed = true;
         trace_enforcement_state!(self);
 
@@ -1453,7 +1473,214 @@ impl Channel {
             self.get_unilateral_close_key(&Some(per_commitment_point), &Some(revocation_pubkey))?;
 
         self.persist()?;
-        Ok((tx, Vec::new(), revocable_redeemscript.to_p2wsh(), ck, revocation_pubkey.0))
+        Ok((tx, htlc_txs, revocable_redeemscript.to_p2wsh(), ck, revocation_pubkey.0))
+    }
+
+    /// Sign HTLC transactions for recovery with batching.
+    ///
+    /// For AnchorsZeroFeeHtlc channels, transactions have zero fees and use
+    /// SIGHASH_SINGLE|SIGHASH_ANYONECANPAY, allowing fee inputs to be added later.
+    ///
+    /// Batches compatible HTLCs to reduce on-chain footprint and fees:
+    /// - All received HTLCs are batched into one transaction (no timelock constraint)
+    /// - Offered HTLCs are batched by CLTV expiry (each group shares the same locktime)
+    ///
+    /// Only returns HTLCs that are currently claimable (skips unexpired or missing preimages).
+    fn sign_holder_htlc_txs_for_recovery(
+        &self,
+        holder_tx: &TrustedCommitmentTransaction,
+        commitment_txid: &Txid,
+        txkeys: &TxCreationKeys,
+        cp_htlc_sigs: &[Signature],
+        spent_htlc_indices: &[bool],
+    ) -> Result<Vec<Transaction>, Status> {
+        let commitment_number = self.enforcement_state.next_holder_commit_num - 1;
+        let per_commitment_point = self.get_per_commitment_point(commitment_number)?;
+        let features = self.setup.features();
+        let node = self.get_node();
+        let current_height = self.get_chain_state().current_height;
+
+        let htlc_count = holder_tx.htlcs().len();
+        if spent_htlc_indices.len() != htlc_count {
+            return Err(invalid_argument(format!(
+                "spent_htlc_indices length mismatch: {} != {}",
+                spent_htlc_indices.len(),
+                htlc_count
+            )));
+        }
+
+        let mut received_htlcs = Vec::new();
+        let mut offered_by_cltv: OrderedMap<u32, Vec<_>> = OrderedMap::new();
+        for (htlc_idx, htlc) in holder_tx.htlcs().iter().enumerate() {
+            if htlc.transaction_output_index.is_none() {
+                continue;
+            }
+
+            if spent_htlc_indices[htlc_idx] {
+                continue;
+            }
+
+            if htlc.offered {
+                if htlc.cltv_expiry > current_height {
+                    continue;
+                }
+                offered_by_cltv.entry(htlc.cltv_expiry).or_default().push((htlc_idx, htlc));
+            } else {
+                let preimage = {
+                    let state = node.get_state();
+                    state.payments.get(&htlc.payment_hash).and_then(|p| p.preimage)
+                };
+
+                if preimage.is_none() {
+                    continue;
+                }
+                received_htlcs.push((htlc_idx, htlc, preimage));
+            }
+        }
+        let mut signed_htlc_txs = Vec::new();
+        if !received_htlcs.is_empty() {
+            debug!("batching {} received HTLCs into single transaction", received_htlcs.len());
+            signed_htlc_txs.push(self.build_and_sign_batched_htlc_tx(
+                commitment_txid,
+                txkeys,
+                &features,
+                commitment_number,
+                per_commitment_point,
+                cp_htlc_sigs,
+                &received_htlcs,
+                0,
+            )?);
+        }
+
+        for (cltv, htlcs) in offered_by_cltv {
+            debug!(
+                "batching {} offered HTLCs with CLTV {} into single transaction",
+                htlcs.len(),
+                cltv
+            );
+
+            let htlcs_to_sign: Vec<_> =
+                htlcs.into_iter().map(|(idx, htlc)| (idx, htlc, None)).collect();
+
+            signed_htlc_txs.push(self.build_and_sign_batched_htlc_tx(
+                commitment_txid,
+                txkeys,
+                &features,
+                commitment_number,
+                per_commitment_point,
+                cp_htlc_sigs,
+                &htlcs_to_sign,
+                cltv,
+            )?);
+        }
+
+        Ok(signed_htlc_txs)
+    }
+
+    fn build_and_sign_batched_htlc_tx(
+        &self,
+        commitment_txid: &Txid,
+        txkeys: &TxCreationKeys,
+        features: &ChannelTypeFeatures,
+        commitment_number: u64,
+        per_commitment_point: PublicKey,
+        cp_htlc_sigs: &[Signature],
+        htlcs: &[(usize, &HTLCOutputInCommitment, Option<PaymentPreimage>)],
+        lock_time: u32,
+    ) -> Result<Transaction, Status> {
+        let channel_derivation_parameters = ChannelDerivationParameters {
+            value_satoshis: self.setup.channel_value_sat,
+            keys_id: self.keys.channel_keys_id(),
+            transaction_parameters: self.make_channel_parameters().clone(),
+        };
+
+        struct HTLCSigningData {
+            htlc_idx: usize,
+            htlc: HTLCOutputInCommitment,
+            preimage: Option<PaymentPreimage>,
+            cp_sig: Signature,
+            redeemscript: ScriptBuf,
+            input: bitcoin::TxIn,
+            output: bitcoin::TxOut,
+        }
+
+        let mut signing_data: Vec<HTLCSigningData> = Vec::with_capacity(htlcs.len());
+
+        for (htlc_idx, htlc, preimage) in htlcs {
+            let htlc_tx = build_htlc_transaction(
+                commitment_txid,
+                0,
+                self.setup.counterparty_selected_contest_delay,
+                htlc,
+                features,
+                &txkeys.broadcaster_delayed_payment_key,
+                &txkeys.revocation_key,
+            );
+
+            let cp_sig = cp_htlc_sigs
+                .get(*htlc_idx)
+                .ok_or_else(|| {
+                    internal_error(format!(
+                "missing counterparty sig for htlc {} (output_index: {:?}, cp_sigs_len: {})",
+                htlc_idx,
+                htlc.transaction_output_index,
+                cp_htlc_sigs.len()
+            ))
+                })?
+                .clone();
+
+            signing_data.push(HTLCSigningData {
+                htlc_idx: *htlc_idx,
+                htlc: (*htlc).clone(),
+                preimage: *preimage,
+                cp_sig,
+                redeemscript: get_htlc_redeemscript(htlc, features, txkeys),
+                input: htlc_tx.input[0].clone(),
+                output: htlc_tx.output[0].clone(),
+            });
+        }
+
+        let mut batched_tx = Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::from_height(lock_time).map_err(|_| {
+                internal_error(format!("invalid CLTV height locktime: {}", lock_time))
+            })?,
+            input: signing_data.iter().map(|sd| sd.input.clone()).collect(),
+            output: signing_data.iter().map(|sd| sd.output.clone()).collect(),
+        };
+
+        for (i, sd) in signing_data.iter().enumerate() {
+            let htlc_descriptor = HTLCDescriptor {
+                channel_derivation_parameters: channel_derivation_parameters.clone(),
+                commitment_txid: *commitment_txid,
+                per_commitment_number: commitment_number,
+                per_commitment_point,
+                feerate_per_kw: 0, // AnchorZeroFee: fee added elsewhere via external input
+                htlc: sd.htlc.clone(),
+                preimage: sd.preimage,
+                counterparty_sig: sd.cp_sig.clone(),
+            };
+
+            let holder_sig = self
+                .keys
+                .sign_holder_htlc_transaction(&batched_tx, i, &htlc_descriptor, &self.secp_ctx)
+                .map_err(|e| {
+                    internal_error(format!(
+                        "HTLC recovery signing failed at idx {} (offered: {}, output: {:?}): {:?}",
+                        sd.htlc_idx, sd.htlc.offered, sd.htlc.transaction_output_index, e
+                    ))
+                })?;
+
+            batched_tx.input[i].witness = build_htlc_input_witness(
+                &holder_sig,
+                &sd.cp_sig,
+                &sd.preimage,
+                &sd.redeemscript,
+                features,
+            );
+        }
+
+        Ok(batched_tx)
     }
 
     /// Sign a holder commitment transaction after rebuilding it
@@ -3059,15 +3286,19 @@ mod tests {
     use lightning::util::ser::Writeable;
 
     use crate::channel::ChannelBase;
+    use crate::node::{PaymentState, PaymentType};
     use crate::util::test_utils::htlc::{
         make_commit_info_with_htlcs, make_counterparty_commit_info_with_htlcs, make_htlc,
     };
     use crate::util::test_utils::key::make_test_pubkey;
     use crate::util::test_utils::{
-        init_node_and_channel, make_test_channel_setup, make_test_payment_hashes, TEST_NODE_CONFIG,
-        TEST_SEED,
+        init_node, init_node_and_channel, make_test_channel_setup,
+        make_test_channel_setup_with_points, make_test_payment_hashes, next_state,
+        TEST_NODE_CONFIG, TEST_SEED,
     };
-    use bitcoin::Network;
+    use bitcoin::{Network, TxOut};
+    use core::time::Duration;
+    use std::collections::HashSet;
 
     #[test]
     fn test_dummy_sig() {
@@ -3557,5 +3788,323 @@ mod tests {
             htlcs,
         );
         Ok(cp_commitment_tx.trust().built_transaction().transaction.clone())
+    }
+
+    #[test]
+    fn test_get_current_holder_commitment_transaction() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, channel, _channel1) = setup_test_channel(&node, &node1, false, 0);
+        let expected_commitment_number = channel.enforcement_state.next_holder_commit_num - 1;
+
+        let commitment_tx = channel.get_current_holder_commitment_transaction().unwrap();
+
+        let per_commitment_point =
+            channel.get_per_commitment_point(expected_commitment_number).unwrap();
+        let expected_txkeys = channel.make_holder_tx_keys(&per_commitment_point);
+
+        let info2 = channel.enforcement_state.current_holder_commit_info.as_ref().unwrap();
+        let fee_rate = if channel.setup.is_zero_fee_htlc() { 0 } else { info2.feerate_per_kw };
+        let htlcs = Channel::htlcs_info2_to_oic(&info2.offered_htlcs, &info2.received_htlcs);
+
+        let expected_tx = channel.make_holder_commitment_tx(
+            expected_commitment_number,
+            &expected_txkeys,
+            fee_rate,
+            info2.to_broadcaster_value_sat,
+            info2.to_countersigner_value_sat,
+            htlcs,
+        );
+
+        assert_eq!(commitment_tx, expected_tx);
+    }
+
+    #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_no_htlcs() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _) = setup_test_channel(&node, &node1, false, 0);
+
+        let (commitment_tx, htlc_txs, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery(&[]).unwrap();
+
+        assert!(htlc_txs.is_empty());
+
+        verify_recovery_result(&channel, &commitment_tx, &htlc_txs);
+    }
+
+    #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_all_htlcs_spent() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 400);
+
+        let (commitment_tx, htlc_batches, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery(&vec![true; 5]).unwrap();
+
+        assert!(htlc_batches.is_empty());
+
+        verify_recovery_result(&channel, &commitment_tx, &htlc_batches);
+    }
+
+    #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_filters_spent_htlcs() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 400);
+
+        let (commitment_tx, all_batches, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5]).unwrap();
+
+        let mut spent = vec![false; 5];
+        spent[0] = true;
+        spent[2] = true;
+
+        let (commitment_tx2, filtered_batches, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery(&spent).unwrap();
+
+        verify_recovery_result(&channel, &commitment_tx, &all_batches);
+        verify_recovery_result(&channel, &commitment_tx2, &filtered_batches);
+
+        let prevouts_before: HashSet<_> =
+            all_batches.iter().flat_map(|tx| tx.input.iter().map(|i| i.previous_output)).collect();
+
+        let prevouts_after: HashSet<_> = filtered_batches
+            .iter()
+            .flat_map(|tx| tx.input.iter().map(|i| i.previous_output))
+            .collect();
+
+        assert!(prevouts_after.is_subset(&prevouts_before));
+        assert_eq!(prevouts_before.len() - prevouts_after.len(), 2);
+
+        let total_inputs_before: usize = all_batches.iter().map(|tx| tx.input.len()).sum();
+        let total_inputs_after: usize = filtered_batches.iter().map(|tx| tx.input.len()).sum();
+        assert!(total_inputs_after < total_inputs_before);
+    }
+
+    #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_rejects_extra_spent_htlc_flags() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 400);
+
+        let err = channel.sign_holder_commitment_tx_for_recovery(&vec![false; 8]).unwrap_err();
+        assert!(err.message().contains("spent_htlc_indices length mismatch: 8 != 5"));
+    }
+
+    #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_skips_future_offered_htlcs() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 120);
+
+        let (commitment_tx, htlc_batches, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5]).unwrap();
+
+        verify_recovery_result(&channel, &commitment_tx, &htlc_batches);
+
+        let offered_locktimes: HashSet<_> = htlc_batches
+            .iter()
+            .map(|tx| tx.lock_time.to_consensus_u32())
+            .filter(|locktime| *locktime > 0)
+            .collect();
+
+        assert_eq!(htlc_batches.len(), 2);
+        assert_eq!(offered_locktimes, HashSet::from([100]));
+        assert!(!offered_locktimes.contains(&150));
+    }
+
+    #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_includes_offered_htlc_at_current_height() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 150);
+
+        let (commitment_tx, htlc_batches, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5]).unwrap();
+
+        verify_recovery_result(&channel, &commitment_tx, &htlc_batches);
+
+        let offered_locktimes: HashSet<_> = htlc_batches
+            .iter()
+            .map(|tx| tx.lock_time.to_consensus_u32())
+            .filter(|locktime| *locktime > 0)
+            .collect();
+
+        assert_eq!(htlc_batches.len(), 3);
+        assert_eq!(offered_locktimes, HashSet::from([100, 150]));
+    }
+
+    #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_batches_by_type_and_cltv() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 400);
+
+        let (commitment_tx, htlc_batches, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5]).unwrap();
+
+        verify_recovery_result(&channel, &commitment_tx, &htlc_batches);
+
+        assert_eq!(htlc_batches.len(), 3);
+    }
+
+    fn setup_test_channel(
+        node: &Arc<Node>,
+        counterparty: &Arc<Node>,
+        with_htlcs: bool,
+        chain_height: u32,
+    ) -> (ChannelId, Channel, Channel) {
+        let (channel_id, _) = node.new_channel_with_random_id(node).unwrap();
+        let (channel_id1, _) = counterparty.new_channel_with_random_id(counterparty).unwrap();
+
+        let points =
+            node.get_channel(&channel_id).unwrap().lock().unwrap().get_channel_basepoints();
+        let points1 = counterparty
+            .get_channel(&channel_id1)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .get_channel_basepoints();
+        let holder_shutdown_key_path = DerivationPath::from(vec![]);
+
+        let mut channel = node
+            .setup_channel(
+                channel_id.clone(),
+                None,
+                make_test_channel_setup_with_points(true, points1.clone()),
+                &holder_shutdown_key_path,
+            )
+            .expect("setup_channel");
+        let mut channel1 = counterparty
+            .setup_channel(
+                channel_id1.clone(),
+                None,
+                make_test_channel_setup_with_points(false, points.clone()),
+                &holder_shutdown_key_path,
+            )
+            .expect("setup_channel 1");
+
+        channel.monitor =
+            ChainMonitorBase::new(channel.monitor.funding_outpoint, chain_height, &channel_id);
+        assert_eq!(channel.monitor.as_chain_state().current_height, chain_height);
+
+        if with_htlcs {
+            let (preimage_2, hash_2) =
+                (PaymentPreimage([2; 32]), PaymentHash::from(PaymentPreimage([2; 32])));
+            let (preimage_5, hash_5) =
+                (PaymentPreimage([5; 32]), PaymentHash::from(PaymentPreimage([5; 32])));
+
+            let hash_1 = PaymentHash::from(PaymentPreimage([1; 32]));
+            let hash_3 = PaymentHash::from(PaymentPreimage([3; 32]));
+            let hash_4 = PaymentHash::from(PaymentPreimage([4; 32]));
+
+            let offered_htlcs = vec![make_htlc(hash_1, 700, 100), make_htlc(hash_3, 800, 150)];
+            let received_htlcs = vec![
+                make_htlc(hash_2, 500, 200),
+                make_htlc(hash_4, 550, 250),
+                make_htlc(hash_5, 600, 300),
+            ];
+
+            {
+                let mut node_state = node.get_state();
+                let mut node1_state = counterparty.get_state();
+
+                for h in &offered_htlcs {
+                    node_state.invoices.insert(
+                        h.payment_hash,
+                        make_invoice_state(h.payment_hash, h.value_sat, counterparty.get_id()),
+                    );
+                    node1_state.issued_invoices.insert(
+                        h.payment_hash,
+                        make_invoice_state(h.payment_hash, h.value_sat, counterparty.get_id()),
+                    );
+                }
+
+                for (idx, h) in received_htlcs.iter().enumerate() {
+                    node1_state.invoices.insert(
+                        h.payment_hash,
+                        make_invoice_state(h.payment_hash, h.value_sat, node.get_id()),
+                    );
+                    node_state.issued_invoices.insert(
+                        h.payment_hash,
+                        make_invoice_state(h.payment_hash, h.value_sat, node.get_id()),
+                    );
+
+                    // only some received HTLCs have known preimages
+                    match idx {
+                        0 =>
+                            add_payment_with_preimage(&mut node_state.payments, hash_2, preimage_2),
+                        2 =>
+                            add_payment_with_preimage(&mut node_state.payments, hash_5, preimage_5),
+                        _ => {}
+                    }
+                }
+            }
+
+            next_state(&mut channel, &mut channel1, 0, 2_999_000, 0, vec![], vec![]);
+            next_state(&mut channel, &mut channel1, 1, 2_899_100, 0, offered_htlcs, received_htlcs);
+        } else {
+            next_state(&mut channel, &mut channel1, 0, 2_999_000, 0, vec![], vec![]);
+        }
+        (channel_id, channel, channel1)
+    }
+
+    fn make_invoice_state(hash: PaymentHash, value_sat: u64, payee: PublicKey) -> PaymentState {
+        PaymentState {
+            invoice_hash: hash.0,
+            amount_msat: value_sat * 1000,
+            payee,
+            duration_since_epoch: Duration::from_secs(0),
+            expiry_duration: Duration::from_secs(3600),
+            is_fulfilled: false,
+            payment_type: PaymentType::Invoice,
+        }
+    }
+
+    fn add_payment_with_preimage(
+        payments: &mut Map<PaymentHash, RoutedPayment>,
+        hash: PaymentHash,
+        preimage: PaymentPreimage,
+    ) {
+        let mut p = RoutedPayment::new();
+        p.preimage = Some(preimage);
+        payments.insert(hash, p);
+    }
+
+    fn verify_recovery_result(
+        channel: &Channel,
+        commitment_tx: &Transaction,
+        htlc_batches: &[Transaction],
+    ) {
+        commitment_tx
+            .verify(|outpoint| {
+                if outpoint == &channel.setup.funding_outpoint {
+                    let funding_redeemscript = make_funding_redeemscript(
+                        &channel.keys.pubkeys().funding_pubkey,
+                        &channel.counterparty_pubkeys().funding_pubkey,
+                    );
+                    Some(TxOut {
+                        value: Amount::from_sat(channel.setup.channel_value_sat),
+                        script_pubkey: funding_redeemscript.to_p2wsh(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .expect("Commitment transaction verified");
+
+        let commitment_txid = commitment_tx.compute_txid();
+
+        for (_, tx) in htlc_batches.iter().enumerate() {
+            tx.verify(|outpoint| {
+                if outpoint.txid == commitment_txid {
+                    commitment_tx.output.get(outpoint.vout as usize).cloned()
+                } else {
+                    None
+                }
+            })
+            .expect("HTLC batch transaction verified");
+        }
     }
 }

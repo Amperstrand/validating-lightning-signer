@@ -254,17 +254,10 @@ mod tests {
 
             assert_eq!(chan.enforcement_state.channel_closed, true);
 
-            let (tx_r, _htlc_txs_r, _revocable_script_r, _uck_r, _revocation_pubkey_r) = chan
-                .sign_holder_commitment_tx_for_recovery(
-                    commit_tx_ctx.feerate_per_kw as u32,
-                    &[InputUtxo {
-                        outpoint: OutPoint::new(tx.transaction.compute_txid(), 0),
-                        value: Amount::from_sat(commit_tx_ctx.to_countersignatory),
-                        derivation_path: DerivationPath::master(),
-                    }],
-                )?;
+            let spent = vec![false; trusted_tx.htlcs().len()];
+            let (tx_r, _htlc_txs_r, _revocable_script_r, _uck_r, _revocation_pubkey_r) =
+                chan.sign_holder_commitment_tx_for_recovery(&spent)?;
             assert_eq!(tx_r.compute_txid(), tx.transaction.compute_txid());
-            // TODO(303) HTLC recovery is not implemented yet
 
             Ok((sig, tx.transaction.clone()))
         })?;

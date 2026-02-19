@@ -4125,16 +4125,7 @@ mod tests {
         let commit_num = 0;
         next_state(&mut channel, &mut channel1, commit_num, 2_999_000, 0, vec![], vec![]);
 
-        let txs = channel
-            .sign_holder_commitment_tx_for_recovery(
-                100,
-                &[InputUtxo {
-                    outpoint: OutPoint { txid: Txid::from_slice(&[2u8; 32]).unwrap(), vout: 0 },
-                    value: Amount::from_sat(100000),
-                    derivation_path: DerivationPath::master(),
-                }],
-            )
-            .unwrap();
+        let txs = channel.sign_holder_commitment_tx_for_recovery(&[]).unwrap();
         let holder_tx = txs.0;
         // find anchor output by value
         let idx =

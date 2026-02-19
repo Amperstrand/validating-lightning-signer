@@ -3,8 +3,9 @@ use lightning::chain::transaction::OutPoint;
 use lightning_signer::bitcoin::bip32::{ChildNumber, DerivationPath};
 use lightning_signer::bitcoin::secp256k1::{PublicKey, SecretKey};
 use lightning_signer::bitcoin::{Address, ScriptBuf, Transaction, TxOut};
-use lightning_signer::channel::{Channel, ChannelBase, ChannelSlot, InputUtxo};
+use lightning_signer::channel::{Channel, ChannelBase, ChannelSlot};
 use lightning_signer::lightning;
+use lightning_signer::lightning::ln::chan_utils::CommitmentTransaction;
 use lightning_signer::node::Node;
 use lightning_signer::prelude::{Arc, Mutex, MutexGuard};
 use lightning_signer::util::status::Status;
@@ -69,14 +70,13 @@ pub struct DirectRecoverySigner {
 impl RecoverySign for DirectRecoverySigner {
     fn sign_holder_commitment_tx_for_recovery(
         &self,
-        fee_rate: u32,
-        fee_utxo: &[InputUtxo],
+        spent_htlc_indices: &[bool],
     ) -> Result<
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
     > {
         let mut lock = self.lock();
-        Self::channel(&mut lock).sign_holder_commitment_tx_for_recovery(fee_rate, fee_utxo)
+        Self::channel(&mut lock).sign_holder_commitment_tx_for_recovery(spent_htlc_indices)
     }
 
     fn funding_outpoint(&self) -> OutPoint {
@@ -93,6 +93,11 @@ impl RecoverySign for DirectRecoverySigner {
         let mut lock = self.lock();
         let channel = Self::channel(&mut lock);
         channel.get_per_commitment_point(channel.enforcement_state.next_holder_commit_num - 1)
+    }
+
+    fn get_current_holder_commitment_transaction(&self) -> Result<CommitmentTransaction, Status> {
+        let mut lock = self.lock();
+        Self::channel(&mut lock).get_current_holder_commitment_transaction()
     }
 }
 
