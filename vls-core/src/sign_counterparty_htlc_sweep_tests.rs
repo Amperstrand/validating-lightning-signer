@@ -360,7 +360,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // no fee validation for now
     fn sign_counterparty_offered_htlc_sweep_with_fee_underflow() {
         assert_failed_precondition_err!(
             sign_counterparty_htlc_sweep_with_mutators(
@@ -377,7 +376,6 @@ mod tests {
 
     // policy-sweep-fee-range
     #[test]
-    #[ignore] // no fee validation for now
     fn sign_counterparty_offered_htlc_sweep_with_fee_too_small() {
         assert_failed_precondition_err!(
             sign_counterparty_htlc_sweep_with_mutators(
@@ -388,13 +386,12 @@ mod tests {
                 },
             ),
             "policy failure: validate_counterparty_htlc_sweep: validate_sweep: validate_fee: \
-             fee below minimum: 0 < 100"
+             feerate below minimum: 1 < 253"
         );
     }
 
     // policy-sweep-fee-range
     #[test]
-    #[ignore] // no fee validation for now
     fn sign_counterparty_offered_htlc_sweep_with_fee_too_large() {
         assert_failed_precondition_err!(
             sign_counterparty_htlc_sweep_with_mutators(
@@ -405,7 +402,7 @@ mod tests {
                 },
             ),
             "policy failure: validate_counterparty_htlc_sweep: validate_sweep: validate_fee: \
-             fee above maximum: 281000 > 200000"
+             feerate above maximum: 509059 > 333333"
         );
     }
 

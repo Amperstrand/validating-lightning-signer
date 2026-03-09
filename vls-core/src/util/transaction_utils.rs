@@ -51,6 +51,18 @@ pub(crate) fn mutual_close_tx_weight(unsigned_tx: &Transaction) -> usize {
     unsigned_tx.weight().to_wu() as usize + EXPECTED_MUTUAL_CLOSE_WITNESS_WEIGHT
 }
 
+/// Estimated weight of a sweep transaction (justice, delayed, counterparty HTLC).
+pub(crate) fn estimated_sweep_tx_weight(unsigned_tx: &Transaction) -> usize {
+    // Per-type witness weight breakdown (per BOLT 3):
+    //   to_local / justice sweeps:  ~157-158 WU (overestimate)
+    //   Received HTLC timeout:      ~220 WU     (matches)
+    //   Offered HTLC preimage:      ~245-248 WU (underestimate by ~25-28 WU, ~4% of total tx weight)
+    // 220 is used as a middle-ground estimate across all sweep variants.
+    // Per-type witness weights are deferred to issue #522.
+    const EXPECTED_SWEEP_WITNESS_WEIGHT: usize = 220;
+    unsigned_tx.weight().to_wu() as usize + EXPECTED_SWEEP_WITNESS_WEIGHT
+}
+
 /// Possibly adds a change output to the given transaction, always doing so if there are excess
 /// funds available beyond the requested feerate.
 /// Assumes at least one input will have a witness (ie spends a segwit output).

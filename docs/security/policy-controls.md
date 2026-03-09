@@ -304,9 +304,8 @@ or justice sweep transaction, the following rules are checked:
 * Destination - destination must be whitelisted <br>
   `policy-sweep-destination-allowlisted`
 
-* Fee - must be in range <br>
-  `policy-sweep-fee-range` <br>
-  ACTION: implement
+* Fee - must be in range. Currently only single-input transactions are validated; multi-input transactions are skipped because input amounts aren't known. <br>
+  `policy-sweep-fee-range`
 
 # L1 Transactions
 
