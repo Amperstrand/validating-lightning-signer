@@ -8,12 +8,63 @@ pub struct InfoModel {
     height: u32,
     channels: u32,
     version: String,
+    node_id: String,
+    network: String,
+    bip32_xpub: String,
 }
 
 impl InfoModel {
-    pub fn new(height: u32, channels: u32, version: String) -> Self {
-        Self { height, channels, version }
+    pub fn new(
+        height: u32,
+        channels: u32,
+        version: String,
+        node_id: String,
+        network: String,
+        bip32_xpub: String,
+    ) -> Self {
+        Self { height, channels, version, node_id, network, bip32_xpub }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChannelInfo {
+    pub channel_id: String,
+    pub state: String,
+    pub channel_value_sat: Option<u64>,
+    pub is_outbound: Option<bool>,
+    pub funding_outpoint: Option<String>,
+    pub commitment_type: Option<String>,
+    pub channel_closed: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChannelListResponse {
+    pub channels: Vec<ChannelInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChannelBalanceResponse {
+    pub claimable_sat: u64,
+    pub received_htlc_sat: u64,
+    pub offered_htlc_sat: u64,
+    pub sweeping_sat: u64,
+    pub channel_count: u32,
+    pub stub_count: u32,
+    pub unconfirmed_count: u32,
+    pub closing_count: u32,
+    pub received_htlc_count: u32,
+    pub offered_htlc_count: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NodeStateResponse {
+    pub velocity_current_msat: u64,
+    pub velocity_limit_msat: Option<u64>,
+    pub fee_velocity_current_msat: u64,
+    pub fee_velocity_limit_msat: Option<u64>,
+    pub invoice_count: usize,
+    pub payment_count: usize,
+    pub last_summary: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

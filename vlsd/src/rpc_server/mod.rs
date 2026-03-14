@@ -4,7 +4,8 @@ pub mod server;
 
 pub use model::{
     AddressInfo, AddressListRequest, AddressListResponse, AddressType, AddressVerifyRequest,
-    AddressVerifyResponse, InfoModel,
+    AddressVerifyResponse, ChannelBalanceResponse, ChannelInfo, ChannelListResponse, InfoModel,
+    NodeStateResponse,
 };
 pub use server::start_rpc_server;
 pub use server::RpcServer;
