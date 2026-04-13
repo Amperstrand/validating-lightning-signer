@@ -22,6 +22,8 @@ The following remain to be implemented:
 
 [Check out our Docs](./docs/README.md)
 
+For any large feature work make sure to consider whether it would require a [VIP (VLS Improvement Proposal)](./vip/README.md) or not.
+
 ### Recommended Rust Version
 
 We recommend using the nightly version of Rust only in specific cases, such as for `cargo fmt` and `no-std`. Otherwise, we explicitly recommend using the stable version.
