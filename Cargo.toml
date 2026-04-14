@@ -1,6 +1,6 @@
 [workspace]
 
-resolver = "2"
+resolver = "3"
 
 members = [
   "vls-common",
@@ -27,6 +27,9 @@ exclude = [
   "vls-core-test",
   "lnrod",
 ]
+
+[workspace.package]
+rust-version = "1.85.0"
 
 [workspace.dependencies]
 tonic = { version = "0.12.0", default-features = false }

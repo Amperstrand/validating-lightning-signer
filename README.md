@@ -57,7 +57,7 @@ This is a Cargo workspace with multiple crates:
 - Support: `bolt-derive`, `vls-policy-derive`, `vls-util`
 
 **Excluded crates** (require special build steps):
-- `vls-signer-stm32` - STM32 microcontroller port (requires `cargo +nightly-2024-10-13`)
+- `vls-signer-stm32` - STM32 microcontroller port (requires `cargo +nightly-2026-02-26`)
 - `embedded` - Bare-metal implementation
 - `wasm` - WebAssembly build
 - `lnrod` - LDK-based Lightning node reference
