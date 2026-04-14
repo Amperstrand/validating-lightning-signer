@@ -2,7 +2,7 @@
 
 > **Prerequisites**: Ensure you have completed the general Rust setup from the main [README.md](../README.md#development-information) first.
 >
-> **Note**: Embedded builds require a specific nightly version: `nightly-2024-10-13`. This differs from the workspace default stable version to ensure compatibility with embedded targets.
+> **Note**: Embedded builds require a specific nightly version: `nightly-2026-02-26`. This differs from the workspace default stable version to ensure compatibility with embedded targets.
 
 # Running
 
@@ -21,7 +21,7 @@ source ./scripts/env.sh && cargo +nightly run --target thumbv7m-none-eabi
 
 > **Tip**: For production embedded builds, use the pinned nightly version:
 > ```bash
-> cargo +nightly-2024-10-13 build --target thumbv7m-none-eabi
+> cargo +nightly-2026-02-26 build --target thumbv7m-none-eabi
 > ```
 > The workspace uses this specific nightly version for embedded targets to ensure consistent behavior across different development environments.
 
