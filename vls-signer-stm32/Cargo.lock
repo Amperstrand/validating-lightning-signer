@@ -187,9 +187,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.11.0"
+version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
+checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
 name = "bolt-derive"
@@ -245,10 +245,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa622bd314835eb026b776af471344d0dba94705c937900656a31d0407e53689"
 
 [[package]]
-name = "core2"
-version = "0.3.3"
+name = "core3"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "239fa3ae9b63c2dc74bd3fa852d4792b8b305ae64eeede946265b6af62f1fff3"
+checksum = "7cbcb5224cf18d0beaecf52c52a58b248213de007fa72bc212d916224e26ceb8"
 dependencies = [
  "memchr",
 ]
@@ -408,7 +408,7 @@ name = "fatfs"
 version = "0.4.0"
 source = "git+https://github.com/rafalh/rust-fatfs.git#c4b88477b22ca7e5131fbd8891f62a5deaa88e6e"
 dependencies = [
- "bitflags 2.11.0",
+ "bitflags 2.11.1",
  "log",
 ]
 
@@ -575,9 +575,9 @@ dependencies = [
 
 [[package]]
 name = "linked_list_allocator"
-version = "0.10.5"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9afa463f5405ee81cdb9cc2baf37e08ec7e4c8209442b5d72c04cfb2cd6e6286"
+checksum = "2b23ac50abb8261cb38c6e2a7192d3302e0836dac1628f6a93b82b4fad185897"
 
 [[package]]
 name = "log"
@@ -775,14 +775,14 @@ dependencies = [
 
 [[package]]
 name = "serde_bolt"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4ec23cff5db3388b8549d1f70fdf14bd506b5321d0256300228dd18c05e26e8"
+checksum = "8db02c046447759ef62beeede660c4b7abae023a961bd5a8935aa7d4207edd1a"
 dependencies = [
  "bitcoin",
  "bitcoin-consensus-derive",
  "chunked-buffer",
- "core2",
+ "core3",
  "hex",
 ]
 

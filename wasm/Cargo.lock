@@ -255,10 +255,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "core2"
-version = "0.3.3"
+name = "core3"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "239fa3ae9b63c2dc74bd3fa852d4792b8b305ae64eeede946265b6af62f1fff3"
+checksum = "7cbcb5224cf18d0beaecf52c52a58b248213de007fa72bc212d916224e26ceb8"
 dependencies = [
  "memchr",
 ]
@@ -660,14 +660,14 @@ dependencies = [
 
 [[package]]
 name = "serde_bolt"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4ec23cff5db3388b8549d1f70fdf14bd506b5321d0256300228dd18c05e26e8"
+checksum = "8db02c046447759ef62beeede660c4b7abae023a961bd5a8935aa7d4207edd1a"
 dependencies = [
  "bitcoin",
  "bitcoin-consensus-derive",
  "chunked-buffer",
- "core2",
+ "core3",
  "hex",
 ]
 
