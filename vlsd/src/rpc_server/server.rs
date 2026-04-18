@@ -6,6 +6,9 @@ use jsonrpsee::{
     server::{RpcModule, Server},
     types::{error::ErrorCode, ErrorObject},
 };
+use lightning_signer::channel::ChannelSlot;
+use lightning_signer::hex;
+use lightning_signer::node::NodeMonitor;
 use lightning_signer::util::status::Status;
 use lightning_signer::wallet::Wallet;
 use lightning_signer::{bitcoin::bip32::DerivationPath, node::Node};
@@ -18,7 +21,8 @@ use tower::ServiceBuilder;
 use super::address_generation::{generate_addresses, verify_address_derivation};
 use super::model::{
     AddressListRequest, AddressListResponse, AddressType, AddressVerifyRequest,
-    AddressVerifyResponse, InfoModel,
+    AddressVerifyResponse, ChannelBalanceResponse, ChannelInfo, ChannelListResponse, InfoModel,
+    NodeStateResponse,
 };
 
 use vls_util::GIT_DESC;
@@ -35,12 +39,87 @@ impl RpcServer {
         Self { node }
     }
 
-    /// Handles the `info` request, returning basic information about the node.
     pub fn handle_info(&self) -> Result<InfoModel, Status> {
         info!("Handling info request");
         let height = self.node.get_chain_height();
         let channels = self.node.get_channels().len() as u32;
-        Ok(InfoModel::new(height, channels, GIT_DESC.to_owned()))
+        let node_id = hex::encode(self.node.get_id().serialize());
+        let network = self.node.network().to_string();
+        let bip32_xpub = self.node.get_account_extended_pubkey().to_string();
+        Ok(InfoModel::new(height, channels, GIT_DESC.to_owned(), node_id, network, bip32_xpub))
+    }
+
+    pub fn handle_channel_list(&self) -> Result<ChannelListResponse, Status> {
+        info!("Handling channel_list request");
+        let channels_guard = self.node.get_channels();
+        let channels = channels_guard
+            .iter()
+            .map(|(_, slot_arc)| {
+                let slot = slot_arc.lock().unwrap();
+                match &*slot {
+                    ChannelSlot::Stub(stub) => ChannelInfo {
+                        channel_id: hex::encode(stub.id0.as_slice()),
+                        state: "stub".to_string(),
+                        channel_value_sat: None,
+                        is_outbound: None,
+                        funding_outpoint: None,
+                        commitment_type: None,
+                        channel_closed: None,
+                    },
+                    ChannelSlot::Ready(chan) => ChannelInfo {
+                        channel_id: hex::encode(chan.id0.as_slice()),
+                        state: "ready".to_string(),
+                        channel_value_sat: Some(chan.setup.channel_value_sat),
+                        is_outbound: Some(chan.setup.is_outbound),
+                        funding_outpoint: Some(format!(
+                            "{}:{}",
+                            chan.setup.funding_outpoint.txid, chan.setup.funding_outpoint.vout
+                        )),
+                        commitment_type: Some(
+                            serde_json::to_value(&chan.setup.commitment_type)
+                                .ok()
+                                .and_then(|v| v.as_str().map(str::to_string))
+                                .unwrap_or_default(),
+                        ),
+                        channel_closed: Some(chan.enforcement_state.channel_closed),
+                    },
+                }
+            })
+            .collect();
+        Ok(ChannelListResponse { channels })
+    }
+
+    pub fn handle_channel_balance(&self) -> Result<ChannelBalanceResponse, Status> {
+        info!("Handling channel_balance request");
+        let bal = self.node.channel_balance();
+        Ok(ChannelBalanceResponse {
+            claimable_sat: bal.claimable,
+            received_htlc_sat: bal.received_htlc,
+            offered_htlc_sat: bal.offered_htlc,
+            sweeping_sat: bal.sweeping,
+            channel_count: bal.channel_count,
+            stub_count: bal.stub_count,
+            unconfirmed_count: bal.unconfirmed_count,
+            closing_count: bal.closing_count,
+            received_htlc_count: bal.received_htlc_count,
+            offered_htlc_count: bal.offered_htlc_count,
+        })
+    }
+
+    pub fn handle_node_state(&self) -> Result<NodeStateResponse, Status> {
+        info!("Handling node_state request");
+        let state = self.node.get_state();
+        let vc = &state.velocity_control;
+        let fvc = &state.fee_velocity_control;
+        Ok(NodeStateResponse {
+            velocity_current_msat: vc.velocity(),
+            velocity_limit_msat: if vc.is_unlimited() { None } else { Some(vc.limit) },
+            fee_velocity_current_msat: fvc.velocity(),
+            fee_velocity_limit_msat: if fvc.is_unlimited() { None } else { Some(fvc.limit) },
+            invoice_count: state.issued_invoices.len(),
+            payment_count: state.payments.len(),
+            last_summary: state.last_summary.clone(),
+        })
     }
 
     /// Handles the `address_list` request.
@@ -105,6 +184,9 @@ pub enum RpcMethods {
     AllowlistRemove,
     AddressList,
     AddressVerify,
+    ChannelList,
+    ChannelBalance,
+    NodeState,
 }
 
 impl RpcMethods {
@@ -117,6 +199,9 @@ impl RpcMethods {
             Self::AllowlistRemove => "allowlist_remove",
             Self::AddressList => "address_list",
             Self::AddressVerify => "address_verify",
+            Self::ChannelList => "channel_list",
+            Self::ChannelBalance => "channel_balance",
+            Self::NodeState => "node_state",
         }
     }
 }
@@ -199,6 +284,30 @@ pub async fn start_rpc_server(
         }
     })?;
 
+    module.register_method(RpcMethods::ChannelList.as_str(), |_, context, _| {
+        info!("rpc_server: channel_list");
+        match context.handle_channel_list() {
+            Ok(response) => Ok(response),
+            Err(e) => Err(ErrorObject::owned(e.code() as i32, e.message(), None::<bool>)),
+        }
+    })?;
+
+    module.register_method(RpcMethods::ChannelBalance.as_str(), |_, context, _| {
+        info!("rpc_server: channel_balance");
+        match context.handle_channel_balance() {
+            Ok(response) => Ok(response),
+            Err(e) => Err(ErrorObject::owned(e.code() as i32, e.message(), None::<bool>)),
+        }
+    })?;
+
+    module.register_method(RpcMethods::NodeState.as_str(), |_, context, _| {
+        info!("rpc_server: node_state");
+        match context.handle_node_state() {
+            Ok(response) => Ok(response),
+            Err(e) => Err(ErrorObject::owned(e.code() as i32, e.message(), None::<bool>)),
+        }
+    })?;
+
     let auth_middleware = ServiceBuilder::new()
         .layer(tower_http::auth::AddAuthorizationLayer::basic(username, password));
 
@@ -227,10 +336,12 @@ mod tests {
 
     use super::*;
     use jsonrpsee::types::Params;
+    use lightning_signer::lightning::types::payment::PaymentHash;
     use lightning_signer::util::{
         status::Code,
         test_utils::{
-            init_node, LDK_TEST_NODE_CONFIG, REGTEST_NODE_CONFIG, TEST_NODE_CONFIG, TEST_SEED,
+            init_node, init_node_and_channel, make_test_channel_setup, LDK_TEST_NODE_CONFIG,
+            REGTEST_NODE_CONFIG, TEST_NODE_CONFIG, TEST_SEED,
         },
     };
 
@@ -346,5 +457,84 @@ mod tests {
         let params = Params::new(Some("{\"address_type\":null,\"count\":null}"));
         let addresslist: AddressListRequest = params.parse().unwrap();
         assert!(addresslist.address_type.is_none());
+    }
+
+    #[test]
+    fn test_handle_info_includes_node_id() {
+        let node = init_node(TEST_NODE_CONFIG, &TEST_SEED[0]);
+        let server = RpcServer::new(node);
+
+        let info = server.handle_info().unwrap();
+
+        let serialized = serde_json::to_value(&info).unwrap();
+        assert_eq!(
+            "0266e4598d1d3c415f572a8488830b60f7e744ed9235eb0b1ba93283b315c03518",
+            serialized["node_id"].as_str().unwrap()
+        );
+        assert_eq!("testnet", serialized["network"].as_str().unwrap());
+        assert!(!serialized["bip32_xpub"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_handle_channel_balance_empty() {
+        let node = init_node(TEST_NODE_CONFIG, &TEST_SEED[0]);
+        let server = RpcServer::new(node);
+
+        let response = server.handle_channel_balance().unwrap();
+
+        assert_eq!(0, response.claimable_sat);
+        assert_eq!(0, response.channel_count);
+        assert_eq!(0, response.stub_count);
+    }
+
+    #[test]
+    fn test_handle_node_state() {
+        let node = init_node(TEST_NODE_CONFIG, &TEST_SEED[0]);
+        let payee_id = init_node(TEST_NODE_CONFIG, &TEST_SEED[1]).get_id();
+        node.add_keysend(payee_id, PaymentHash([1; 32]), 1000).unwrap();
+        let server = RpcServer::new(node);
+
+        let response = server.handle_node_state().unwrap();
+
+        assert_eq!(0, response.invoice_count);
+        assert_eq!(1, response.payment_count);
+        assert_eq!(1000, response.velocity_current_msat);
+    }
+
+    #[test]
+    fn test_handle_channel_list_with_channel() {
+        let (node, _) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[0], make_test_channel_setup());
+        let server = RpcServer::new(node);
+
+        let response = server.handle_channel_list().unwrap();
+
+        assert_eq!(1, response.channels.len());
+        let ch = &response.channels[0];
+        assert_eq!("ready", ch.state);
+        assert_eq!(Some(3_000_000), ch.channel_value_sat);
+        assert_eq!(Some(true), ch.is_outbound);
+        assert_eq!(
+            Some("0202020202020202020202020202020202020202020202020202020202020202:0"),
+            ch.funding_outpoint.as_deref()
+        );
+        assert_eq!(Some("StaticRemoteKey"), ch.commitment_type.as_deref());
+    }
+
+    #[test]
+    fn test_handle_channel_balance_with_stub() {
+        let node = init_node(TEST_NODE_CONFIG, &TEST_SEED[0]);
+        node.new_channel(1, &[0u8; 33], &node).unwrap();
+        let server = RpcServer::new(Arc::clone(&node));
+
+        let response = server.handle_channel_balance().unwrap();
+
+        assert_eq!(1, response.stub_count);
+        assert_eq!(0, response.channel_count);
+
+        let list_response = server.handle_channel_list().unwrap();
+        assert_eq!(1, list_response.channels.len());
+        assert_eq!("stub", list_response.channels[0].state);
+        assert_eq!(82, list_response.channels[0].channel_id.len());
     }
 }
