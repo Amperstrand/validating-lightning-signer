@@ -18,7 +18,7 @@ hex = { workspace = true }
 vls-core = { path = "../vls-core", version = "0.15.0-rc.1", default-features = false }
 
 [dependencies.serde_bolt]
-version = "0.5.0"
+version = "0.5.2"
 default-features = false
 
 [dependencies.txoo]
@@ -29,7 +29,7 @@ regex = "1.5"
 # For logging in unit tests
 env_logger = { workspace = true }
 test-log = { workspace = true }
-serde_bolt = { version = "0.5.0", features = ["test_utils"] }
+serde_bolt = { version = "0.5.2", features = ["test_utils"] }
 vls-protocol = { path = ".", features = ["developer"] }
 
 [features]
