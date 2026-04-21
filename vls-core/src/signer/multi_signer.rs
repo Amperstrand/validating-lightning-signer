@@ -238,33 +238,17 @@ impl MultiSigner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::persist::{DummyPersister, DummySeedPersister};
-    use crate::policy::simple_validator::SimpleValidatorFactory;
-    use crate::util::clock::StandardClock;
+    use crate::persist::DummySeedPersister;
     use crate::util::status::Code;
     use crate::util::test_utils::hex_decode;
     use crate::util::test_utils::*;
     use bitcoin::secp256k1::Secp256k1;
     use std::sync::Arc;
 
-    fn make_test_services() -> NodeServices {
-        let validator_factory = Arc::new(SimpleValidatorFactory::new());
-        let persister = Arc::new(DummyPersister {});
-        let clock = Arc::new(StandardClock());
-        let starting_time_factory = make_genesis_starting_time_factory(TEST_NODE_CONFIG.network);
-        NodeServices {
-            validator_factory,
-            starting_time_factory,
-            persister,
-            clock,
-            trusted_oracle_pubkeys: vec![],
-        }
-    }
-
     #[cfg(feature = "std")]
     #[test]
     fn new_node_and_node_service_test() {
-        let services = make_test_services();
+        let services = make_services();
         let signer = MultiSigner::new(services.clone());
 
         assert_eq!(signer.test_mode, false);
@@ -291,7 +275,7 @@ mod tests {
 
     #[test]
     fn warmstart_with_seed_test() {
-        let signer = MultiSigner::new(make_test_services());
+        let signer = MultiSigner::new(make_services());
         let mut seed = [0; 32];
         seed.copy_from_slice(hex_decode(TEST_SEED[1]).unwrap().as_slice());
         let seed_persister = Arc::new(DummySeedPersister {});
@@ -315,7 +299,7 @@ mod tests {
     #[test]
     fn bad_node_lookup_test() {
         let secp_ctx = Secp256k1::signing_only();
-        let signer = MultiSigner::new(make_test_services());
+        let signer = MultiSigner::new(make_services());
         let node_id = pubkey_from_secret_hex(
             "0101010101010101010101010101010101010101010101010101010101010101",
             &secp_ctx,

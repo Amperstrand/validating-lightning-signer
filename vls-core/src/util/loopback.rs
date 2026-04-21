@@ -24,7 +24,7 @@ use crate::invoice::Invoice;
 use crate::node::Node;
 use crate::prelude::*;
 use crate::signer::multi_signer::MultiSigner;
-use crate::tx::tx::HTLCInfo2;
+use crate::tx::tx::{CommitmentInfo2, HTLCInfo2};
 use crate::util::crypto_utils::derive_public_key;
 use crate::util::status::Status;
 use crate::util::INITIAL_COMMITMENT_NUMBER;
@@ -326,15 +326,27 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
         let sig = self
             .signer
             .with_channel(&self.node_id, &self.channel_id, |chan| {
-                let result = chan.sign_holder_commitment_tx_phase2_redundant(
+                let info2 = chan.validator().get_current_holder_commitment_info(
+                    &mut chan.enforcement_state,
                     commitment_number,
-                    feerate_per_kw,
-                    to_holder_value_sat,
+                )?;
+
+                let expected = CommitmentInfo2::new(
+                    false,
                     to_counterparty_value_sat,
+                    to_holder_value_sat,
                     offered_htlcs.clone(),
                     received_htlcs.clone(),
-                )?;
-                Ok(result)
+                    feerate_per_kw,
+                );
+
+                // Ensure that LDK-provided data matches previously validated state
+                if info2 != expected {
+                    return Err(Status::invalid_argument(
+                        "holder commitment tx does not match previously validated state",
+                    ));
+                }
+                chan.sign_holder_commitment_tx_phase2(commitment_number)
             })
             .map_err(|s| self.bad_status(s))?;
 
@@ -681,4 +693,119 @@ fn get_delayed_payment_keys(
         derive_public_key(secp_ctx, &per_commitment_point, &a_pubkeys.delayed_payment_basepoint.0)
             .map_err(|_| ())?;
     Ok((revocation_key.0, delayed_payment_key))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use bitcoin::{hex::FromHex, key::Secp256k1};
+    use lightning::sign::{ecdsa::EcdsaChannelSigner, SignerProvider};
+
+    use crate::channel::{Channel, ChannelBase};
+    use crate::persist::DummySeedPersister;
+    use crate::signer::multi_signer::MultiSigner;
+    use crate::util::loopback::{LoopbackChannelSigner, LoopbackSignerKeysInterface};
+    use crate::util::test_utils::key::make_test_pubkey;
+    use crate::util::test_utils::{
+        init_channel, make_services, make_test_channel_setup, make_test_counterparty_keys,
+        setup_validated_holder_commitment,
+    };
+    use crate::util::test_utils::{
+        make_holder_commitment_tx, TestChannelContext, TestNodeContext, TEST_NODE_CONFIG, TEST_SEED,
+    };
+
+    fn setup_loopback_signer() -> (
+        LoopbackChannelSigner,
+        TestNodeContext,
+        TestChannelContext,
+        crate::util::test_utils::TestCommitmentTxContext,
+    ) {
+        let setup = make_test_channel_setup();
+        let signer = Arc::new(MultiSigner::new(make_services()));
+        let seed = Vec::from_hex(TEST_SEED[1]).expect("test seed");
+        let node_id = signer
+            .new_node_with_seed(TEST_NODE_CONFIG, &seed, Arc::new(DummySeedPersister {}))
+            .expect("new node");
+
+        let node = signer.get_node(&node_id).expect("get node");
+        let channel_id = init_channel(setup.clone(), node.clone());
+        let secp_ctx = Secp256k1::signing_only();
+        let counterparty_keys = make_test_counterparty_keys(
+            &TestNodeContext { node: node.clone(), secp_ctx: secp_ctx.clone() },
+            &channel_id,
+            setup.channel_value_sat,
+        );
+
+        node.with_channel(&channel_id, |chan| {
+            let commit_num = 23;
+            let point = make_test_pubkey(25);
+            chan.enforcement_state.set_next_holder_commit_num_for_testing(commit_num);
+            chan.enforcement_state
+                .set_next_counterparty_commit_num_for_testing(commit_num + 1, point);
+            chan.enforcement_state.set_next_counterparty_revoke_num_for_testing(commit_num);
+            Ok(())
+        })
+        .expect("set commitment state");
+
+        let node_ctx = TestNodeContext { node: node.clone(), secp_ctx };
+        let chan_ctx =
+            TestChannelContext { channel_id: channel_id.clone(), setup, counterparty_keys };
+
+        let commit_tx_ctx =
+            setup_validated_holder_commitment(&node_ctx, &chan_ctx, 23, |_ctx| {}, |_keys| {})
+                .expect("validated commitment");
+
+        let lsp = LoopbackSignerKeysInterface { node_id, signer };
+        let loopback_signer = lsp.derive_channel_signer(
+            chan_ctx.setup.channel_value_sat,
+            channel_id.ldk_channel_keys_id(),
+        );
+
+        (loopback_signer, node_ctx, chan_ctx, commit_tx_ctx)
+    }
+
+    #[test]
+    fn sign_holder_commitment_success() {
+        let (loopback_signer, node_ctx, chan_ctx, mut commit_tx_ctx) = setup_loopback_signer();
+        let hct = make_holder_commitment_tx(&node_ctx, &chan_ctx, &mut commit_tx_ctx);
+        let secp_ctx = Secp256k1::new();
+
+        let result = loopback_signer.sign_holder_commitment(&hct, &secp_ctx);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn sign_holder_commitment_rejects_mismatch() {
+        let (loopback_signer, node_ctx, chan_ctx, mut commit_tx_ctx) = setup_loopback_signer();
+
+        let mismatched_commitment_tx = node_ctx
+            .node
+            .with_channel(&chan_ctx.channel_id, |chan| {
+                let per_commitment_point =
+                    chan.get_per_commitment_point(commit_tx_ctx.commit_num)?;
+                let txkeys = chan.make_holder_tx_keys(&per_commitment_point);
+                let htlcs = Channel::htlcs_info2_to_oic(
+                    &commit_tx_ctx.offered_htlcs,
+                    &commit_tx_ctx.received_htlcs,
+                );
+
+                Ok(chan.make_holder_commitment_tx(
+                    commit_tx_ctx.commit_num,
+                    &txkeys,
+                    commit_tx_ctx.feerate_per_kw + 1,
+                    commit_tx_ctx.to_broadcaster,
+                    commit_tx_ctx.to_countersignatory,
+                    htlcs,
+                ))
+            })
+            .expect("mismatched commitment tx");
+
+        commit_tx_ctx.tx = Some(mismatched_commitment_tx);
+        let hct = make_holder_commitment_tx(&node_ctx, &chan_ctx, &mut commit_tx_ctx);
+        let secp_ctx = Secp256k1::new();
+
+        let result = loopback_signer.sign_holder_commitment(&hct, &secp_ctx);
+        assert!(result.is_err());
+    }
 }

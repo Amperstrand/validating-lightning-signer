@@ -32,6 +32,7 @@ use lightning::chain::channelmonitor::MonitorEvent;
 use lightning::chain::transaction::OutPoint;
 use lightning::chain::{chainmonitor, channelmonitor};
 use lightning::ln::chan_utils::get_to_countersignatory_with_anchors_redeemscript;
+use lightning::ln::chan_utils::HolderCommitmentTransaction;
 use lightning::ln::chan_utils::{
     build_htlc_transaction, derive_private_key, get_anchor_redeemscript, get_htlc_redeemscript,
     get_revokeable_redeemscript, make_funding_redeemscript, ChannelPublicKeys,
@@ -1311,6 +1312,33 @@ pub fn validate_holder_commitment(
             chan.revoke_previous_holder_commitment(commit_tx_ctx.commit_num)
         }
     })
+}
+
+// Build a `HolderCommitmentTransaction` from the context of a holder commitment,
+// including counterparty signatures.
+pub fn make_holder_commitment_tx(
+    node_ctx: &TestNodeContext,
+    chan_ctx: &TestChannelContext,
+    commit_tx_ctx: &mut crate::util::test_utils::TestCommitmentTxContext,
+) -> HolderCommitmentTransaction {
+    let (counterparty_sig, counterparty_htlc_sigs) =
+        counterparty_sign_holder_commitment(node_ctx, chan_ctx, commit_tx_ctx);
+    let commitment_tx = commit_tx_ctx.tx.take().expect("commitment tx");
+
+    let (holder_funding_pubkey, counterparty_funding_pubkey) = node_ctx
+        .node
+        .with_channel(&chan_ctx.channel_id, |chan| {
+            Ok((chan.keys.pubkeys().funding_pubkey, chan.counterparty_pubkeys().funding_pubkey))
+        })
+        .expect("funding pubkeys");
+
+    HolderCommitmentTransaction::new(
+        commitment_tx,
+        counterparty_sig,
+        counterparty_htlc_sigs,
+        &holder_funding_pubkey,
+        &counterparty_funding_pubkey,
+    )
 }
 
 pub fn sign_holder_commitment(
