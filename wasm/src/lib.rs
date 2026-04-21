@@ -11,11 +11,12 @@ use log::LevelFilter;
 use wasm_bindgen::prelude::*;
 use web_sys;
 
-use lightning_signer::channel::{ChannelId, ChannelSetup, CommitmentType};
+use lightning_signer::channel::{ChannelBase, ChannelId, ChannelSetup, CommitmentType};
 use lightning_signer::hex;
 use lightning_signer::node::{Node, NodeConfig, NodeServices};
 use lightning_signer::persist::{DummyPersister, Persist};
 use lightning_signer::policy::simple_validator::SimpleValidatorFactory;
+use lightning_signer::policy::validator::CommitmentSignatures;
 use lightning_signer::prelude::Arc;
 use lightning_signer::signer::StartingTimeFactory;
 use lightning_signer::util::clock::ManualClock;
@@ -53,6 +54,13 @@ impl Signature {
     #[wasm_bindgen(js_name = toString)]
     pub fn to_string(&self) -> String {
         format!("Signature({})", hex::encode(&self.0))
+    }
+
+    pub fn serialize_der(&self) -> Vec<u8> {
+        BitcoinSignature::from_compact(&self.0)
+            .expect("invalid compact signature")
+            .serialize_der()
+            .to_vec()
     }
 }
 
@@ -236,15 +244,66 @@ impl JSNode {
     ) -> Result<Signature, JsValue> {
         self.node
             .with_channel(&channel_id.0, |chan| {
-                chan.sign_holder_commitment_tx_phase2_redundant(
-                    commit_num,
-                    0, // feerate not used
-                    to_holder_value_sat,
-                    to_counterparty_value_sat,
-                    vec![],
-                    vec![],
-                )
-                .map(|p| p.into())
+                let info2 = chan
+                    .validator()
+                    .get_current_holder_commitment_info(&mut chan.enforcement_state, commit_num)?;
+
+                // Note: This is a partial check of provided values against stored commitment
+                // state since the WASM API only provides value fields;
+                // HTLCs and feerate are not available here.
+                if info2.to_broadcaster_value_sat != to_holder_value_sat
+                    || info2.to_countersigner_value_sat != to_counterparty_value_sat
+                {
+                    return Err(Status::invalid_argument(
+                        "holder commitment values do not match validated state",
+                    ));
+                }
+
+                chan.sign_holder_commitment_tx_phase2(commit_num).map(|p| p.into())
+            })
+            .map_err(|s| from_status(s).into())
+    }
+}
+
+#[cfg(test)]
+impl JSNode {
+    // Test-only helper: initializes minimal commitment state required by
+    // the signing API. The WASM bindings do not expose commitment construction,
+    // so this seeds enforcement_state for testing purposes.
+    pub(crate) fn init_holder_commitment(
+        &self,
+        channel_id: &JSChannelId,
+        commit_num: u64,
+        to_holder_value_sat: u64,
+        to_counterparty_value_sat: u64,
+    ) -> Result<(), JsValue> {
+        use lightning_signer::tx::tx::CommitmentInfo2;
+
+        self.node
+            .with_channel(&channel_id.0, |chan| {
+                let info = CommitmentInfo2 {
+                    is_counterparty_broadcaster: false,
+                    to_countersigner_value_sat: to_counterparty_value_sat,
+                    to_broadcaster_value_sat: to_holder_value_sat,
+                    offered_htlcs: vec![],
+                    received_htlcs: vec![],
+                    feerate_per_kw: 0,
+                };
+
+                let sig = BitcoinSignature::from_compact(&[1; 64])
+                    .map_err(|_| Status::invalid_argument("bad sig"))?;
+                let sigs = CommitmentSignatures(sig, vec![]);
+
+                chan.validator()
+                    .set_next_holder_commit_num(
+                        &mut chan.enforcement_state,
+                        commit_num + 1,
+                        info,
+                        sigs,
+                    )
+                    .map_err(|e| Status::invalid_argument(format!("{:?}", e)))?;
+
+                Ok(())
             })
             .map_err(|s| from_status(s).into())
     }
@@ -348,4 +407,41 @@ pub fn make_test_key(i: u8) -> (PublicKey, SecretKey) {
     let secp_ctx = Secp256k1::signing_only();
     let secret_key = SecretKey::from_slice(&[i; 32]).unwrap();
     return (PublicKey::from_secret_key(&secp_ctx, &secret_key), secret_key);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{make_node, JSChannelPublicKeys, JSChannelSetup, JSOutPoint, JSPublicKey};
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    fn channel_test() {
+        let node = make_node();
+        let channel_id = node.new_channel();
+
+        let cp_keys = JSChannelPublicKeys::new(
+            JSPublicKey::new_test_key(100),
+            JSPublicKey::new_test_key(101),
+            JSPublicKey::new_test_key(102),
+            JSPublicKey::new_test_key(103),
+            JSPublicKey::new_test_key(104),
+        );
+
+        let outpoint = JSOutPoint::default();
+
+        let setup = JSChannelSetup::new(false, 10000, 0, outpoint, 6, cp_keys, 6);
+        node.setup_channel(&channel_id, &setup).unwrap();
+
+        // The signing API requires a pre-existing commitment in enforcement_state.
+        // The WASM layer does not construct commitments, so we initialize a minimal holder
+        // commitment before signing.
+        node.init_holder_commitment(&channel_id, 0, 9000, 0).unwrap();
+
+        let sig = node.sign_holder_commitment(&channel_id, 0, 9000, 0).unwrap();
+
+        let der = sig.serialize_der();
+        assert!(!der.is_empty());
+    }
 }

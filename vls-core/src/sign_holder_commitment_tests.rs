@@ -8,9 +8,7 @@ mod tests {
 
     use test_log::test;
 
-    use crate::channel::{
-        Channel, ChannelBase, ChannelSetup, CommitmentType, InputUtxo, TypedSignature,
-    };
+    use crate::channel::{Channel, ChannelBase, CommitmentType, InputUtxo, TypedSignature};
     use crate::node::NodeMonitor;
     use crate::policy::validator::{ChainState, EnforcementState};
     use crate::util::status::{Code, Status};
@@ -18,77 +16,6 @@ mod tests {
     use crate::util::transaction_utils::expected_commitment_tx_weight;
 
     use paste::paste;
-
-    #[test]
-    fn success_redundant_static() {
-        let setup = make_test_channel_setup();
-        test_redundant(&setup);
-    }
-
-    #[test]
-    fn success_redundant_anchors() {
-        let mut setup = make_test_channel_setup();
-        setup.commitment_type = CommitmentType::AnchorsZeroFeeHtlc;
-        test_redundant(&setup);
-    }
-
-    fn test_redundant(setup: &ChannelSetup) {
-        let (node, channel_id) =
-            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], setup.clone());
-
-        let commit_num = 23;
-        let to_holder_value_sat = 1_000_000;
-        let to_counterparty_value_sat = 1_999_000;
-        let tx = node
-            .with_channel(&channel_id, |chan| {
-                chan.enforcement_state.set_next_holder_commit_num_for_testing(commit_num);
-                let per_commitment_point = chan.get_per_commitment_point(commit_num)?;
-                let txkeys = chan.make_holder_tx_keys(&per_commitment_point);
-                let commitment_tx = chan.make_holder_commitment_tx(
-                    commit_num,
-                    &txkeys,
-                    0,
-                    to_holder_value_sat,
-                    to_counterparty_value_sat,
-                    vec![],
-                );
-                Ok(commitment_tx.trust().built_transaction().transaction.clone())
-            })
-            .expect("build");
-        let signature = node
-            .with_channel(&channel_id, |chan| {
-                chan.sign_holder_commitment_tx_phase2_redundant(
-                    commit_num,
-                    0, // feerate not used
-                    to_holder_value_sat,
-                    to_counterparty_value_sat,
-                    vec![],
-                    vec![],
-                )
-            })
-            .expect("sign");
-        assert_eq!(
-            tx.compute_txid().to_string(),
-            if setup.commitment_type == CommitmentType::AnchorsZeroFeeHtlc {
-                "35d42554e19cc82267c29b813d8a9465b762c730a1958b31f147080d302b6fbd"
-            } else {
-                "ae3b1c99071772622e336cf674c6f26bf5ef8860b6487b7cdf82e7d86cf23a42"
-            }
-        );
-
-        let funding_pubkey = get_channel_funding_pubkey(&node, &channel_id);
-        let channel_funding_redeemscript =
-            make_funding_redeemscript(&funding_pubkey, &setup.counterparty_points.funding_pubkey);
-
-        check_signature(
-            &tx,
-            0,
-            TypedSignature::all(signature),
-            &funding_pubkey,
-            setup.channel_value_sat,
-            &channel_funding_redeemscript,
-        );
-    }
 
     const HOLD_COMMIT_NUM: u64 = 23;
 
