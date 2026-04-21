@@ -15,6 +15,7 @@ use lightning_signer::bitcoin::bip32::{ChildNumber, DerivationPath};
 use lightning_signer::bitcoin::consensus::encode::serialize_hex;
 use lightning_signer::bitcoin::{Amount, Sequence, TxOut, Txid};
 use lightning_signer::channel::InputUtxo;
+use lightning_signer::lightning::ln::chan_utils::CommitmentTransaction;
 use lightning_signer::lightning::ln::channel_keys::RevocationKey;
 use lightning_signer::node::{Allowable, ToStringForNetwork};
 use lightning_signer::util::status::Status;
@@ -64,8 +65,7 @@ pub trait RecoveryKeys {
 pub trait RecoverySign {
     fn sign_holder_commitment_tx_for_recovery(
         &self,
-        fee_rate: u32,
-        fee_utxo: &[InputUtxo],
+        spent_htlc_indices: &[bool],
     ) -> Result<
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
@@ -73,6 +73,7 @@ pub trait RecoverySign {
     fn funding_outpoint(&self) -> OutPoint;
     fn counterparty_selected_contest_delay(&self) -> u16;
     fn get_per_commitment_point(&self) -> Result<PublicKey, Status>;
+    fn get_current_holder_commitment_transaction(&self) -> Result<CommitmentTransaction, Status>;
 }
 
 pub async fn recover_l1<R: RecoveryKeys>(
@@ -217,6 +218,53 @@ async fn get_feerate(esplora: &EsploraClient) -> Result<u64, ()> {
     Ok(feerate)
 }
 
+/// Checks which HTLC outputs from the commitment transaction have been spent on-chain.
+/// Returns a vector of booleans where `true` means the output is already spent.
+async fn get_spent_htlc_indices(
+    explorer_client: &Option<Box<dyn Explorer>>,
+    commitment_tx: &CommitmentTransaction,
+) -> Result<Vec<bool>, Status> {
+    let htlcs = commitment_tx.htlcs();
+    let htlc_count = htlcs.len();
+
+    if htlc_count == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut spent_indices = vec![false; htlc_count];
+
+    let Some(client) = explorer_client else {
+        warn!("No block explorer available. Assuming all HTLCs are unspent.");
+        return Ok(spent_indices);
+    };
+
+    let commitment_txid = commitment_tx.trust().built_transaction().transaction.compute_txid();
+
+    for (htlc_idx, htlc_output) in htlcs.iter().enumerate() {
+        let Some(vout) = htlc_output.transaction_output_index else {
+            continue;
+        };
+
+        let outpoint = bitcoin::OutPoint { txid: commitment_txid, vout };
+
+        match client.get_utxo_confirmations(&outpoint).await {
+            Ok(confirmations) => {
+                if confirmations.is_none() {
+                    // We only probe HTLC outputs after the funding outpoint is no longer live,
+                    // so a missing HTLC UTXO here is treated as already spent/missing on-chain.
+                    spent_indices[htlc_idx] = true;
+                    info!("HTLC index {} (vout {}) is already spent/missing", htlc_idx, vout);
+                }
+            }
+            Err(e) => {
+                warn!("Failed to check HTLC at vout {}: {}. Assuming unspent.", vout, e);
+            }
+        }
+    }
+
+    Ok(spent_indices)
+}
+
 pub async fn recover_close<R: RecoveryKeys>(
     network: Network,
     block_explorer_type: BlockExplorerType,
@@ -230,28 +278,40 @@ pub async fn recover_close<R: RecoveryKeys>(
         Some(url) => Some(explorer_from_url(network, block_explorer_type, url).await),
         None => None,
     };
-
     let mut sweeps = Vec::new();
 
     for signer in keys.iter() {
         info!("# funding {:?}", signer.funding_outpoint());
 
+        let current_commitment_tx = signer
+            .get_current_holder_commitment_transaction()
+            .expect("signer must have a current commitment tx before recovery can proceed");
+
+        let funding_confirms = if let Some(bitcoind_client) = &explorer_client {
+            bitcoind_client
+                .get_utxo_confirmations(&signer.funding_outpoint().into_bitcoin_outpoint())
+                .await
+                .expect("block explorer must be reachable to verify funding outpoint status")
+        } else {
+            None
+        };
+
+        let spent_htlc_indices = if explorer_client.is_none() || funding_confirms.is_some() {
+            vec![false; current_commitment_tx.htlcs().len()]
+        } else {
+            get_spent_htlc_indices(&explorer_client, &current_commitment_tx)
+                .await
+                .expect("block explorer must be reachable to check HTLC spend status")
+        };
+
         let (tx, htlc_txs, revocable_script, uck, revocation_pubkey) =
-            signer.sign_holder_commitment_tx_for_recovery(fee_rate, input_utxos).expect("sign");
+            signer.sign_holder_commitment_tx_for_recovery(&spent_htlc_indices).expect("sign");
         let txid = tx.compute_txid();
         debug!("closing tx {:?}", &tx);
         info!("closing txid {}", txid);
         if let Some(bitcoind_client) = &explorer_client {
-            let funding_confirms = bitcoind_client
-                .get_utxo_confirmations(&signer.funding_outpoint().into_bitcoin_outpoint())
-                .await
-                .expect("get_txout for funding");
-            if funding_confirms.is_some() {
-                info!(
-                    "channel is open ({} confirms), broadcasting force-close {}",
-                    funding_confirms.unwrap(),
-                    txid
-                );
+            if let Some(confirms) = funding_confirms {
+                info!("channel is open ({} confirms), broadcasting force-close {}", confirms, txid);
                 bitcoind_client.broadcast_transaction(&tx).await.expect("failed to broadcast");
             } else {
                 let required_confirms = signer.counterparty_selected_contest_delay();
@@ -259,6 +319,7 @@ pub async fn recover_close<R: RecoveryKeys>(
                     "channel is already closed, check outputs, waiting until {} confirms",
                     required_confirms
                 );
+
                 for (idx, out) in tx.output.iter().enumerate() {
                     let script = out.script_pubkey.clone();
                     if script == revocable_script {
