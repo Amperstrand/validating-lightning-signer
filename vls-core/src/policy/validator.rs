@@ -4,6 +4,7 @@ use core::cmp::{max, min};
 use core::fmt::{self, Debug, Formatter};
 
 use bitcoin::bip32::DerivationPath;
+
 use bitcoin::blockdata::block::Header as BlockHeader;
 use bitcoin::blockdata::script::ScriptBuf;
 use bitcoin::hash_types::FilterHeader;
@@ -15,6 +16,8 @@ use bitcoin::sighash::{EcdsaSighashType, SegwitV0Sighash};
 use bitcoin::{BlockHash, Network, OutPoint, Transaction};
 use core::time::Duration;
 use lightning::ln::chan_utils::{ClosingTransaction, HTLCOutputInCommitment, TxCreationKeys};
+use lightning::offers::invoice::UnsignedBolt12Invoice;
+
 use lightning::sign::InMemorySigner;
 use lightning::types::payment::PaymentHash;
 use log::{debug, error};
@@ -25,6 +28,8 @@ use txoo::proof::{TxoProof, VerifyError};
 use crate::channel::{ChannelBalance, ChannelId, ChannelSetup, ChannelSlot};
 use crate::invoice::{Invoice, InvoiceAttributes};
 use crate::policy::{Policy, MAX_CLOCK_SKEW, MIN_INVOICE_EXPIRY};
+#[cfg(feature = "timeless_workaround")]
+use crate::policy::{INVOICE_AHEAD_TOLERANCE, INVOICE_BEHIND_TOLERANCE};
 use crate::prelude::*;
 use crate::tx::tx::{CommitmentInfo, CommitmentInfo2, HTLCInfo2, PreimageMap};
 use crate::util::debug_utils::DebugBytes;
@@ -409,12 +414,11 @@ pub trait Validator {
 
     /// Validate an invoice
     fn validate_invoice(&self, invoice: &Invoice, now: Duration) -> Result<(), ValidationError> {
-        // When we are using block headers our now() may be 1 hour behind or 2 hours ahead
         #[cfg(not(feature = "timeless_workaround"))]
         let (behind_tolerance, ahead_tolerance) = (Duration::from_secs(0), Duration::from_secs(0));
         #[cfg(feature = "timeless_workaround")]
         let (behind_tolerance, ahead_tolerance) =
-            (Duration::from_secs(1 * 60 * 60), Duration::from_secs(2 * 60 * 60));
+            (INVOICE_BEHIND_TOLERANCE, INVOICE_AHEAD_TOLERANCE);
 
         // invoice must not have been created in the future
         if now + MAX_CLOCK_SKEW + behind_tolerance < invoice.duration_since_epoch() {
@@ -442,6 +446,61 @@ pub trait Validator {
                 now.as_secs(),
                 MIN_INVOICE_EXPIRY.as_secs(),
                 (invoice.duration_since_epoch() + invoice.expiry_duration()).as_secs(),
+                MAX_CLOCK_SKEW.as_secs(),
+                ahead_tolerance.as_secs()
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Validate an unsigned BOLT-12 invoice before signing it.
+    fn validate_bolt12_invoice_unsigned(
+        &self,
+        invoice: &UnsignedBolt12Invoice,
+        now: Duration,
+        bolt12_pubkey: PublicKey,
+    ) -> Result<(), ValidationError> {
+        if invoice.signing_pubkey() != bolt12_pubkey {
+            policy_err!(
+                self,
+                "policy-bolt12-signing-pubkey",
+                "invoice signing pubkey {} does not match node bolt12 pubkey {}",
+                invoice.signing_pubkey(),
+                bolt12_pubkey
+            );
+        }
+
+        #[cfg(not(feature = "timeless_workaround"))]
+        let (behind_tolerance, ahead_tolerance) = (Duration::from_secs(0), Duration::from_secs(0));
+        #[cfg(feature = "timeless_workaround")]
+        let (behind_tolerance, ahead_tolerance) =
+            (INVOICE_BEHIND_TOLERANCE, INVOICE_AHEAD_TOLERANCE);
+
+        // invoice must not have been created in the future
+        if now + MAX_CLOCK_SKEW + behind_tolerance < invoice.created_at() {
+            policy_err!(
+                self,
+                "policy-bolt12-invoice-validity",
+                "invoice is not yet valid ({} + {} (skew) + {} (tolerance) < {})",
+                now.as_secs(),
+                MAX_CLOCK_SKEW.as_secs(),
+                behind_tolerance.as_secs(),
+                invoice.created_at().as_secs()
+            );
+        }
+
+        // new invoices must not expire too soon
+        if now + MIN_INVOICE_EXPIRY
+            > (invoice.created_at() + invoice.relative_expiry()) + MAX_CLOCK_SKEW + ahead_tolerance
+        {
+            policy_err!(
+                self,
+                "policy-bolt12-invoice-validity",
+                "invoice is expired ({} + {} (buffer) > {} + {} (skew) + {} (tolerance))",
+                now.as_secs(),
+                MIN_INVOICE_EXPIRY.as_secs(),
+                (invoice.created_at() + invoice.relative_expiry()).as_secs(),
                 MAX_CLOCK_SKEW.as_secs(),
                 ahead_tolerance.as_secs()
             );

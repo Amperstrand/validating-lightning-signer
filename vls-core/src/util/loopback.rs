@@ -668,9 +668,9 @@ impl NodeSigner for LoopbackSignerKeysInterface {
 
     fn sign_bolt12_invoice(
         &self,
-        _: &lightning::offers::invoice::UnsignedBolt12Invoice,
+        invoice: &lightning::offers::invoice::UnsignedBolt12Invoice,
     ) -> Result<bitcoin::secp256k1::schnorr::Signature, ()> {
-        todo!()
+        self.get_node().sign_bolt12_invoice(invoice).map_err(|_| ())
     }
 
     fn get_inbound_payment_key(&self) -> ExpandedKey {

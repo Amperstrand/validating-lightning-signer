@@ -18,6 +18,7 @@ use bitcoin::WPubkeyHash;
 use bitcoin::{secp256k1, ScriptBuf, Transaction, TxOut, Witness};
 use lightning::ln::msgs::{DecodeError, UnsignedGossipMessage};
 use lightning::ln::script::ShutdownScript;
+use lightning::offers::invoice::UnsignedBolt12Invoice;
 use lightning::sign::{
     EntropySource, InMemorySigner, NodeSigner, Recipient, SignerProvider, SpendableOutputDescriptor,
 };
@@ -617,17 +618,24 @@ impl NodeSigner for MyKeysManager {
 
     fn sign_bolt12_invoice(
         &self,
-        _: &lightning::offers::invoice::UnsignedBolt12Invoice,
+        invoice: &UnsignedBolt12Invoice,
     ) -> Result<schnorr::Signature, ()> {
-        todo!("issue 459")
+        if !invoice.signing_pubkey().eq(&self.get_bolt12_pubkey()) {
+            return Err(());
+        }
+
+        let keys = Keypair::from_secret_key(&self.secp_ctx, &self.bolt12_secret);
+        Ok(self.secp_ctx.sign_schnorr_no_aux_rand(invoice.tagged_hash().as_digest(), &keys))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::util::test_utils::invoice::make_test_unsigned_bolt12_invoice;
     use crate::util::INITIAL_COMMITMENT_NUMBER;
     use bitcoin::Network::Testnet;
     use core::borrow::Borrow;
+    use lightning::types::payment::PaymentHash;
 
     use super::*;
     use crate::util::test_utils::{
@@ -886,6 +894,46 @@ mod tests {
         assert!(secp_ctx
             .verify_schnorr(&signature_no_tweak, &msg, &keypair_no_tweak.x_only_public_key().0)
             .is_ok());
+    }
+
+    #[test]
+    fn test_sign_bolt12_invoice() {
+        let seed = [0x11u8; 32];
+        let manager = MyKeysManager::new(
+            KeyDerivationStyle::Ldk,
+            &seed,
+            Network::Testnet,
+            FixedStartingTimeFactory::new(1, 1).borrow(),
+        );
+        let secp_ctx = Secp256k1::new();
+        let invoice =
+            make_test_unsigned_bolt12_invoice(manager.get_bolt12_pubkey(), PaymentHash([7; 32]));
+
+        let signature = manager.sign_bolt12_invoice(&invoice).unwrap();
+
+        let msg = *invoice.tagged_hash().as_digest();
+        let (xonly, _) = invoice.signing_pubkey().x_only_public_key();
+        secp_ctx.verify_schnorr(&signature, &msg, &xonly).unwrap();
+    }
+
+    #[test]
+    fn test_sign_bolt12_invoice_rejects_mismatched_pubkey() {
+        let seed = [0x11u8; 32];
+        let manager = MyKeysManager::new(
+            KeyDerivationStyle::Ldk,
+            &seed,
+            Network::Testnet,
+            FixedStartingTimeFactory::new(1, 1).borrow(),
+        );
+        let invoice = make_test_unsigned_bolt12_invoice(
+            PublicKey::from_secret_key(
+                &Secp256k1::new(),
+                &SecretKey::from_slice(&[9; 32]).unwrap(),
+            ),
+            PaymentHash([8; 32]),
+        );
+
+        assert!(manager.sign_bolt12_invoice(&invoice).is_err());
     }
 
     #[test]

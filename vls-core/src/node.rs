@@ -27,6 +27,7 @@ use lightning::ln::chan_utils::{
 use lightning::ln::inbound_payment::ExpandedKey;
 use lightning::ln::msgs::UnsignedGossipMessage;
 use lightning::ln::script::ShutdownScript;
+use lightning::offers::invoice::UnsignedBolt12Invoice;
 use lightning::sign::{
     ChannelSigner, EntropySource, NodeSigner, Recipient, SignerProvider, SpendableOutputDescriptor,
 };
@@ -55,6 +56,8 @@ use crate::policy::error::{policy_error, ValidationError};
 use crate::policy::validator::{BalanceDelta, ValidatorFactory};
 use crate::policy::validator::{EnforcementState, Validator};
 use crate::policy::Policy;
+#[cfg(feature = "timeless_workaround")]
+use crate::policy::INVOICE_AHEAD_TOLERANCE;
 use crate::policy_err;
 use crate::prelude::*;
 use crate::signer::derive::KeyDerivationStyle;
@@ -782,8 +785,7 @@ impl NodeState {
         };
         #[cfg(feature = "timeless_workaround")]
         {
-            // When we are using block headers our now() could be 2 hours ahead
-            prune += Duration::from_secs(2 * 60 * 60);
+            prune += INVOICE_AHEAD_TOLERANCE
         }
         prune
     }
@@ -2511,6 +2513,60 @@ impl Node {
         Ok(sig)
     }
 
+    /// Sign a BOLT-12 invoice after enforcing signer-side policy checks.
+    ///
+    /// Issued-invoice accounting intentionally mirrors BOLT-11: `max_invoices`
+    /// is an absolute limit checked before duplicate lookup, and zero-amount
+    /// invoices are signed but not tracked in `issued_invoices`.
+    pub fn sign_bolt12_invoice(
+        &self,
+        invoice: &UnsignedBolt12Invoice,
+    ) -> Result<schnorr::Signature, Status> {
+        let validator = self.validator();
+        let now = self.clock.now();
+        validator.validate_bolt12_invoice_unsigned(invoice, now, self.get_bolt12_pubkey())?;
+
+        let sig = self
+            .keys_manager
+            .sign_bolt12_invoice(invoice)
+            .map_err(|_| internal_error("failed to sign bolt12 invoice"))?;
+
+        let sig_copy = sig;
+        let signed_invoice = invoice
+            .clone()
+            .sign(move |_message: &UnsignedBolt12Invoice| Ok(sig_copy))
+            .map_err(|_| internal_error("failed to assemble signed bolt12 invoice"))?;
+        let (payment_hash, payment_state, invoice_hash) =
+            Self::payment_state_from_invoice(&Invoice::Bolt12(signed_invoice))?;
+
+        defer! { trace_node_state!(self.get_state()); }
+        let mut state = self.get_state();
+        let policy = self.policy();
+        if state.issued_invoices.len() >= policy.max_invoices() {
+            return Err(failed_precondition(format!(
+                "too many invoices {} (max {})",
+                state.issued_invoices.len(),
+                policy.max_invoices()
+            )));
+        }
+
+        if let Some(existing_state) = state.issued_invoices.get(&payment_hash) {
+            return if existing_state.invoice_hash == invoice_hash {
+                Ok(sig)
+            } else {
+                Err(failed_precondition(
+                    "sign_bolt12_invoice: already have a different invoice for same payment hash"
+                        .to_string(),
+                ))
+            };
+        }
+
+        if payment_state.amount_msat > 0 {
+            state.issued_invoices.insert(payment_hash, payment_state);
+        }
+        Ok(sig)
+    }
+
     fn policy(&self) -> Box<dyn Policy> {
         self.validator_factory().policy(self.network())
     }
@@ -3111,15 +3167,19 @@ mod tests {
     use crate::policy::simple_validator::{
         make_default_simple_policy, SimpleValidatorFactory, TestSimpleValidatorBuilder,
     };
+    use crate::util::clock::ManualClock;
     use crate::util::test_utils::htlc::{
         make_commit_info_with_htlcs, make_counterparty_commit_info_with_htlcs, make_htlc,
     };
+    use crate::util::test_utils::invoice::{
+        make_test_bolt12_invoice, make_test_unsigned_bolt12_invoice_with_params,
+    };
     use crate::util::test_utils::key::make_test_pubkey;
     use bitcoin::hashes::sha256::Hash as Sha256Hash;
+    use lightning::offers::offer::Quantity;
 
     use crate::tx::tx::ANCHOR_SAT;
     use crate::util::status::{internal_error, invalid_argument, Code, Status};
-    use crate::util::test_utils::invoice::make_test_bolt12_invoice;
     use crate::util::test_utils::*;
     use crate::util::velocity::{VelocityControlIntervalType, VelocityControlSpec};
     use crate::CommitmentPointProvider;
@@ -3663,6 +3723,134 @@ mod tests {
 
         let raw_invoice = build_test_invoice("invoice", &PaymentHash([2u8; 32]));
         node.sign_bolt11_invoice(raw_invoice).expect_err("expected too many issued invoics");
+    }
+
+    #[test]
+    fn sign_bolt12_invoice_rejects_future_timestamp_test() {
+        let now = Duration::from_secs(10_000);
+        let clock: Arc<dyn Clock> = Arc::new(ManualClock::new(now));
+        let node = init_node_with_policy_and_clock(
+            TEST_NODE_CONFIG,
+            TEST_SEED[0],
+            make_default_simple_policy(Network::Testnet),
+            clock,
+        );
+        let invoice = make_test_unsigned_bolt12_invoice_with_params(
+            node.get_bolt12_pubkey(),
+            PaymentHash([21; 32]),
+            Some(2_000),
+            None,
+            None,
+            Quantity::One,
+            now + Duration::from_secs(61),
+            None,
+            Some(Network::Testnet),
+        );
+
+        assert!(node
+            .sign_bolt12_invoice(&invoice)
+            .unwrap_err()
+            .message()
+            .contains("not yet valid"));
+    }
+
+    #[test]
+    fn sign_bolt12_invoice_rejects_expired_test() {
+        let now = Duration::from_secs(10_000);
+        let clock: Arc<dyn Clock> = Arc::new(ManualClock::new(now));
+        let node = init_node_with_policy_and_clock(
+            TEST_NODE_CONFIG,
+            TEST_SEED[0],
+            make_default_simple_policy(Network::Testnet),
+            clock,
+        );
+        let invoice = make_test_unsigned_bolt12_invoice_with_params(
+            node.get_bolt12_pubkey(),
+            PaymentHash([22; 32]),
+            Some(2_000),
+            None,
+            None,
+            Quantity::One,
+            now - Duration::from_secs(7_201),
+            None,
+            Some(Network::Testnet),
+        );
+
+        assert!(node.sign_bolt12_invoice(&invoice).unwrap_err().message().contains("expired"));
+    }
+
+    #[test]
+    fn sign_bolt12_invoice_tracks_issued_invoices_test() {
+        let now = Duration::from_secs(10_000);
+        let clock: Arc<dyn Clock> = Arc::new(ManualClock::new(now));
+        let mut policy = make_default_simple_policy(Network::Testnet);
+        policy.max_invoices = 1;
+        let node = init_node_with_policy_and_clock(TEST_NODE_CONFIG, TEST_SEED[0], policy, clock);
+
+        let invoice1 = make_test_unsigned_bolt12_invoice_with_params(
+            node.get_bolt12_pubkey(),
+            PaymentHash([28; 32]),
+            Some(2_000),
+            None,
+            None,
+            Quantity::One,
+            now,
+            None,
+            Some(Network::Testnet),
+        );
+        node.sign_bolt12_invoice(&invoice1).unwrap();
+        assert!(node.sign_bolt12_invoice(&invoice1).is_err());
+        assert_eq!(node.get_state().issued_invoices.len(), 1);
+
+        let invoice2 = make_test_unsigned_bolt12_invoice_with_params(
+            node.get_bolt12_pubkey(),
+            PaymentHash([29; 32]),
+            Some(2_000),
+            None,
+            None,
+            Quantity::One,
+            now,
+            None,
+            Some(Network::Testnet),
+        );
+        assert!(node.sign_bolt12_invoice(&invoice2).is_err());
+    }
+
+    #[test]
+    fn sign_bolt12_invoice_drops_zero_amount_issued_invoice_test() {
+        let now = Duration::from_secs(10_000);
+        let clock: Arc<dyn Clock> = Arc::new(ManualClock::new(now));
+        let mut policy = make_default_simple_policy(Network::Testnet);
+        policy.max_invoices = 1;
+        let node = init_node_with_policy_and_clock(TEST_NODE_CONFIG, TEST_SEED[0], policy, clock);
+
+        let zero_amount_invoice = make_test_unsigned_bolt12_invoice_with_params(
+            node.get_bolt12_pubkey(),
+            PaymentHash([30; 32]),
+            Some(0),
+            None,
+            None,
+            Quantity::One,
+            now,
+            None,
+            Some(Network::Testnet),
+        );
+        node.sign_bolt12_invoice(&zero_amount_invoice).unwrap();
+        assert_eq!(node.get_state().issued_invoices.len(), 0);
+
+        let invoice = make_test_unsigned_bolt12_invoice_with_params(
+            node.get_bolt12_pubkey(),
+            PaymentHash([31; 32]),
+            Some(2_000),
+            None,
+            None,
+            Quantity::One,
+            now,
+            None,
+            Some(Network::Testnet),
+        );
+        node.sign_bolt12_invoice(&invoice).unwrap();
+        assert_eq!(node.get_state().issued_invoices.len(), 1);
     }
 
     #[test]
