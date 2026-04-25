@@ -1379,8 +1379,8 @@ impl Handler for ChannelHandler {
                         &remote_per_commitment_point,
                         commit_num,
                         feerate_sat_per_kw,
-                        offered_htlcs.clone(),
-                        received_htlcs.clone(),
+                        offered_htlcs,
+                        received_htlcs,
                     )
                 })?;
                 Ok(Box::new(msgs::SignTxReply { signature: to_bitcoin_sig(sig) }))
@@ -1399,8 +1399,8 @@ impl Handler for ChannelHandler {
                         feerate_sat_per_kw,
                         m.to_local_value_sat,
                         m.to_remote_value_sat,
-                        offered_htlcs.clone(),
-                        received_htlcs.clone(),
+                        offered_htlcs,
+                        received_htlcs,
                     )
                 })?;
                 Ok(Box::new(msgs::SignCommitmentTxWithHtlcsReply {
@@ -1497,8 +1497,8 @@ impl Handler for ChannelHandler {
                             &witscripts,
                             commit_num,
                             feerate_sat_per_kw,
-                            offered_htlcs.clone(),
-                            received_htlcs.clone(),
+                            offered_htlcs,
+                            received_htlcs,
                             &commit_sig,
                             &htlc_sigs,
                         )?;
@@ -1551,8 +1551,8 @@ impl Handler for ChannelHandler {
                             feerate_sat_per_kw,
                             m.to_local_value_sat,
                             m.to_remote_value_sat,
-                            offered_htlcs.clone(),
-                            received_htlcs.clone(),
+                            offered_htlcs,
+                            received_htlcs,
                             &commit_sig,
                             &htlc_sigs,
                         )?;
@@ -1812,8 +1812,7 @@ fn extract_pubkey(key: &PubKey) -> PublicKey {
 fn extract_psbt_witscripts(psbt: &Psbt) -> Vec<Vec<u8>> {
     psbt.outputs
         .iter()
-        .map(|o| o.witness_script.clone().unwrap_or(ScriptBuf::new()))
-        .map(|s| s[..].to_bytes())
+        .map(|o| o.witness_script.as_ref().map(|s| s.as_bytes().to_vec()).unwrap_or_default())
         .collect()
 }
 
