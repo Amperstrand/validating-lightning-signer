@@ -72,7 +72,6 @@ feature-depth = 1
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "Paste is not maintained but considered complete: https://github.com/rustsec/advisory-db/pull/2215#issuecomment-2709315704" },
     { id = "RUSTSEC-2026-0009", reason = "time crate is only used for formatting timestamps in logging, no parsing of untrusted input" },
-    { id = "RUSTSEC-2026-0097", reason = "rand 0.8.5 resolved without `log` or `thread_rng` features, so the unsound code path is unreachable. Blocked on jsonrpsee replacement to drop rand 0.8 entirely." },
     #"RUSTSEC-0000-0000",
     #{ id = "RUSTSEC-0000-0000", reason = "you can specify a reason the advisory is ignored" },
     #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
