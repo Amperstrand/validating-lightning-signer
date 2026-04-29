@@ -53,6 +53,7 @@ serde = { workspace = true, features = ["std"] }
 tempfile = "3.17.1"
 
 [dev-dependencies]
+async-trait = { workspace = true }
 vls-core = { path = "../vls-core", version = "0.15.0-rc.1", features = ["use_backtrace", "test_utils"] }
 
 [build-dependencies]

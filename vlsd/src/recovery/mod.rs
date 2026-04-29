@@ -14,7 +14,7 @@ use lightning_signer::bitcoin::address::{NetworkChecked, NetworkUnchecked};
 use lightning_signer::bitcoin::bip32::{ChildNumber, DerivationPath};
 use lightning_signer::bitcoin::consensus::encode::serialize_hex;
 use lightning_signer::bitcoin::{Amount, Sequence, TxOut, Txid};
-use lightning_signer::channel::InputUtxo;
+use lightning_signer::channel::{CommitmentType, InputUtxo};
 use lightning_signer::lightning::ln::chan_utils::CommitmentTransaction;
 use lightning_signer::lightning::ln::channel_keys::RevocationKey;
 use lightning_signer::node::{Allowable, ToStringForNetwork};
@@ -59,6 +59,13 @@ pub trait RecoveryKeys {
     ) -> Result<Vec<Vec<Vec<u8>>>, Status>;
     fn wallet_address_native(&self, index: ChildNumber) -> Result<Address, Status>;
     fn wallet_address_taproot(&self, index: ChildNumber) -> Result<Address, Status>;
+    fn wallet_script_pubkey_native(&self, path: &DerivationPath) -> Result<ScriptBuf, Status>;
+    fn sign_wallet_input_unchecked(
+        &self,
+        tx: &Transaction,
+        input_index: usize,
+        input_utxo: &InputUtxo,
+    ) -> Result<Vec<Vec<u8>>, Status>;
 }
 
 /// Provide enough signer functionality to force-close a channel
@@ -74,6 +81,7 @@ pub trait RecoverySign {
     fn counterparty_selected_contest_delay(&self) -> u16;
     fn get_per_commitment_point(&self) -> Result<PublicKey, Status>;
     fn get_current_holder_commitment_transaction(&self) -> Result<CommitmentTransaction, Status>;
+    fn commitment_type(&self) -> CommitmentType;
 }
 
 pub async fn recover_l1<R: RecoveryKeys>(
@@ -435,13 +443,342 @@ fn spend_delayed_outputs<R: RecoveryKeys>(
 mod tests {
     use super::direct::DirectRecoveryKeys;
     use super::*;
-    use lightning_signer::node::SpendType;
-    use lightning_signer::util::test_utils::key::make_test_pubkey;
-    use lightning_signer::util::test_utils::{
-        init_node, make_test_previous_tx, TEST_NODE_CONFIG, TEST_SEED,
+    use async_trait::async_trait;
+    use bitcoind_client::Error;
+    use lightning_signer::bitcoin::hashes::Hash;
+    use lightning_signer::channel::Channel;
+    use lightning_signer::lightning::ln::chan_utils::{
+        ChannelTransactionParameters, CounterpartyChannelTransactionParameters,
+        HTLCOutputInCommitment, TxCreationKeys,
     };
-    use std::collections::BTreeMap;
+    use lightning_signer::lightning::ln::channel_keys::{DelayedPaymentKey, HtlcKey};
+    use lightning_signer::lightning::types::payment::PaymentHash;
+    use lightning_signer::node::SpendType;
+    use lightning_signer::tx::tx::HTLCInfo2;
+    use lightning_signer::util::test_utils::key::{
+        make_test_bitcoin_pubkey, make_test_counterparty_points, make_test_privkey,
+        make_test_pubkey,
+    };
+    use lightning_signer::util::test_utils::{
+        init_node, make_test_channel_setup_with_points, make_test_previous_tx, TEST_NODE_CONFIG,
+        TEST_SEED,
+    };
+    use std::collections::{BTreeMap, HashMap};
+    use std::sync::{Arc, Mutex};
     use vls_protocol::serde_bolt::bitcoin::CompressedPublicKey;
+
+    #[derive(Default)]
+    struct TestRecoveryState {
+        spent_htlc_indices: Vec<Vec<bool>>,
+        wallet_signs: Vec<WalletSignCall>,
+    }
+
+    struct WalletSignCall {
+        tx: Transaction,
+        input_index: usize,
+        input_utxo: InputUtxo,
+    }
+
+    #[derive(Clone, Default)]
+    struct MockExplorer {
+        confirms: Arc<Mutex<HashMap<bitcoin::OutPoint, Option<u64>>>>,
+        broadcasts: Arc<Mutex<Vec<Transaction>>>,
+        spending_txs: Arc<Mutex<HashMap<bitcoin::OutPoint, Option<Transaction>>>>,
+        spending_tx_errors: Arc<Mutex<HashMap<bitcoin::OutPoint, String>>>,
+    }
+
+    impl MockExplorer {
+        fn set_confirms(&self, outpoint: bitcoin::OutPoint, confirms: Option<u64>) {
+            self.confirms.lock().unwrap().insert(outpoint, confirms);
+        }
+
+        fn set_spending_tx(&self, outpoint: bitcoin::OutPoint, tx: Option<Transaction>) {
+            self.spending_txs.lock().unwrap().insert(outpoint, tx);
+        }
+
+        fn broadcasts(&self) -> Vec<Transaction> {
+            self.broadcasts.lock().unwrap().clone()
+        }
+
+        fn set_spending_tx_error(&self, outpoint: bitcoin::OutPoint, error: &str) {
+            self.spending_tx_errors.lock().unwrap().insert(outpoint, error.to_string());
+        }
+    }
+
+    #[async_trait]
+    impl Explorer for MockExplorer {
+        async fn get_utxo_confirmations(
+            &self,
+            outpoint: &bitcoin::OutPoint,
+        ) -> Result<Option<u64>, Error> {
+            Ok(self.confirms.lock().unwrap().get(outpoint).cloned().unwrap_or(None))
+        }
+
+        async fn broadcast_transaction(&self, tx: &Transaction) -> Result<(), Error> {
+            self.broadcasts.lock().unwrap().push(tx.clone());
+            Ok(())
+        }
+
+        async fn get_utxo_spending_tx(
+            &self,
+            outpoint: &bitcoin::OutPoint,
+        ) -> Result<Option<Transaction>, Error> {
+            if let Some(error) = self.spending_tx_errors.lock().unwrap().get(outpoint).cloned() {
+                return Err(Error::Esplora(error));
+            }
+            Ok(self.spending_txs.lock().unwrap().get(outpoint).cloned().unwrap_or(None))
+        }
+    }
+
+    #[derive(Clone)]
+    struct TestRecoveryKeys {
+        signers: Vec<TestRecoverySigner>,
+        state: Arc<Mutex<TestRecoveryState>>,
+        wallet_script: ScriptBuf,
+        wallet_witness: Vec<Vec<u8>>,
+    }
+
+    impl TestRecoveryKeys {
+        fn new(signers: Vec<TestRecoverySigner>, state: Arc<Mutex<TestRecoveryState>>) -> Self {
+            Self {
+                signers,
+                state,
+                wallet_script: make_p2wpkh_script(21),
+                wallet_witness: vec![vec![0x30, 0x01], vec![0x02, 0x03]],
+            }
+        }
+    }
+
+    impl RecoveryKeys for TestRecoveryKeys {
+        type Signer = TestRecoverySigner;
+
+        fn iter(&self) -> Iter<Self::Signer> {
+            Iter { signers: self.signers.clone() }
+        }
+
+        fn sign_onchain_tx(
+            &self,
+            _tx: &Transaction,
+            _segwit_flags: &[bool],
+            _ipaths: &Vec<DerivationPath>,
+            _prev_outs: &Vec<TxOut>,
+            _uniclosekeys: Vec<Option<(SecretKey, Vec<Vec<u8>>)>>,
+            _opaths: &Vec<DerivationPath>,
+        ) -> Result<Vec<Vec<Vec<u8>>>, Status> {
+            panic!("not used by recover_close dry-run tests")
+        }
+
+        fn wallet_address_native(&self, _index: ChildNumber) -> Result<Address, Status> {
+            panic!("not used by recover_close tests")
+        }
+
+        fn wallet_address_taproot(&self, _index: ChildNumber) -> Result<Address, Status> {
+            panic!("not used by recover_close tests")
+        }
+
+        fn wallet_script_pubkey_native(&self, _path: &DerivationPath) -> Result<ScriptBuf, Status> {
+            Ok(self.wallet_script.clone())
+        }
+
+        fn sign_wallet_input_unchecked(
+            &self,
+            tx: &Transaction,
+            input_index: usize,
+            input_utxo: &InputUtxo,
+        ) -> Result<Vec<Vec<u8>>, Status> {
+            self.state.lock().unwrap().wallet_signs.push(WalletSignCall {
+                tx: tx.clone(),
+                input_index,
+                input_utxo: input_utxo.clone(),
+            });
+            Ok(self.wallet_witness.clone())
+        }
+    }
+
+    #[derive(Clone)]
+    struct TestRecoverySigner {
+        funding_outpoint: OutPoint,
+        commitment_type: CommitmentType,
+        current_commitment_tx: CommitmentTransaction,
+        closing_tx: Transaction,
+        htlc_txs: Vec<Transaction>,
+        state: Arc<Mutex<TestRecoveryState>>,
+    }
+
+    impl TestRecoverySigner {
+        fn new(
+            commitment_type: CommitmentType,
+            htlc_txs: Vec<Transaction>,
+            state: Arc<Mutex<TestRecoveryState>>,
+        ) -> Self {
+            Self {
+                funding_outpoint: funding_outpoint(),
+                commitment_type,
+                current_commitment_tx: make_empty_commitment_tx(),
+                closing_tx: make_recovery_tx(),
+                htlc_txs,
+                state,
+            }
+        }
+    }
+
+    impl RecoverySign for TestRecoverySigner {
+        fn sign_holder_commitment_tx_for_recovery(
+            &self,
+            spent_htlc_indices: &[bool],
+        ) -> Result<
+            (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
+            Status,
+        > {
+            self.state.lock().unwrap().spent_htlc_indices.push(spent_htlc_indices.to_vec());
+            Ok((
+                self.closing_tx.clone(),
+                self.htlc_txs.clone(),
+                ScriptBuf::new(),
+                (make_test_privkey(1), Vec::new()),
+                make_test_pubkey(2),
+            ))
+        }
+
+        fn funding_outpoint(&self) -> OutPoint {
+            self.funding_outpoint
+        }
+
+        fn counterparty_selected_contest_delay(&self) -> u16 {
+            6
+        }
+
+        fn get_per_commitment_point(&self) -> Result<PublicKey, Status> {
+            Ok(make_test_pubkey(3))
+        }
+
+        fn get_current_holder_commitment_transaction(
+            &self,
+        ) -> Result<CommitmentTransaction, Status> {
+            Ok(self.current_commitment_tx.clone())
+        }
+
+        fn commitment_type(&self) -> CommitmentType {
+            self.commitment_type
+        }
+    }
+
+    fn txid(byte: u8) -> Txid {
+        Txid::from_slice(&[byte; 32]).unwrap()
+    }
+
+    fn funding_outpoint() -> OutPoint {
+        OutPoint { txid: txid(42), index: 0 }
+    }
+
+    fn funding_bitcoin_outpoint() -> bitcoin::OutPoint {
+        funding_outpoint().into_bitcoin_outpoint()
+    }
+
+    fn bitcoin_outpoint(byte: u8, vout: u32) -> bitcoin::OutPoint {
+        bitcoin::OutPoint { txid: txid(byte), vout }
+    }
+
+    fn make_p2wpkh_script(byte: u8) -> ScriptBuf {
+        Address::p2wpkh(&make_test_bitcoin_pubkey(byte), Network::Regtest).script_pubkey()
+    }
+
+    fn make_recovery_tx() -> Transaction {
+        Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![bitcoin::TxIn {
+                previous_output: bitcoin_outpoint(42, 0),
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::ZERO,
+                witness: Witness::new(),
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(20_000),
+                script_pubkey: make_p2wpkh_script(1),
+            }],
+        }
+    }
+
+    fn make_htlc_tx(value_sat: u64) -> Transaction {
+        Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![bitcoin::TxIn {
+                previous_output: bitcoin_outpoint(43, 0),
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::ZERO,
+                witness: Witness::new(),
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(value_sat),
+                script_pubkey: make_p2wpkh_script(2),
+            }],
+        }
+    }
+
+    fn make_fee_utxo(value_sat: u64) -> InputUtxo {
+        InputUtxo {
+            outpoint: bitcoin_outpoint(44, 1),
+            value: Amount::from_sat(value_sat),
+            derivation_path: vec![ChildNumber::from_normal_idx(7).unwrap()].into(),
+        }
+    }
+
+    fn make_htlc_output(byte: u8) -> HTLCOutputInCommitment {
+        let htlc = HTLCInfo2 {
+            value_sat: 700 + u64::from(byte) * 100,
+            cltv_expiry: 100 + u32::from(byte),
+            payment_hash: PaymentHash([byte; 32]),
+        };
+
+        let (offered, received) =
+            if byte % 2 == 0 { (vec![htlc], Vec::new()) } else { (Vec::new(), vec![htlc]) };
+        Channel::htlcs_info2_to_oic(&offered, &received).remove(0)
+    }
+
+    fn make_empty_commitment_tx() -> CommitmentTransaction {
+        make_commitment_tx(Vec::new())
+    }
+
+    fn make_commitment_tx(htlcs: Vec<HTLCOutputInCommitment>) -> CommitmentTransaction {
+        let holder_pubkeys = make_test_counterparty_points();
+        let mut setup = make_test_channel_setup_with_points(true, make_test_counterparty_points());
+        setup.funding_outpoint = funding_bitcoin_outpoint();
+
+        let channel_parameters = ChannelTransactionParameters {
+            holder_pubkeys: holder_pubkeys.clone(),
+            holder_selected_contest_delay: setup.holder_selected_contest_delay,
+            is_outbound_from_holder: setup.is_outbound,
+            counterparty_parameters: Some(CounterpartyChannelTransactionParameters {
+                pubkeys: setup.counterparty_points.clone(),
+                selected_contest_delay: setup.counterparty_selected_contest_delay,
+            }),
+            funding_outpoint: Some(funding_outpoint()),
+            channel_type_features: setup.features(),
+        };
+        let mut htlcs = htlcs.into_iter().map(|h| (h, ())).collect();
+        let keys = TxCreationKeys {
+            per_commitment_point: make_test_pubkey(10),
+            revocation_key: RevocationKey(make_test_pubkey(11)),
+            broadcaster_htlc_key: HtlcKey(make_test_pubkey(12)),
+            countersignatory_htlc_key: HtlcKey(make_test_pubkey(13)),
+            broadcaster_delayed_payment_key: DelayedPaymentKey(make_test_pubkey(14)),
+        };
+
+        CommitmentTransaction::new_with_auxiliary_htlc_data(
+            0,
+            20_000,
+            0,
+            holder_pubkeys.funding_pubkey,
+            setup.counterparty_points.funding_pubkey,
+            keys,
+            0,
+            &mut htlcs,
+            &channel_parameters.as_holder_broadcastable(),
+        )
+        .with_non_zero_fee_anchors()
+    }
 
     #[ignore]
     #[tokio::test]
