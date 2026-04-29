@@ -19,6 +19,7 @@ use lightning_signer::lightning::ln::chan_utils::CommitmentTransaction;
 use lightning_signer::lightning::ln::channel_keys::RevocationKey;
 use lightning_signer::node::{Allowable, ToStringForNetwork};
 use lightning_signer::util::status::Status;
+use lightning_signer::util::transaction_utils::maybe_add_change_output;
 use lightning_signer::{bitcoin, lightning};
 use log::*;
 use std::collections::BTreeMap;
@@ -271,6 +272,153 @@ async fn get_spent_htlc_indices(
     }
 
     Ok(spent_indices)
+}
+
+/// Constant for the combined size of a witness component in bytes.
+/// Per BIP141/BIP144, a P2WPKH witness field is serialized as:
+/// - 1 byte  : var_int item count (0x02, two items: sig + pubkey)
+/// - 1 byte  : var_int signature length (0x49 = 73)
+/// - 73 bytes: DER-encoded signature (max size)
+/// - 1 byte  : var_int pubkey length (0x21 = 33)
+/// - 33 bytes: compressed public key
+/// Total: 1 + 1 + 73 + 1 + 33 = 109 bytes per input witness.
+const P2WPKH_INPUT_WITNESS_SIZE: u64 = 1 + 1 + 73 + 1 + 33;
+
+fn add_fee_to_htlc_txs<R: RecoveryKeys>(
+    keys: &R,
+    htlc_txs: Vec<Transaction>,
+    fee_rate: u32,
+    input_utxos: &[InputUtxo],
+    funding_outpoint: &OutPoint,
+) -> Result<Vec<Transaction>, Status> {
+    if htlc_txs.is_empty() {
+        return Ok(htlc_txs);
+    }
+
+    let mut result = Vec::with_capacity(htlc_txs.len());
+    let mut provided_utxos = input_utxos.iter().cloned();
+    let mut current_fee_utxo = provided_utxos.next();
+
+    for (idx, htlc_tx) in htlc_txs.into_iter().enumerate() {
+        let mut next_fee_utxo = current_fee_utxo.take().or_else(|| provided_utxos.next());
+        let mut last_error = None;
+
+        loop {
+            let Some(fee_utxo) = next_fee_utxo else {
+                let last_error =
+                    last_error.map(|e| format!("; last fee UTXO error: {}", e)).unwrap_or_default();
+                return Err(Status::invalid_argument(format!(
+                    "cannot add fees to HTLC recovery transaction {} for channel {:?}: no usable fee UTXO available{}",
+                    idx, funding_outpoint, last_error
+                )));
+            };
+
+            let fee_outpoint = fee_utxo.outpoint;
+            match add_fee_to_htlc_tx(
+                keys,
+                htlc_tx.clone(),
+                &fee_utxo,
+                fee_rate,
+                funding_outpoint,
+                idx,
+            ) {
+                Ok((funded_tx, change_utxo)) => {
+                    info!(
+                        "added fee input {}:{} to HTLC recovery transaction {} for channel {:?}",
+                        fee_outpoint.txid, fee_outpoint.vout, idx, funding_outpoint
+                    );
+                    current_fee_utxo = change_utxo;
+                    result.push(funded_tx);
+                    break;
+                }
+                Err(e) => {
+                    warn!(
+                        "skipping fee UTXO {}:{} for HTLC recovery transaction {} on channel {:?}: {}",
+                        fee_outpoint.txid, fee_outpoint.vout, idx, funding_outpoint, e
+                    );
+                    last_error = Some(e.to_string());
+                    next_fee_utxo = provided_utxos.next();
+                }
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+fn add_fee_to_htlc_tx<R: RecoveryKeys>(
+    keys: &R,
+    mut tx: Transaction,
+    fee_utxo: &InputUtxo,
+    fee_rate: u32,
+    funding_outpoint: &OutPoint,
+    htlc_tx_index: usize,
+) -> Result<(Transaction, Option<InputUtxo>), Status> {
+    let fee_input_index = tx.input.len();
+    tx.input.push(bitcoin::TxIn {
+        previous_output: fee_utxo.outpoint,
+        script_sig: ScriptBuf::new(),
+        sequence: Sequence::ZERO,
+        witness: Witness::default(),
+    });
+
+    let htlc_output_value = tx.output.iter().try_fold(0u64, |sum, output| {
+        sum.checked_add(output.value.to_sat()).ok_or_else(|| {
+            Status::internal(format!(
+                "HTLC recovery transaction {} for channel {:?} output value overflow",
+                htlc_tx_index, funding_outpoint
+            ))
+        })
+    })?;
+    let input_value = htlc_output_value.checked_add(fee_utxo.value.to_sat()).ok_or_else(|| {
+        Status::internal(format!(
+            "HTLC recovery transaction {} for channel {:?} input value overflow",
+            htlc_tx_index, funding_outpoint
+        ))
+    })?;
+
+    let change_script = keys.wallet_script_pubkey_native(&fee_utxo.derivation_path)?;
+    let outputs_before_change = tx.output.len();
+    maybe_add_change_output(
+        &mut tx,
+        input_value,
+        P2WPKH_INPUT_WITNESS_SIZE,
+        fee_rate,
+        change_script,
+    )
+    .map_err(|_| {
+        Status::invalid_argument(format!(
+            "fee UTXO {}:{} value {} sat cannot pay fee rate {} sat/kw for HTLC recovery transaction {} on channel {:?}",
+            fee_utxo.outpoint.txid,
+            fee_utxo.outpoint.vout,
+            fee_utxo.value.to_sat(),
+            fee_rate,
+            htlc_tx_index,
+            funding_outpoint
+        ))
+    })?;
+
+    let change_utxo = if tx.output.len() > outputs_before_change {
+        let change_vout = (tx.output.len() - 1) as u32;
+        Some(InputUtxo {
+            outpoint: bitcoin::OutPoint { txid: tx.compute_txid(), vout: change_vout },
+            value: tx.output[change_vout as usize].value,
+            derivation_path: fee_utxo.derivation_path.clone(),
+        })
+    } else {
+        None
+    };
+
+    let fee_witness = keys.sign_wallet_input_unchecked(&tx, fee_input_index, fee_utxo)?;
+    if fee_witness.is_empty() {
+        return Err(Status::internal(format!(
+            "signer returned empty wallet witness for fee input {} on HTLC recovery transaction {} for channel {:?}",
+            fee_input_index, htlc_tx_index, funding_outpoint
+        )));
+    }
+    tx.input[fee_input_index].witness = Witness::from_slice(&fee_witness);
+
+    Ok((tx, change_utxo))
 }
 
 pub async fn recover_close<R: RecoveryKeys>(
@@ -851,5 +999,53 @@ mod tests {
             }
         })
         .expect_err("verify");
+    }
+
+    #[test]
+    fn add_fee_to_htlc_txs_adds_fee_input_change_and_witness() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let keys = TestRecoveryKeys::new(Vec::new(), state.clone());
+        let input_utxo = make_fee_utxo(60_000);
+
+        let txs = add_fee_to_htlc_txs(
+            &keys,
+            vec![make_htlc_tx(10_000)],
+            1000,
+            &[input_utxo.clone()],
+            &funding_outpoint(),
+        )
+        .expect("funded htlc tx");
+
+        assert_eq!(txs.len(), 1);
+        assert_eq!(txs[0].input.len(), 2);
+        assert_eq!(txs[0].input[1].previous_output, input_utxo.outpoint);
+        assert_eq!(txs[0].input[1].witness.len(), 2);
+        assert_eq!(txs[0].output.len(), 2);
+        assert_eq!(txs[0].output[1].script_pubkey, keys.wallet_script);
+
+        let state = state.lock().unwrap();
+        assert_eq!(state.wallet_signs.len(), 1);
+        assert_eq!(state.wallet_signs[0].input_index, 1);
+        assert_eq!(state.wallet_signs[0].input_utxo, input_utxo);
+        assert_eq!(state.wallet_signs[0].tx.input[1].previous_output, input_utxo.outpoint);
+    }
+
+    #[test]
+    fn add_fee_to_htlc_txs_errors_when_fee_utxo_cannot_pay_fee() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let keys = TestRecoveryKeys::new(Vec::new(), state.clone());
+
+        let err = add_fee_to_htlc_txs(
+            &keys,
+            vec![make_htlc_tx(10_000)],
+            1000,
+            &[make_fee_utxo(100)],
+            &funding_outpoint(),
+        )
+        .expect_err("fee utxo is too small");
+
+        assert!(err.message().contains("no usable fee UTXO available"));
+        assert!(err.message().contains("cannot pay fee rate 1000"));
+        assert!(state.lock().unwrap().wallet_signs.is_empty());
     }
 }
