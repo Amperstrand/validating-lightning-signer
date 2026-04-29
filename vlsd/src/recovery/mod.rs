@@ -278,6 +278,18 @@ pub async fn recover_close<R: RecoveryKeys>(
         Some(url) => Some(explorer_from_url(network, block_explorer_type, url).await),
         None => None,
     };
+
+    recover_close_inner(network, destination, keys, fee_rate, input_utxos, explorer_client).await;
+}
+
+pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
+    network: Network,
+    destination: &str,
+    keys: R,
+    _fee_rate: u32,
+    _input_utxos: &[InputUtxo],
+    explorer_client: Option<Box<dyn Explorer>>,
+) {
     let mut sweeps = Vec::new();
 
     for signer in keys.iter() {
