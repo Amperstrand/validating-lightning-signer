@@ -421,35 +421,123 @@ fn add_fee_to_htlc_tx<R: RecoveryKeys>(
     Ok((tx, change_utxo))
 }
 
+async fn broadcast_htlc_txs<E: Explorer + ?Sized>(
+    explorer: &E,
+    htlc_txs: &[Transaction],
+    funding_outpoint: &OutPoint,
+) {
+    for (idx, htlc_tx) in htlc_txs.iter().enumerate() {
+        let txid = htlc_tx.compute_txid();
+        match explorer.broadcast_transaction(htlc_tx).await {
+            Ok(()) => {
+                info!(
+                    "broadcast HTLC recovery transaction {} for channel {:?}: {}",
+                    idx, funding_outpoint, txid
+                );
+            }
+            Err(e) => {
+                error!(
+                    "failed to broadcast HTLC recovery transaction {} for channel {:?} (txid {}): {}",
+                    idx, funding_outpoint, txid, e
+                );
+            }
+        }
+    }
+}
+
 pub async fn recover_close<R: RecoveryKeys>(
     network: Network,
     block_explorer_type: BlockExplorerType,
     block_explorer_rpc: Option<Url>,
     destination: &str,
     keys: R,
-    fee_rate: u32,
+    fee_rate: Option<u32>,
     input_utxos: &[InputUtxo],
 ) {
+    let can_lookup_spending_tx = matches!(block_explorer_type, BlockExplorerType::Esplora);
     let explorer_client = match block_explorer_rpc {
         Some(url) => Some(explorer_from_url(network, block_explorer_type, url).await),
         None => None,
     };
 
-    recover_close_inner(network, destination, keys, fee_rate, input_utxos, explorer_client).await;
+    recover_close_inner(
+        network,
+        destination,
+        keys,
+        fee_rate,
+        input_utxos,
+        explorer_client,
+        can_lookup_spending_tx,
+    )
+    .await;
 }
 
 pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
     network: Network,
     destination: &str,
     keys: R,
-    _fee_rate: u32,
-    _input_utxos: &[InputUtxo],
+    fee_rate: Option<u32>,
+    input_utxos: &[InputUtxo],
     explorer_client: Option<Box<dyn Explorer>>,
+    can_lookup_spending_tx: bool,
 ) {
     let mut sweeps = Vec::new();
 
     for signer in keys.iter() {
-        info!("# funding {:?}", signer.funding_outpoint());
+        let funding_outpoint = signer.funding_outpoint();
+        info!("# funding {:?}", funding_outpoint);
+
+        let commitment_type = signer.commitment_type();
+        let anchor_fee_rate = match commitment_type {
+            CommitmentType::AnchorsZeroFeeHtlc => {
+                let fee_rate = match fee_rate {
+                    Some(fee_rate) => fee_rate,
+                    None => {
+                        error!(
+                            "cannot recover AnchorsZeroFeeHtlc channel {:?}: missing --fee-rate; provide a fee rate in satoshis per kw so recovery transactions can pay fees",
+                            funding_outpoint
+                        );
+                        continue;
+                    }
+                };
+                if fee_rate == 0 {
+                    error!(
+                        "cannot recover AnchorsZeroFeeHtlc channel {:?}: --fee-rate must be greater than zero sat/kw",
+                        funding_outpoint
+                    );
+                    continue;
+                }
+
+                if input_utxos.is_empty() {
+                    error!(
+                        "cannot recover AnchorsZeroFeeHtlc channel {:?}: missing --input-utxo; provide at least one wallet UTXO as txid:vout:value:derivation_path to pay recovery fees",
+                        funding_outpoint
+                    );
+                    continue;
+                }
+                debug!(
+                    "AnchorsZeroFeeHtlc recovery fee inputs for {:?}: fee_rate={} sat/kw input_utxos={}",
+                    funding_outpoint,
+                    fee_rate,
+                    input_utxos.len()
+                );
+                Some(fee_rate)
+            }
+            CommitmentType::StaticRemoteKey => {
+                info!(
+                    "skipping second-level HTLC broadcasting for StaticRemoteKey channel {:?}; only holder close and delayed-output sweep recovery are supported",
+                    funding_outpoint
+                );
+                None
+            }
+            unsupported => {
+                warn!(
+                    "skipping channel {:?}: recovery supports StaticRemoteKey close/delayed-sweep recovery and AnchorsZeroFeeHtlc second-level HTLC recovery; found unsupported commitment type {:?}",
+                    funding_outpoint, unsupported
+                );
+                continue;
+            }
+        };
 
         let current_commitment_tx = signer
             .get_current_holder_commitment_transaction()
@@ -457,14 +545,16 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
 
         let funding_confirms = if let Some(bitcoind_client) = &explorer_client {
             bitcoind_client
-                .get_utxo_confirmations(&signer.funding_outpoint().into_bitcoin_outpoint())
+                .get_utxo_confirmations(&funding_outpoint.into_bitcoin_outpoint())
                 .await
                 .expect("block explorer must be reachable to verify funding outpoint status")
         } else {
             None
         };
 
-        let spent_htlc_indices = if explorer_client.is_none() || funding_confirms.is_some() {
+        let spent_htlc_indices = if anchor_fee_rate.is_none() {
+            vec![true; current_commitment_tx.htlcs().len()]
+        } else if explorer_client.is_none() || funding_confirms.is_some() {
             vec![false; current_commitment_tx.htlcs().len()]
         } else {
             get_spent_htlc_indices(&explorer_client, &current_commitment_tx)
@@ -474,6 +564,20 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
 
         let (tx, htlc_txs, revocable_script, uck, revocation_pubkey) =
             signer.sign_holder_commitment_tx_for_recovery(&spent_htlc_indices).expect("sign");
+        let htlc_txs = if let Some(fee_rate) = anchor_fee_rate {
+            match add_fee_to_htlc_txs(&keys, htlc_txs, fee_rate, input_utxos, &funding_outpoint) {
+                Ok(htlc_txs) => htlc_txs,
+                Err(e) => {
+                    error!(
+                        "failed to add fees to HTLC recovery transactions for channel {:?}: {}",
+                        funding_outpoint, e
+                    );
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
         let txid = tx.compute_txid();
         debug!("closing tx {:?}", &tx);
         info!("closing txid {}", txid);
@@ -481,7 +585,52 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
             if let Some(confirms) = funding_confirms {
                 info!("channel is open ({} confirms), broadcasting force-close {}", confirms, txid);
                 bitcoind_client.broadcast_transaction(&tx).await.expect("failed to broadcast");
+                broadcast_htlc_txs(bitcoind_client.as_ref(), &htlc_txs, &funding_outpoint).await;
             } else {
+                if anchor_fee_rate.is_some() && !can_lookup_spending_tx {
+                    error!(
+                        "cannot determine who closed channel {:?}: bitcoind recovery backend does not support funding outpoint spender lookup; use --recover-type esplora with an Esplora --recover-rpc to recover already-closed channels",
+                        funding_outpoint
+                    );
+                    continue;
+                }
+
+                if anchor_fee_rate.is_some() {
+                    let spending_tx = match bitcoind_client
+                        .get_utxo_spending_tx(&funding_outpoint.into_bitcoin_outpoint())
+                        .await
+                    {
+                        Ok(spending_tx) => spending_tx,
+                        Err(e) => {
+                            warn!(
+                                "skipping channel {:?}: failed to determine who closed channel (expected closing tx {}): {}",
+                                funding_outpoint, txid, e
+                            );
+                            continue;
+                        }
+                    };
+
+                    match spending_tx {
+                        Some(ref stx) => {
+                            let spending_txid = stx.compute_txid();
+                            if spending_txid != txid {
+                                warn!(
+                                    "skipping channel {:?}: closing tx was spent by counterparty (expected {}, found {}); counterparty-initiated close recovery is not supported",
+                                    funding_outpoint, txid, spending_txid
+                                );
+                                continue;
+                            }
+                        }
+                        None => {
+                            warn!(
+                                "skipping channel {:?}: funding outpoint is unavailable, but no spending transaction was found (expected closing tx {}); cannot confirm holder-initiated close recovery",
+                                funding_outpoint, txid
+                            );
+                            continue;
+                        }
+                    }
+                }
+                broadcast_htlc_txs(bitcoind_client.as_ref(), &htlc_txs, &funding_outpoint).await;
                 let required_confirms = signer.counterparty_selected_contest_delay();
                 info!(
                     "channel is already closed, check outputs, waiting until {} confirms",
@@ -768,6 +917,14 @@ mod tests {
                 state,
             }
         }
+
+        fn with_current_commitment_tx(
+            mut self,
+            current_commitment_tx: CommitmentTransaction,
+        ) -> Self {
+            self.current_commitment_tx = current_commitment_tx;
+            self
+        }
     }
 
     impl RecoverySign for TestRecoverySigner {
@@ -1047,5 +1204,336 @@ mod tests {
         assert!(err.message().contains("no usable fee UTXO available"));
         assert!(err.message().contains("cannot pay fee rate 1000"));
         assert!(state.lock().unwrap().wallet_signs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_spent_htlc_indices_without_explorer_assumes_unspent() {
+        let commitment_tx = make_commitment_tx(vec![make_htlc_output(1), make_htlc_output(2)]);
+        let explorer_client: Option<Box<dyn Explorer>> = None;
+
+        let spent = get_spent_htlc_indices(&explorer_client, &commitment_tx).await.unwrap();
+
+        assert_eq!(spent, vec![false, false]);
+    }
+
+    #[tokio::test]
+    async fn get_spent_htlc_indices_marks_missing_outputs_spent() {
+        let commitment_tx =
+            make_commitment_tx(vec![make_htlc_output(1), make_htlc_output(2), make_htlc_output(3)]);
+        let commitment_txid = commitment_tx.trust().built_transaction().transaction.compute_txid();
+        let mock = MockExplorer::default();
+
+        for (idx, htlc) in commitment_tx.htlcs().iter().enumerate() {
+            let outpoint = bitcoin::OutPoint {
+                txid: commitment_txid,
+                vout: htlc.transaction_output_index.unwrap(),
+            };
+            mock.set_confirms(outpoint, if idx == 0 || idx == 2 { None } else { Some(1) });
+        }
+
+        let explorer_client: Option<Box<dyn Explorer>> = Some(Box::new(mock));
+        let spent = get_spent_htlc_indices(&explorer_client, &commitment_tx).await.unwrap();
+
+        assert_eq!(spent, vec![true, false, true]);
+    }
+
+    #[tokio::test]
+    async fn recover_close_inner_open_anchor_channel_broadcasts_close_and_htlc_txs() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let signer = TestRecoverySigner::new(
+            CommitmentType::AnchorsZeroFeeHtlc,
+            vec![make_htlc_tx(10_000)],
+            state.clone(),
+        );
+        let keys = TestRecoveryKeys::new(vec![signer], state);
+        let input_utxos = vec![make_fee_utxo(60_000)];
+        let mock = MockExplorer::default();
+        mock.set_confirms(funding_bitcoin_outpoint(), Some(3));
+
+        recover_close_inner(
+            Network::Regtest,
+            "none",
+            keys,
+            Some(1000),
+            &input_utxos,
+            Some(Box::new(mock.clone())),
+            false,
+        )
+        .await;
+
+        let broadcasts = mock.broadcasts();
+        assert_eq!(broadcasts.len(), 2);
+        assert!(broadcasts[0]
+            .input
+            .iter()
+            .any(|input| { input.previous_output == funding_bitcoin_outpoint() }));
+        assert!(broadcasts[1]
+            .input
+            .iter()
+            .any(|input| input.previous_output == input_utxos[0].outpoint));
+    }
+
+    #[tokio::test]
+    async fn recover_close_inner_open_static_channel_broadcasts_close_only() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let signer = TestRecoverySigner::new(
+            CommitmentType::StaticRemoteKey,
+            vec![make_htlc_tx(10_000)],
+            state.clone(),
+        )
+        .with_current_commitment_tx(make_commitment_tx(vec![
+            make_htlc_output(1),
+            make_htlc_output(2),
+        ]));
+        let keys = TestRecoveryKeys::new(vec![signer], state.clone());
+        let mock = MockExplorer::default();
+        mock.set_confirms(funding_bitcoin_outpoint(), Some(3));
+
+        recover_close_inner(
+            Network::Regtest,
+            "none",
+            keys,
+            None,
+            &[],
+            Some(Box::new(mock.clone())),
+            false,
+        )
+        .await;
+
+        let broadcasts = mock.broadcasts();
+        assert_eq!(broadcasts.len(), 1);
+        assert!(broadcasts[0]
+            .input
+            .iter()
+            .any(|input| { input.previous_output == funding_bitcoin_outpoint() }));
+
+        let state = state.lock().unwrap();
+        assert_eq!(state.spent_htlc_indices, vec![vec![true, true]]);
+        assert!(state.wallet_signs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_close_inner_closed_static_channel_does_not_require_spender_lookup() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let signer = TestRecoverySigner::new(
+            CommitmentType::StaticRemoteKey,
+            vec![make_htlc_tx(10_000)],
+            state.clone(),
+        )
+        .with_current_commitment_tx(make_commitment_tx(vec![
+            make_htlc_output(1),
+            make_htlc_output(2),
+        ]));
+        let keys = TestRecoveryKeys::new(vec![signer], state.clone());
+        let mock = MockExplorer::default();
+        mock.set_confirms(funding_bitcoin_outpoint(), None);
+
+        recover_close_inner(
+            Network::Regtest,
+            "none",
+            keys,
+            None,
+            &[],
+            Some(Box::new(mock.clone())),
+            false,
+        )
+        .await;
+
+        assert!(mock.broadcasts().is_empty());
+
+        let state = state.lock().unwrap();
+        assert_eq!(state.spent_htlc_indices, vec![vec![true, true]]);
+        assert!(state.wallet_signs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_close_inner_already_closed_rebroadcasts_anchor_htlc_txs_for_holder_close() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let signer = TestRecoverySigner::new(
+            CommitmentType::AnchorsZeroFeeHtlc,
+            vec![make_htlc_tx(10_000)],
+            state.clone(),
+        );
+        let keys = TestRecoveryKeys::new(vec![signer], state);
+        let input_utxos = vec![make_fee_utxo(60_000)];
+        let mock = MockExplorer::default();
+        mock.set_confirms(funding_bitcoin_outpoint(), None);
+        mock.set_spending_tx(funding_bitcoin_outpoint(), Some(make_recovery_tx()));
+
+        recover_close_inner(
+            Network::Regtest,
+            "none",
+            keys,
+            Some(1000),
+            &input_utxos,
+            Some(Box::new(mock.clone())),
+            true,
+        )
+        .await;
+
+        let broadcasts = mock.broadcasts();
+        assert_eq!(broadcasts.len(), 1);
+        assert!(broadcasts[0]
+            .input
+            .iter()
+            .any(|input| input.previous_output == input_utxos[0].outpoint));
+        assert!(!broadcasts[0]
+            .input
+            .iter()
+            .any(|input| input.previous_output == funding_bitcoin_outpoint()));
+    }
+
+    #[tokio::test]
+    async fn recover_close_inner_closed_anchor_skips_when_spender_lookup_fails() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let signer = TestRecoverySigner::new(
+            CommitmentType::AnchorsZeroFeeHtlc,
+            vec![make_htlc_tx(10_000)],
+            state.clone(),
+        );
+        let keys = TestRecoveryKeys::new(vec![signer], state);
+        let input_utxos = vec![make_fee_utxo(60_000)];
+        let mock = MockExplorer::default();
+        mock.set_confirms(funding_bitcoin_outpoint(), None);
+        mock.set_spending_tx_error(funding_bitcoin_outpoint(), "lookup failed");
+
+        recover_close_inner(
+            Network::Regtest,
+            "none",
+            keys,
+            Some(1000),
+            &input_utxos,
+            Some(Box::new(mock.clone())),
+            true,
+        )
+        .await;
+
+        assert!(mock.broadcasts().is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_close_inner_closed_anchor_skips_without_spending_tx() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let signer = TestRecoverySigner::new(
+            CommitmentType::AnchorsZeroFeeHtlc,
+            vec![make_htlc_tx(10_000)],
+            state.clone(),
+        );
+        let keys = TestRecoveryKeys::new(vec![signer], state);
+        let input_utxos = vec![make_fee_utxo(60_000)];
+        let mock = MockExplorer::default();
+        mock.set_confirms(funding_bitcoin_outpoint(), None);
+
+        recover_close_inner(
+            Network::Regtest,
+            "none",
+            keys,
+            Some(1000),
+            &input_utxos,
+            Some(Box::new(mock.clone())),
+            true,
+        )
+        .await;
+
+        assert!(mock.broadcasts().is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_close_skips_unsupported_or_anchor_channels_without_required_fee_inputs() {
+        let cases = vec![
+            (
+                "unsupported commitment type",
+                CommitmentType::Anchors,
+                Some(1000),
+                vec![make_fee_utxo(60_000)],
+            ),
+            (
+                "missing fee rate",
+                CommitmentType::AnchorsZeroFeeHtlc,
+                None,
+                vec![make_fee_utxo(60_000)],
+            ),
+            (
+                "zero fee rate",
+                CommitmentType::AnchorsZeroFeeHtlc,
+                Some(0),
+                vec![make_fee_utxo(60_000)],
+            ),
+            ("missing fee input", CommitmentType::AnchorsZeroFeeHtlc, Some(1000), Vec::new()),
+        ];
+
+        for (case, commitment_type, fee_rate, input_utxos) in cases {
+            let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+            let signer = TestRecoverySigner::new(commitment_type, Vec::new(), state.clone());
+            let keys = TestRecoveryKeys::new(vec![signer], state.clone());
+
+            recover_close(
+                Network::Regtest,
+                BlockExplorerType::Bitcoind,
+                None,
+                "none",
+                keys,
+                fee_rate,
+                &input_utxos,
+            )
+            .await;
+
+            let state = state.lock().unwrap();
+            assert!(state.spent_htlc_indices.is_empty(), "case: {}", case);
+            assert!(state.wallet_signs.is_empty(), "case: {}", case);
+        }
+    }
+
+    #[tokio::test]
+    async fn recover_close_dry_run_signs_and_funds_anchor_htlc_txs() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let signer = TestRecoverySigner::new(
+            CommitmentType::AnchorsZeroFeeHtlc,
+            vec![make_htlc_tx(10_000)],
+            state.clone(),
+        );
+        let keys = TestRecoveryKeys::new(vec![signer], state.clone());
+        let input_utxos = vec![make_fee_utxo(60_000)];
+
+        recover_close(
+            Network::Regtest,
+            BlockExplorerType::Bitcoind,
+            None,
+            "none",
+            keys,
+            Some(1000),
+            &input_utxos,
+        )
+        .await;
+
+        let state = state.lock().unwrap();
+        assert_eq!(state.spent_htlc_indices, vec![Vec::<bool>::new()]);
+        assert_eq!(state.wallet_signs.len(), 1);
+        assert_eq!(state.wallet_signs[0].input_index, 1);
+        assert_eq!(state.wallet_signs[0].input_utxo, input_utxos[0]);
+        assert_eq!(state.wallet_signs[0].tx.input.len(), 2);
+        assert_eq!(state.wallet_signs[0].tx.input[1].previous_output, input_utxos[0].outpoint);
+    }
+
+    #[tokio::test]
+    async fn recover_close_dry_run_static_signs_without_fee_inputs() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let signer = TestRecoverySigner::new(
+            CommitmentType::StaticRemoteKey,
+            vec![make_htlc_tx(10_000)],
+            state.clone(),
+        )
+        .with_current_commitment_tx(make_commitment_tx(vec![
+            make_htlc_output(1),
+            make_htlc_output(2),
+        ]));
+        let keys = TestRecoveryKeys::new(vec![signer], state.clone());
+
+        recover_close(Network::Regtest, BlockExplorerType::Bitcoind, None, "none", keys, None, &[])
+            .await;
+
+        let state = state.lock().unwrap();
+        assert_eq!(state.spent_htlc_indices, vec![vec![true, true]]);
+        assert!(state.wallet_signs.is_empty());
     }
 }
