@@ -37,8 +37,9 @@ use crate::util::debug_utils::{
     DebugVecVecU8,
 };
 use crate::util::transaction_utils::{
-    estimate_feerate_per_kw, expected_commitment_tx_weight, is_tx_non_malleable,
-    mutual_close_tx_weight, MIN_CHAN_DUST_LIMIT_SATOSHIS, MIN_DUST_LIMIT_SATOSHIS,
+    estimate_feerate_per_kw, estimated_sweep_tx_weight, expected_commitment_tx_weight,
+    is_tx_non_malleable, mutual_close_tx_weight, MIN_CHAN_DUST_LIMIT_SATOSHIS,
+    MIN_DUST_LIMIT_SATOSHIS,
 };
 use crate::util::velocity::VelocityControlSpec;
 use crate::wallet::Wallet;
@@ -360,19 +361,27 @@ impl SimpleValidator {
         wallet: &dyn Wallet,
         tx: &Transaction,
         _input: usize,
-        _amount_sat: u64,
+        amount_sat: u64,
         wallet_path: &DerivationPath,
     ) -> Result<(), ValidationError> {
         if tx.version != Version::TWO {
             transaction_format_err!(self, "policy-sweep-version", "bad version: {}", tx.version);
         }
 
-        // LDK now provides multi-input txs, and we can't easily validate fees securely
-        // TODO(522) Since we see the tx on-chain, we should just get the input amount from there
-
-        // // policy-sweep-fee-range
-        // self.validate_fee(amount_sat, tx.output[0].value.to_sat())
-        //     .map_err(|ve| ve.prepend_msg(format!("{}: ", containing_function!())))?;
+        // policy-sweep-fee-range
+        // For multi-input txs we only know one input's value, so fee can't be computed.
+        // TODO(522) resolve multi-input case by looking up input amounts from chain data.
+        if tx.input.len() == 1 {
+            let sum_outputs: u64 = tx.output.iter().map(|o| o.value.to_sat()).sum();
+            let weight = estimated_sweep_tx_weight(tx);
+            self.validate_fee("policy-sweep-fee-range", amount_sat, sum_outputs, weight)
+                .map_err(|ve| ve.prepend_msg(format!("{}: ", containing_function!())))?;
+        } else {
+            warn!(
+                "policy-sweep-fee-range: skipping fee validation for multi-input sweep tx ({} inputs)",
+                tx.input.len()
+            );
+        }
 
         for out in tx.output.iter() {
             let dest_script = &out.script_pubkey;
