@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use crate::util::crypto_utils::{hkdf_sha256, sighash_from_heartbeat};
+use crate::util::crypto_utils::hkdf_sha256;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use bitcoin::bip32::{ChildNumber, Xpriv, Xpub};
@@ -500,9 +500,8 @@ impl MyKeysManager {
     }
 
     /// Sign a heartbeat object
-    pub fn sign_heartbeat(&self, ser_heartbeat: &[u8]) -> schnorr::Signature {
+    pub fn sign_heartbeat(&self, msg: Message) -> schnorr::Signature {
         let kp = Keypair::from_secret_key(&self.secp_ctx, &self.account_extended_key.private_key);
-        let msg = sighash_from_heartbeat(ser_heartbeat);
         self.secp_ctx.sign_schnorr_no_aux_rand(&msg, &kp)
     }
 }

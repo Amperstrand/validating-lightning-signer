@@ -20,7 +20,6 @@ use lightning_signer::chain::tracker::ChainTracker;
 use lightning_signer::node::{Heartbeat, SignedHeartbeat};
 use lightning_signer::policy::simple_validator::SimpleValidatorFactory;
 use lightning_signer::txoo::proof::TxoProof;
-use lightning_signer::util::crypto_utils::sighash_from_heartbeat;
 use lightning_signer::util::test_utils::MockListener;
 use log::*;
 use serde_json::{json, Value};
@@ -132,8 +131,7 @@ impl SignerPort for DummySignerPort {
                     current_timestamp: 0,
                 };
                 let kp = Keypair::from_secret_key(&self.secp, &self.xpriv.private_key);
-                let ser_heartbeat = heartbeat.encode();
-                let msg = sighash_from_heartbeat(&ser_heartbeat);
+                let msg = heartbeat.sighash();
                 let sig = self.secp.sign_schnorr_no_aux_rand(&msg, &kp);
                 let signed_heartbeat = SignedHeartbeat { signature: sig[..].to_vec(), heartbeat };
 

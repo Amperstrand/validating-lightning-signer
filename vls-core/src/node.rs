@@ -10,7 +10,7 @@ use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
 use bitcoin::consensus::{Decodable, Encodable};
 use bitcoin::hashes::sha256::Hash as Sha256Hash;
 use bitcoin::hashes::sha256d::Hash as Sha256dHash;
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::{Hash, HashEngine};
 use bitcoin::key::UntweakedPublicKey;
 use bitcoin::key::XOnlyPublicKey;
 use bitcoin::secp256k1::ecdh::SharedSecret;
@@ -35,11 +35,11 @@ use lightning::util::logger::Logger;
 use lightning::util::ser::Writeable;
 use lightning_invoice::{RawBolt11Invoice, SignedRawBolt11Invoice};
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Bytes, IfIsHumanReadable};
 
 #[allow(unused_imports)]
 use log::*;
-use serde_bolt::to_vec;
+
+use serde_with::{serde_as, Bytes, IfIsHumanReadable};
 
 use crate::chain::tracker::ChainTracker;
 use crate::chain::tracker::Headers;
@@ -64,8 +64,7 @@ use crate::tx::tx::{CommitmentInfo2, PreimageMap};
 use crate::txoo::get_latest_checkpoint;
 use crate::util::clock::Clock;
 use crate::util::crypto_utils::{
-    ecdsa_sign, schnorr_signature_to_bitcoin_vec, sighash_from_heartbeat, signature_to_bitcoin_vec,
-    taproot_sign,
+    ecdsa_sign, schnorr_signature_to_bitcoin_vec, signature_to_bitcoin_vec, taproot_sign,
 };
 use crate::util::debug_utils::{
     DebugBytes, DebugMapPaymentState, DebugMapPaymentSummary, DebugMapRoutedPayment,
@@ -1001,9 +1000,17 @@ pub struct Heartbeat {
 }
 
 impl Heartbeat {
-    /// Serialize with serde_bolt
-    pub fn encode(&self) -> Vec<u8> {
-        to_vec(&self).expect("serialize Heartbeat")
+    /// Compute heartbeat hash
+    pub fn sighash(&self) -> Message {
+        let mut sha = Sha256Hash::engine();
+        sha.input(b"vls");
+        sha.input(b"heartbeat");
+        sha.input(self.chain_tip.as_byte_array());
+        sha.input(&self.chain_height.to_be_bytes());
+        sha.input(&self.chain_timestamp.to_be_bytes());
+        sha.input(&self.current_timestamp.to_be_bytes());
+        let hash = Sha256Hash::from_engine(sha);
+        Message::from_digest(hash.to_byte_array())
     }
 }
 
@@ -1028,7 +1035,7 @@ impl Debug for SignedHeartbeat {
 impl SignedHeartbeat {
     /// Get the hash of the heartbeat for signing
     pub fn sighash(&self) -> Message {
-        sighash_from_heartbeat(&self.heartbeat.encode())
+        self.heartbeat.sighash()
     }
 
     /// Verify the heartbeat signature
@@ -2005,8 +2012,7 @@ impl Node {
             chain_timestamp: tip.0.time,
             current_timestamp,
         };
-        let ser_heartbeat = heartbeat.encode();
-        let sig = self.keys_manager.sign_heartbeat(&ser_heartbeat);
+        let sig = self.keys_manager.sign_heartbeat(heartbeat.sighash());
         SignedHeartbeat { signature: sig[..].to_vec(), heartbeat }
     }
 
@@ -3096,6 +3102,7 @@ mod tests {
     use lightning::ln::channel_keys::{DelayedPaymentKey, RevocationKey};
     use lightning_invoice::PaymentSecret;
     use lightning_invoice::{Currency, InvoiceBuilder};
+    use serde_bolt::to_vec;
     use std::time::{SystemTime, UNIX_EPOCH};
     use test_log::test;
     use vls_common::to_derivation_path;
@@ -4540,6 +4547,20 @@ mod tests {
         let heartbeat = node.get_heartbeat();
         let secp = Secp256k1::new();
         assert!(heartbeat.verify(&node.get_account_extended_pubkey().public_key, &secp));
+    }
+
+    #[test]
+    fn heartbeat_sighash_test() {
+        let heartbeat = Heartbeat {
+            chain_tip: BlockHash::from_byte_array([0x11; 32]),
+            chain_height: 0x12345678,
+            chain_timestamp: 0x9abcdef0,
+            current_timestamp: 0xcafebabe,
+        };
+        assert_eq!(
+            hex::encode(heartbeat.sighash().as_ref()),
+            "bd57eb2bd6eabc85ac72c04e27163db9c9ee0282a8dfab8fc1fa8c84dcf7756e"
+        );
     }
 
     #[test]
