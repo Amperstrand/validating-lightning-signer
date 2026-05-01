@@ -110,16 +110,6 @@ pub fn generate_seed() -> [u8; 32] {
     unimplemented!("no RNG available in no_std environments yet");
 }
 
-/// Hash the serialized heartbeat message for signing
-pub fn sighash_from_heartbeat(ser_heartbeat: &[u8]) -> Message {
-    let mut sha = BitcoinSha256::engine();
-    sha.input("vls".as_bytes());
-    sha.input("heartbeat".as_bytes());
-    sha.input(ser_heartbeat);
-    let hash = BitcoinSha256::from_engine(sha);
-    Message::from_digest(hash.to_byte_array())
-}
-
 pub(crate) fn ecdsa_sign(
     secp_ctx: &Secp256k1<secp256k1::All>,
     privkey: &PrivateKey,
@@ -301,17 +291,6 @@ mod tests {
             let result = std::panic::catch_unwind(|| generate_seed());
             assert!(result.is_err());
         }
-    }
-
-    #[test]
-    fn test_sighash_from_heartbeat() {
-        let ser_heartbeat = [1, 2, 3];
-        let result = sighash_from_heartbeat(&ser_heartbeat);
-        let expected_hash = BitcoinSha256::hash(
-            &["vls".as_bytes(), "heartbeat".as_bytes(), &ser_heartbeat].concat(),
-        );
-        let expected = Message::from_digest(expected_hash.to_byte_array());
-        assert_eq!(result, expected);
     }
 
     #[test]
