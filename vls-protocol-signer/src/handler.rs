@@ -937,9 +937,6 @@ impl Handler for RootHandler {
                 };
                 Ok(Box::new(node_info))
             }
-            Message::Unknown(u) => {
-                unimplemented!("loop {}: unknown message type {}", self.id, u.message_type)
-            }
             Message::SignNodeAnnouncement(m) => {
                 let message = m.announcement[64 + 2..].to_vec();
                 let sig = self.node.sign_node_announcement(&message)?;
@@ -1634,9 +1631,6 @@ impl Handler for ChannelHandler {
                     node_signature,
                     bitcoin_signature,
                 }))
-            }
-            Message::Unknown(u) => {
-                unimplemented!("cloop {}: unknown message type {}", self.id, u.message_type)
             }
             m => unimplemented!("cloop {}: unimplemented message {:?}", self.id, m),
         }

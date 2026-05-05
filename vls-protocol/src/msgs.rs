@@ -1321,6 +1321,13 @@ pub fn from_reader<R: Read>(reader: &mut R, len: u32) -> Result<Message> {
 
     let message_type = take.read_u16_be()?;
     let message = Message::read_message(&mut take, message_type)?;
+    // For unrecognized message types, `read_message` returns `Message::Unknown`
+    // without consuming the body; surface this as an explicit error so that
+    // callers/logs can clearly see "UNHANDLED MESSAGE #<type>" rather than
+    // a misleading trailing-bytes decode failure.
+    if let Message::Unknown(_) = message {
+        return Err(Error::UnknownMessageType(message_type, take.remaining() as usize));
+    }
     if !take.is_empty() {
         return Err(Error::TrailingBytes(take.remaining() as usize, message_type));
     }
@@ -1609,6 +1616,20 @@ mod tests {
         let mut cursor = Cursor::new(buf.clone());
         let result: Result<SignInvoiceReply> = read_message(&mut cursor);
         assert!(matches!(result, Err(Error::UnexpectedType(102))));
+
+        // Unknown / unhandled message type: length-framed with type 0xFFFF and 3 body bytes.
+        // Should produce UnknownMessageType (not TrailingBytes), and Display should
+        // contain "UNHANDLED MESSAGE #65535".
+        let mut unknown_buf: Vec<u8> = Vec::new();
+        let body_len: u32 = 2 + 3; // type + 3 body bytes
+        unknown_buf.extend_from_slice(&body_len.to_be_bytes());
+        unknown_buf.extend_from_slice(&0xFFFFu16.to_be_bytes());
+        unknown_buf.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+        let mut cursor = Cursor::new(unknown_buf);
+        let err = read(&mut cursor).err().expect("expected error");
+        assert!(matches!(err, Error::UnknownMessageType(0xFFFF, 3)));
+        let rendered = format!("{}", err);
+        assert!(rendered.contains("UNHANDLED MESSAGE #65535"), "unexpected display: {}", rendered);
     }
 
     #[derive(SerBolt, Debug, Encodable, Decodable)]
