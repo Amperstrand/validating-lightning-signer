@@ -15,6 +15,8 @@ use lightning_signer::bitcoin::script::PushBytesBuf;
 use lightning_signer::bitcoin::ScriptBuf;
 use lightning_signer::lightning::ln::channel_keys::RevocationKey;
 use lightning_signer::lightning_invoice::RawBolt11Invoice;
+use lightning_signer::persist::model::ChannelEntry;
+use lightning_signer::util::status::invalid_argument;
 use vls_common::to_derivation_path;
 use vls_protocol::msgs::SignBolt12V2Reply;
 use vls_protocol::psbt::PsbtWrapper;
@@ -42,7 +44,7 @@ use lightning_signer::invoice::Invoice;
 use lightning_signer::lightning::ln::chan_utils::ChannelPublicKeys;
 use lightning_signer::lightning::types::payment::PaymentHash;
 use lightning_signer::node::{Node, NodeConfig, NodeMonitor, NodeServices};
-use lightning_signer::persist::{Mutations, Persist};
+use lightning_signer::persist::{Error as PersistError, Mutations, Persist};
 use lightning_signer::prelude::Arc;
 use lightning_signer::signer::my_keys_manager::MyKeysManager;
 use lightning_signer::tx::tx::HTLCInfo2;
@@ -1074,6 +1076,61 @@ impl Handler for RootHandler {
                     ))?
                 }
             }
+            Message::CheckChannelStateSync(m) => {
+                let node_channel_entry_json = core::str::from_utf8(&m.node_channel_entry_json.0)
+                    .map_err(|e| {
+                        invalid_argument(format!(
+                            "Unable to decode channel state as UTF-8: {:?}",
+                            e
+                        ))
+                    })?;
+                let node_channel_entry: ChannelEntry =
+                    serde_json::from_str(node_channel_entry_json).map_err(|e| {
+                        invalid_argument(format!(
+                            "Unable to parse channel state in message {:?}",
+                            e
+                        ))
+                    })?;
+                if node_channel_entry.id.is_none() {
+                    return Err(Status::invalid_argument("channel id missing from JSON object"))?;
+                }
+
+                let channel_id = node_channel_entry.id.as_ref().unwrap();
+                let signer_channel_entry: ChannelEntry =
+                    match self.node.get_persister().get_channel(&self.node.get_id(), channel_id) {
+                        Ok(entry) => entry.into(),
+                        Err(PersistError::NotFound(_)) => {
+                            return Err(Status::invalid_argument(format!(
+                                "channel with id {} not found in persister",
+                                channel_id
+                            ))
+                            .into());
+                        }
+                        Err(e) => {
+                            return Err(Status::internal(format!(
+                                "unable to load channel {} from persister: {}",
+                                channel_id, e
+                            ))
+                            .into());
+                        }
+                    };
+
+                if signer_channel_entry.eq(&node_channel_entry) {
+                    return Ok(Box::new(msgs::CheckChannelStateSyncReply {
+                        state_matches: true,
+                        signer_channel_entry_json: None,
+                    }));
+                }
+
+                Ok(Box::new(msgs::CheckChannelStateSyncReply {
+                    state_matches: false,
+                    signer_channel_entry_json: Some(WireString(
+                        serde_json::to_string(&signer_channel_entry)
+                            .expect("ChannelEntry is serializable")
+                            .into_bytes(),
+                    )),
+                }))
+            }
             m => unimplemented!("loop {}: unimplemented message {:?}", self.id, m),
         }
     }
@@ -1785,8 +1842,23 @@ fn extract_htlcs(htlcs: &[Htlc]) -> (Vec<HTLCInfo2>, Vec<HTLCInfo2>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::SignerTestHarnessBuilder;
-    use lightning_signer::channel::CommitmentType;
+    use crate::test_utils::{channel_entry_with_id, SignerTestHarnessBuilder};
+    use lightning_signer::channel::{ChannelId, CommitmentType};
+    use lightning_signer::policy::validator::EnforcementState;
+    use lightning_signer::util::status::{Code, Status};
+
+    #[test]
+    fn ping_returns_pong() {
+        let harness = SignerTestHarnessBuilder::new().with_network(Network::Regtest).build();
+        let handler = harness.root_handler();
+
+        let reply = handler
+            .handle(Message::Ping(msgs::Ping { id: 7, message: WireString(b"ping".to_vec()) }))
+            .expect("ping reply");
+        let pong = reply.as_any().downcast_ref::<msgs::Pong>().expect("expected Pong reply");
+        assert_eq!(pong.id, 7);
+        assert_eq!(pong.message.0, b"pong");
+    }
 
     #[test]
     #[cfg(feature = "std")]
@@ -1856,5 +1928,121 @@ mod tests {
     #[should_panic]
     fn test_channel_type_to_commitment_type_panic() {
         channel_type_to_commitment_type(&vec![0x10_u8, 0x00_u8, 0x00_u8]);
+    }
+
+    fn status_from(err: super::Error) -> Status {
+        match err {
+            super::Error::Signing(status) | super::Error::Temporary(status) => status,
+            super::Error::Protocol(e) => panic!("unexpected protocol error: {:?}", e),
+        }
+    }
+
+    fn channel_id() -> ChannelId {
+        ChannelId::new(&[3u8; 32])
+    }
+
+    fn make_entry(channel_id: &ChannelId, value_sat: u64) -> ChannelEntry {
+        let mut entry = channel_entry_with_id(channel_id.clone());
+        entry.channel_value_satoshis = value_sat;
+        entry.enforcement_state = EnforcementState::new(42);
+        entry.blockheight = Some(123);
+        entry
+    }
+
+    #[test]
+    fn malformed_payload_returns_invalid_argument() {
+        let harness = SignerTestHarnessBuilder::new().build();
+        let handler = harness.root_handler();
+
+        let err = handler
+            .handle(Message::CheckChannelStateSync(msgs::CheckChannelStateSync {
+                node_channel_entry_json: WireString(b"not-json".to_vec()),
+            }))
+            .unwrap_err();
+
+        let status = status_from(err);
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert!(status.message().contains("Unable to parse channel state"));
+    }
+
+    #[test]
+    fn invalid_utf8_payload_returns_invalid_argument() {
+        let harness = SignerTestHarnessBuilder::new().build();
+        let handler = harness.root_handler();
+
+        let err = handler
+            .handle(Message::CheckChannelStateSync(msgs::CheckChannelStateSync {
+                node_channel_entry_json: WireString(vec![0xff]),
+            }))
+            .unwrap_err();
+
+        let status = status_from(err);
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert!(status.message().contains("UTF-8"));
+    }
+
+    #[test]
+    fn missing_channel_returns_invalid_argument() {
+        let harness = SignerTestHarnessBuilder::new().build();
+        let handler = harness.root_handler();
+        let channel_id = channel_id();
+        let entry = make_entry(&channel_id, 10);
+        let payload = serde_json::to_string(&entry).unwrap();
+
+        let err = handler
+            .handle(Message::CheckChannelStateSync(msgs::CheckChannelStateSync {
+                node_channel_entry_json: WireString(payload.into_bytes()),
+            }))
+            .unwrap_err();
+
+        let status = status_from(err);
+        assert_eq!(status.code(), Code::InvalidArgument);
+        assert!(status.message().contains(&channel_id.to_string()));
+    }
+
+    #[test]
+    fn mismatch_returns_signer_state() {
+        let harness = SignerTestHarnessBuilder::new().build();
+        let handler = harness.root_handler();
+        let node_id = handler.node().get_id();
+        let channel_id = channel_id();
+        let mut signer_entry = make_entry(&channel_id, 77);
+        signer_entry.enforcement_state = EnforcementState::new(7);
+        let mismatched_entry = make_entry(&channel_id, 33);
+        harness.seed_channel_entry(&node_id, &signer_entry).unwrap();
+        let payload = serde_json::to_string(&mismatched_entry).unwrap();
+
+        let reply = handler
+            .handle(Message::CheckChannelStateSync(msgs::CheckChannelStateSync {
+                node_channel_entry_json: WireString(payload.into_bytes()),
+            }))
+            .unwrap();
+
+        let reply = reply.as_any().downcast_ref::<msgs::CheckChannelStateSyncReply>().unwrap();
+        assert!(!reply.state_matches);
+        let persisted = reply.signer_channel_entry_json.as_ref().unwrap();
+        let parsed: ChannelEntry = serde_json::from_slice(&persisted.0).unwrap();
+        assert_eq!(parsed, signer_entry);
+    }
+
+    #[test]
+    fn synchronized_returns_none() {
+        let harness = SignerTestHarnessBuilder::new().build();
+        let handler = harness.root_handler();
+        let node_id = handler.node().get_id();
+        let channel_id = channel_id();
+        let entry = make_entry(&channel_id, 99);
+        let payload = serde_json::to_string(&entry).unwrap();
+        harness.seed_channel_entry(&node_id, &entry.into()).unwrap();
+
+        let reply = handler
+            .handle(Message::CheckChannelStateSync(msgs::CheckChannelStateSync {
+                node_channel_entry_json: WireString(payload.into_bytes()),
+            }))
+            .unwrap();
+
+        let reply = reply.as_any().downcast_ref::<msgs::CheckChannelStateSyncReply>().unwrap();
+        assert!(reply.state_matches);
+        assert!(reply.signer_channel_entry_json.is_none());
     }
 }

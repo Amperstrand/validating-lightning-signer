@@ -15,14 +15,19 @@ pub struct NodeEntry {
     pub state: NodeState,
 }
 
-/// A persistence layer entry for a channel
-#[allow(missing_docs)]
-#[derive(Debug, Serialize, Deserialize)]
+/// Persistent state for a channel.
+///
+/// Contains channel configuration, current enforcement state, and metadata.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct ChannelEntry {
+    /// Channel capacity in satoshis
     pub channel_value_satoshis: u64,
+    /// Channel setup configuration (funding, keys, scripts)
     pub channel_setup: Option<ChannelSetup>,
-    // Permanent channel ID if different from the initial channel ID
+    /// Permanent channel ID (if different from initial ID)
     pub id: Option<ChannelId>,
+    /// Enforcement and validation state for the channel
     pub enforcement_state: EnforcementState,
+    /// Birth blockheight for stub channels, None for regular channels
     pub blockheight: Option<u32>,
 }

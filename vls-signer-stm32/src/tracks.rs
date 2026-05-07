@@ -224,6 +224,8 @@ fn track_char(msg: &Message) -> char {
         Message::GetSecureRandomBytes(_m) => 'r',
         Message::Unknown(_m) => ' ',
 
+        Message::CheckChannelStateSync(m) => 's',
+
         // we shouldn't see any of these
         Message::Pong(_)
         | Message::HsmdDevPreinitReply(_)
@@ -274,7 +276,8 @@ fn track_char(msg: &Message) -> char {
         | Message::GetHeartbeatReply(_)
         | Message::SignGossipMessage(_)
         | Message::SignGossipMessageReply(_)
-        | Message::GetSecureRandomBytesReply(_) => {
+        | Message::GetSecureRandomBytesReply(_)
+        | Message::CheckChannelStateSyncReply(_) => {
             panic!("{:?} invalid in this context", msg);
         }
     }

@@ -12,6 +12,7 @@ use bitcoin::{Address, Amount, Network, ScriptBuf};
 use bitcoin::{Script, TxOut};
 use lightning::sign::{ChannelSigner, InMemorySigner};
 use lightning::types::payment::PaymentHash;
+
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, Bytes, IfIsHumanReadable};
 
@@ -56,15 +57,17 @@ impl fmt::Debug for HTLCInfo {
 #[serde(remote = "PaymentHash")]
 pub struct PaymentHashDef(#[serde_as(as = "IfIsHumanReadable<_, Bytes>")] pub [u8; 32]);
 
-/// Phase 2 HTLC info
+/// HTLC information (Phase 2).
+///
+/// Represents a single HTLC with full payment details including CLTV expiry.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HTLCInfo2 {
-    /// The value in satoshi
+    /// HTLC value in satoshis
     pub value_sat: u64,
-    /// The payment hash
+    /// Payment hash for this HTLC
     #[serde(with = "PaymentHashDef")]
     pub payment_hash: PaymentHash,
-    /// This is zero for offered HTLCs in phase 1
+    /// CLTV expiry block height, it is zero for offered HTLCs in phase 1
     pub cltv_expiry: u32,
 }
 
@@ -102,14 +105,23 @@ pub trait PreimageMap {
     fn has_preimage(&self, hash: &PaymentHash) -> bool;
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[allow(missing_docs)]
+/// Commitment transaction information (Phase 2).
+///
+/// Contains the state of a commitment transaction including output values,
+/// HTLCs, and feerate. HTLC vectors are kept sorted for canonical comparison.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentInfo2 {
+    /// Whether the counterparty is the broadcaster of this commitment
     pub is_counterparty_broadcaster: bool,
+    /// Value in satoshis going to the countersigner
     pub to_countersigner_value_sat: u64,
+    /// Value in satoshis going to the broadcaster
     pub to_broadcaster_value_sat: u64,
+    /// HTLCs offered by the broadcaster
     pub offered_htlcs: Vec<HTLCInfo2>,
+    /// HTLCs received by the broadcaster
     pub received_htlcs: Vec<HTLCInfo2>,
+    /// Fee rate in satoshis per 1000 weight units
     pub feerate_per_kw: u32,
 }
 

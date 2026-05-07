@@ -533,15 +533,24 @@ pub trait ValidatorFactory: Send + Sync {
 }
 
 /// Signatures for a commitment transaction
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CommitmentSignatures(pub Signature, pub Vec<Signature>);
 
-/// Copied from LDK because we need to serialize it
+/// Copied from LDK because we need to serialize it.
+///
+/// Stores revocation secrets from counterparty commitments.
+/// The vector is kept sorted in descending order by commitment index
+/// by the `provide_secret` function. This sorted invariant is required
+/// for member functions to work correctly.
+///
+/// Equality comparison ignores only trailing zero-secret padding entries.
+/// Non-trailing zero entries are considered invalid and will cause
+/// inequality. Full `(secret, index)` tuples are compared.
 #[serde_as]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CounterpartyCommitmentSecrets {
     #[serde_as(as = "IfIsHumanReadable<_, Vec<(Bytes, _)>>")]
-    old_secrets: Vec<([u8; 32], u64)>,
+    pub(crate) old_secrets: Vec<([u8; 32], u64)>,
 }
 
 impl Debug for CounterpartyCommitmentSecrets {
@@ -550,6 +559,29 @@ impl Debug for CounterpartyCommitmentSecrets {
             .field("old_secrets", &DebugOldSecrets(&self.old_secrets))
             .finish()
     }
+}
+
+impl PartialEq for CounterpartyCommitmentSecrets {
+    fn eq(&self, other: &Self) -> bool {
+        match (trim_trailing_zeros(&self.old_secrets), trim_trailing_zeros(&other.old_secrets)) {
+            (Some(self_trimmed), Some(other_trimmed)) => self_trimmed == other_trimmed,
+            _ => false,
+        }
+    }
+}
+
+fn trim_trailing_zeros(secrets: &[([u8; 32], u64)]) -> Option<&[([u8; 32], u64)]> {
+    let non_zero_len = secrets.iter().take_while(|(secret, _)| !is_zero_secret(secret)).count();
+
+    if secrets[non_zero_len..].iter().all(|(secret, _)| is_zero_secret(secret)) {
+        Some(&secrets[..non_zero_len])
+    } else {
+        None
+    }
+}
+
+fn is_zero_secret(secret: &[u8; 32]) -> bool {
+    secret.iter().all(|&b| b == 0)
 }
 
 struct DebugOldSecrets<'a>(pub &'a Vec<([u8; 32], u64)>);
@@ -645,42 +677,41 @@ impl CounterpartyCommitmentSecrets {
     }
 }
 
-/// Enforcement state for a channel
+/// Channel enforcement and validation state.
 ///
-/// This keeps track of commitments on both sides and whether the channel
-/// was closed.
-#[allow(missing_docs)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Tracks commitment transactions on both sides, revocation points,
+/// and whether the channel is closed. Used to enforce policy rules
+/// and prevent invalid state transitions.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EnforcementState {
-    // the next commitment number we expect to see signed by the counterparty
-    // (set by validate_holder_commitment_tx)
-    pub next_holder_commit_num: u64,
-    // the next commitment number we expect to sign
-    // (set by sign_counterparty_commitment_tx)
-    pub next_counterparty_commit_num: u64,
-    // the next commitment number we expect the counterparty to revoke
-    // (set by validate_counterparty_revocation)
-    pub next_counterparty_revoke_num: u64,
+    /// Next commitment number expected from counterparty
+    pub next_holder_commit_num: u64, // set by validate_holder_commitment_tx
+    /// Next commitment number we will sign
+    pub next_counterparty_commit_num: u64, // set by sign_counterparty_commitment_tx
+    /// Next commitment number counterparty should revoke
+    pub next_counterparty_revoke_num: u64, // set by validate_counterparty_revocation
 
-    // (set by sign_counterparty_commitment_tx)
-    pub current_counterparty_point: Option<PublicKey>, // next_counterparty_commit_num - 1
-    // (set by sign_counterparty_commitment_tx)
-    pub previous_counterparty_point: Option<PublicKey>, // next_counterparty_commit_num - 2
+    /// Current counterparty revocation point
+    pub current_counterparty_point: Option<PublicKey>, // set by sign_counterparty_commitment_tx (next_counterparty_commit_num - 1)
+    /// Previous counterparty revocation point
+    pub previous_counterparty_point: Option<PublicKey>, // set by sign_counterparty_commitment_tx (next_counterparty_commit_num - 2)
 
-    // (set by validate_holder_commitment_tx)
-    pub current_holder_commit_info: Option<CommitmentInfo2>,
+    /// Current holder commitment transaction info
+    pub current_holder_commit_info: Option<CommitmentInfo2>, // set by validate_holder_commitment_tx
     /// Counterparty signatures on holder's commitment
     pub current_counterparty_signatures: Option<CommitmentSignatures>,
 
-    /// Next holder commitment
+    /// Next holder commitment with signatures
     pub next_holder_commit_info: Option<(CommitmentInfo2, CommitmentSignatures)>,
 
-    // (set by sign_counterparty_commitment_tx)
-    pub current_counterparty_commit_info: Option<CommitmentInfo2>,
-    // (set by sign_counterparty_commitment_tx)
-    pub previous_counterparty_commit_info: Option<CommitmentInfo2>,
+    /// Current counterparty commitment transaction info
+    pub current_counterparty_commit_info: Option<CommitmentInfo2>, // set by sign_counterparty_commitment_tx
+    /// Previous counterparty commitment transaction info
+    pub previous_counterparty_commit_info: Option<CommitmentInfo2>, // set by sign_counterparty_commitment_tx
 
+    /// Whether the channel has been closed
     pub channel_closed: bool,
+    /// Initial value to holder in satoshis
     pub initial_holder_value: u64,
 
     /// Counterparty revocation secrets.
@@ -1794,5 +1825,49 @@ mod tests {
             if is_received { htlcs.clone() } else { vec![] },
             1000,
         )
+    }
+
+    #[test]
+    fn test_counterparty_secrets_trailing_zero_padding() {
+        // Trailing zero-secret entries are ignored during comparison
+        let mut secrets1 = CounterpartyCommitmentSecrets::new();
+        secrets1.old_secrets = vec![([1u8; 32], 200), ([2u8; 32], 100)];
+        let mut secrets2 = CounterpartyCommitmentSecrets::new();
+        secrets2.old_secrets =
+            vec![([1u8; 32], 200), ([2u8; 32], 100), ([0u8; 32], 50), ([0u8; 32], 25)];
+
+        assert_eq!(secrets1, secrets2);
+    }
+
+    #[test]
+    fn test_counterparty_secrets_non_trailing_zero_invalid() {
+        // A zero-secret entry in a non-trailing position is invalid
+        let mut secrets1 = CounterpartyCommitmentSecrets::new();
+        secrets1.old_secrets = vec![([1u8; 32], 200), ([2u8; 32], 100)];
+        let mut secrets2 = CounterpartyCommitmentSecrets::new();
+        secrets2.old_secrets = vec![([0u8; 32], 300), ([1u8; 32], 200), ([2u8; 32], 100)];
+
+        assert_ne!(secrets1, secrets2);
+    }
+
+    #[test]
+    fn test_counterparty_secrets_different_values() {
+        let mut secrets1 = CounterpartyCommitmentSecrets::new();
+        secrets1.old_secrets = vec![([1u8; 32], 200), ([2u8; 32], 100)];
+        let mut secrets2 = CounterpartyCommitmentSecrets::new();
+        secrets2.old_secrets = vec![([1u8; 32], 200), ([3u8; 32], 100)];
+
+        assert_ne!(secrets1, secrets2);
+    }
+
+    #[test]
+    fn test_counterparty_secrets_different_indices() {
+        // Same secret bytes but different indices must not be equal
+        let mut secrets1 = CounterpartyCommitmentSecrets::new();
+        secrets1.old_secrets = vec![([1u8; 32], 200), ([2u8; 32], 100)];
+        let mut secrets2 = CounterpartyCommitmentSecrets::new();
+        secrets2.old_secrets = vec![([1u8; 32], 199), ([2u8; 32], 100)];
+
+        assert_ne!(secrets1, secrets2);
     }
 }

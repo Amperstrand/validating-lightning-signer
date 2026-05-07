@@ -198,13 +198,14 @@ impl<M: Persist, B: Persist> Persist for BackupPersister<M, B> {
 #[allow(unused_variables)]
 mod tests {
     use super::*;
-    use crate::model::{ChainTrackerEntry, ChannelEntry, NodeEntry, NodeStateEntry};
+    use crate::model::{ChainTrackerEntry, NodeEntry, NodeStateEntry};
     use lightning_signer::bitcoin::secp256k1::PublicKey;
     use lightning_signer::bitcoin::Network;
     use lightning_signer::chain::tracker::ChainTracker;
     use lightning_signer::channel::{Channel, ChannelId, ChannelStub};
     use lightning_signer::monitor::ChainMonitor;
     use lightning_signer::node::{Node, NodeConfig, NodeState};
+    use lightning_signer::persist::model::ChannelEntry;
     use lightning_signer::persist::SignerId;
     use lightning_signer::signer::derive::KeyDerivationStyle;
     use lightning_signer::util::test_utils::TEST_CHANNEL_ID;
