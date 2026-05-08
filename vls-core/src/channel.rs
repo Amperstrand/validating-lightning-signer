@@ -763,8 +763,8 @@ impl Channel {
         let info2 = self.build_counterparty_commitment_info(
             to_holder_value_sat,
             to_counterparty_value_sat,
-            offered_htlcs.clone(),
-            received_htlcs.clone(),
+            offered_htlcs,
+            received_htlcs,
             feerate_per_kw,
         )?;
 
@@ -785,7 +785,7 @@ impl Channel {
             &info2,
         )?;
 
-        let htlcs = Self::htlcs_info2_to_oic(&offered_htlcs, &received_htlcs);
+        let htlcs = Self::htlcs_info2_to_oic(&info2.offered_htlcs, &info2.received_htlcs);
 
         #[cfg(fuzzing)]
         let htlcs_len = htlcs.len();
@@ -937,7 +937,7 @@ impl Channel {
         to_counterparty_value_sat: u64,
         htlcs: Vec<HTLCOutputInCommitment>,
     ) -> CommitmentTransaction {
-        let mut htlcs_with_aux = htlcs.iter().map(|h| (h.clone(), ())).collect();
+        let mut htlcs_with_aux = htlcs.into_iter().map(|h| (h, ())).collect();
         let channel_parameters = self.make_channel_parameters();
         let parameters = channel_parameters.as_counterparty_broadcastable();
         let commitment_tx = CommitmentTransaction::new_with_auxiliary_htlc_data(
@@ -2484,8 +2484,8 @@ impl Channel {
         let info2 = self.build_holder_commitment_info(
             info.to_broadcaster_value_sat,
             info.to_countersigner_value_sat,
-            offered_htlcs.clone(),
-            received_htlcs.clone(),
+            offered_htlcs,
+            received_htlcs,
             feerate_per_kw,
         )?;
 
@@ -2531,7 +2531,7 @@ impl Channel {
             feerate_per_kw,
             info.to_broadcaster_value_sat,
             info.to_countersigner_value_sat,
-            htlcs.clone(),
+            htlcs,
         );
 
         if recomposed_tx.trust().built_transaction().transaction != *tx {
@@ -2542,8 +2542,8 @@ impl Channel {
                 DebugVecVecU8(output_witscripts),
                 commitment_number,
                 feerate_per_kw,
-                &offered_htlcs,
-                &received_htlcs
+                &info2.offered_htlcs,
+                &info2.received_htlcs
             );
             #[cfg(not(feature = "log_pretty_print"))]
             {
@@ -3082,10 +3082,7 @@ impl Channel {
             if let Some(info) = &es.current_holder_commit_info {
                 let per_commitment_point = self.get_per_commitment_point(commitment_number)?;
                 let txkeys = self.make_holder_tx_keys(&per_commitment_point);
-                let htlcs = Self::htlcs_info2_to_oic(
-                    &info.offered_htlcs.clone(),
-                    &info.received_htlcs.clone(),
-                );
+                let htlcs = Self::htlcs_info2_to_oic(&info.offered_htlcs, &info.received_htlcs);
                 let expected_tx = self.make_holder_commitment_tx(
                     commitment_number,
                     &txkeys,
