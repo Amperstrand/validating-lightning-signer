@@ -2,8 +2,8 @@ use super::{Iter, RecoveryKeys, RecoverySign};
 use lightning::chain::transaction::OutPoint;
 use lightning_signer::bitcoin::bip32::{ChildNumber, DerivationPath};
 use lightning_signer::bitcoin::secp256k1::{PublicKey, SecretKey};
-use lightning_signer::bitcoin::{Address, ScriptBuf, Transaction, TxOut};
-use lightning_signer::channel::{Channel, ChannelBase, ChannelSlot};
+use lightning_signer::bitcoin::{Address, Amount, ScriptBuf, Transaction, TxOut};
+use lightning_signer::channel::{Channel, ChannelBase, ChannelSlot, CommitmentType, InputUtxo};
 use lightning_signer::lightning;
 use lightning_signer::lightning::ln::chan_utils::CommitmentTransaction;
 use lightning_signer::node::Node;
@@ -60,6 +60,55 @@ impl RecoveryKeys for DirectRecoveryKeys {
     fn wallet_address_taproot(&self, index: ChildNumber) -> Result<Address, Status> {
         self.node.get_taproot_address(&vec![index].into())
     }
+
+    fn wallet_script_pubkey_native(&self, path: &DerivationPath) -> Result<ScriptBuf, Status> {
+        Ok(self.node.get_native_address(path)?.script_pubkey())
+    }
+
+    fn sign_wallet_input_unchecked(
+        &self,
+        tx: &Transaction,
+        input_index: usize,
+        input_utxo: &InputUtxo,
+    ) -> Result<Vec<Vec<u8>>, Status> {
+        if input_index >= tx.input.len() {
+            return Err(Status::invalid_argument(format!(
+                "fee input index {} out of bounds for tx with {} inputs",
+                input_index,
+                tx.input.len()
+            )));
+        }
+        if input_utxo.derivation_path.is_empty() {
+            return Err(Status::invalid_argument(format!(
+                "fee input {}:{} must include the native wallet child derivation path",
+                input_utxo.outpoint.txid, input_utxo.outpoint.vout
+            )));
+        }
+
+        let mut ipaths = vec![DerivationPath::master(); tx.input.len()];
+        let mut prev_outs =
+            vec![TxOut { value: Amount::ZERO, script_pubkey: ScriptBuf::new() }; tx.input.len()];
+        ipaths[input_index] = input_utxo.derivation_path.clone();
+        prev_outs[input_index] = TxOut {
+            value: input_utxo.value,
+            script_pubkey: self.wallet_script_pubkey_native(&input_utxo.derivation_path)?,
+        };
+
+        let witnesses = self.node.unchecked_sign_onchain_tx(
+            tx,
+            &ipaths,
+            &prev_outs,
+            vec![None; tx.input.len()],
+        )?;
+
+        witnesses.get(input_index).cloned().ok_or_else(|| {
+            Status::internal(format!(
+                "missing wallet witness for fee input {} in tx with {} inputs",
+                input_index,
+                tx.input.len()
+            ))
+        })
+    }
 }
 
 /// Recovery signer for an in-process Channel
@@ -98,6 +147,11 @@ impl RecoverySign for DirectRecoverySigner {
     fn get_current_holder_commitment_transaction(&self) -> Result<CommitmentTransaction, Status> {
         let mut lock = self.lock();
         Self::channel(&mut lock).get_current_holder_commitment_transaction()
+    }
+
+    fn commitment_type(&self) -> CommitmentType {
+        let mut lock = self.lock();
+        Self::channel(&mut lock).setup.commitment_type
     }
 }
 
