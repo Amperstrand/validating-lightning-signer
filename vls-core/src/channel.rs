@@ -518,6 +518,13 @@ impl Debug for Channel {
     }
 }
 
+#[derive(Clone)]
+struct ClosableHolderCommitment {
+    commitment_number: u64,
+    info: CommitmentInfo2,
+    counterparty_signatures: CommitmentSignatures,
+}
+
 impl ChannelBase for Channel {
     // TODO move out to impl Channel {} once LDK workaround is removed
     #[cfg(any(test, feature = "test_utils"))]
@@ -1307,22 +1314,57 @@ impl Channel {
         Ok((next_holder_commitment_point, maybe_old_secret))
     }
 
-    /// Sign a holder commitment when force-closing
-    pub fn sign_holder_commitment_tx_phase2(
+    fn get_holder_commitment_for_close(
         &mut self,
         commitment_number: u64,
-    ) -> Result<Signature, Status> {
-        // We are just signing the latest commitment info that we previously
-        // stored in the enforcement state, while checking that the commitment
-        // number supplied by the caller matches the one we expect.
-        //
-        // policy-commitment-holder-not-revoked is implicitly checked by
-        // the fact that the current holder commitment info in the enforcement
-        // state cannot have been revoked.
-        let validator = self.validator();
-        let info2 = validator
-            .get_current_holder_commitment_info(&mut self.enforcement_state, commitment_number)?;
+    ) -> Result<ClosableHolderCommitment, Status> {
+        if commitment_number == self.enforcement_state.next_holder_commit_num {
+            if let Some((info, counterparty_signatures)) =
+                &self.enforcement_state.next_holder_commit_info
+            {
+                info!("closing with pending-next holder commitment {}", commitment_number);
 
+                return Ok(ClosableHolderCommitment {
+                    commitment_number,
+                    info: info.clone(),
+                    counterparty_signatures: counterparty_signatures.clone(),
+                });
+            }
+        }
+
+        info!("closing with current holder commitment {}", commitment_number);
+        let validator = self.validator();
+        let info = validator
+            .get_current_holder_commitment_info(&mut self.enforcement_state, commitment_number)?;
+        let counterparty_signatures = self
+            .enforcement_state
+            .current_counterparty_signatures
+            .clone()
+            .ok_or_else(|| internal_error("channel not open: counterparty sigs missing"))?;
+
+        Ok(ClosableHolderCommitment { commitment_number, info, counterparty_signatures })
+    }
+
+    fn get_latest_holder_commitment_for_close(
+        &mut self,
+    ) -> Result<ClosableHolderCommitment, Status> {
+        let commitment_number = if self.enforcement_state.next_holder_commit_info.is_some() {
+            self.enforcement_state.next_holder_commit_num
+        } else {
+            self.enforcement_state
+                .next_holder_commit_num
+                .checked_sub(1)
+                .ok_or_else(|| internal_error("channel was not open: commit info missing"))?
+        };
+
+        self.get_holder_commitment_for_close(commitment_number)
+    }
+
+    fn recompose_holder_commitment_tx(
+        &self,
+        commitment_number: u64,
+        info2: &CommitmentInfo2,
+    ) -> Result<(CommitmentTransaction, PublicKey, TxCreationKeys), Status> {
         let htlcs = Self::htlcs_info2_to_oic(&info2.offered_htlcs, &info2.received_htlcs);
         let per_commitment_point = self.get_per_commitment_point(commitment_number)?;
 
@@ -1337,6 +1379,27 @@ impl Channel {
             info2.to_countersigner_value_sat,
             htlcs,
         );
+
+        Ok((recomposed_tx, per_commitment_point, txkeys))
+    }
+
+    /// Sign a holder commitment when force-closing
+    pub fn sign_holder_commitment_tx_phase2(
+        &mut self,
+        commitment_number: u64,
+    ) -> Result<Signature, Status> {
+        // We sign the current holder commitment, or the already-validated
+        // pending next holder commitment, while checking that the commitment
+        // number supplied by the caller is in sync with the close selector.
+        //
+        // policy-commitment-holder-not-revoked is implicitly checked by
+        // the fact that the current holder commitment info in the enforcement
+        // state cannot have been revoked.
+        let holder_commitment = self.get_holder_commitment_for_close(commitment_number)?;
+        let (recomposed_tx, _per_commitment_point, _txkeys) = self.recompose_holder_commitment_tx(
+            holder_commitment.commitment_number,
+            &holder_commitment.info,
+        )?;
 
         // We provide a dummy signature for the remote, since we don't require that sig
         // to be passed in to this call.  It would have been better if HolderCommitmentTransaction
@@ -1378,20 +1441,8 @@ impl Channel {
             .ok_or_else(|| internal_error("channel was not open - commit info missing"))?;
 
         let commitment_number = self.enforcement_state.next_holder_commit_num - 1;
-        let per_commitment_point = self.get_per_commitment_point(commitment_number)?;
-
-        let build_feerate = if self.setup.is_zero_fee_htlc() { 0 } else { info2.feerate_per_kw };
-        let txkeys = self.make_holder_tx_keys(&per_commitment_point);
-        let htlcs = Self::htlcs_info2_to_oic(&info2.offered_htlcs, &info2.received_htlcs);
-
-        let recomposed_tx = self.make_holder_commitment_tx(
-            commitment_number,
-            &txkeys,
-            build_feerate,
-            info2.to_broadcaster_value_sat,
-            info2.to_countersigner_value_sat,
-            htlcs,
-        );
+        let (recomposed_tx, _, _) =
+            self.recompose_holder_commitment_tx(commitment_number, info2)?;
 
         Ok(recomposed_tx)
     }
@@ -1410,22 +1461,19 @@ impl Channel {
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
     > {
-        let cp_sigs = self
-            .enforcement_state
-            .current_counterparty_signatures
-            .as_ref()
-            .ok_or_else(|| internal_error("channel was not open - counterparty sigs"))?;
-        let commitment_number = self.enforcement_state.next_holder_commit_num - 1;
+        let holder_commitment = self.get_latest_holder_commitment_for_close()?;
+        let CommitmentSignatures(counterparty_commit_sig, counterparty_htlc_sigs) =
+            holder_commitment.counterparty_signatures;
+        let commitment_number = holder_commitment.commitment_number;
         warn!("force-closing channel for recovery at commitment number {}", commitment_number);
 
-        let recomposed_tx = self.get_current_holder_commitment_transaction()?;
-        let per_commitment_point = self.get_per_commitment_point(commitment_number)?;
-        let txkeys = self.make_holder_tx_keys(&per_commitment_point);
+        let (recomposed_tx, per_commitment_point, txkeys) =
+            self.recompose_holder_commitment_tx(commitment_number, &holder_commitment.info)?;
         // Holder commitments need an extra wrapper for the LDK signature routine.
         let recomposed_holder_tx = HolderCommitmentTransaction::new(
             recomposed_tx,
-            cp_sigs.0.clone(),
-            cp_sigs.1.clone(),
+            counterparty_commit_sig.clone(),
+            counterparty_htlc_sigs.clone(),
             &self.keys.pubkeys().funding_pubkey,
             &self.counterparty_pubkeys().funding_pubkey,
         );
@@ -1448,14 +1496,20 @@ impl Channel {
             &tx_keys.broadcaster_delayed_payment_key,
         );
 
-        add_holder_sig(&mut tx, sig, cp_sigs.0, &holder_funding_key, &counterparty_funding_key);
+        add_holder_sig(
+            &mut tx,
+            sig,
+            counterparty_commit_sig,
+            &holder_funding_key,
+            &counterparty_funding_key,
+        );
 
         let commitment_txid = tx.compute_txid();
         let htlc_txs = self.sign_holder_htlc_txs_for_recovery(
             &holder_tx,
             &commitment_txid,
             &txkeys,
-            &cp_sigs.1,
+            &counterparty_htlc_sigs,
             spent_htlc_indices,
         )?;
 
@@ -3740,6 +3794,25 @@ mod tests {
         );
 
         assert_eq!(commitment_tx, expected_tx);
+    }
+
+    #[test]
+    fn test_get_current_holder_commitment_transaction_ignores_pending_next() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _channel1) = setup_test_channel(&node, &node1, false, 0);
+
+        let current_tx = channel.get_current_holder_commitment_transaction().unwrap();
+        let mut next_info = channel.enforcement_state.current_holder_commit_info.clone().unwrap();
+        next_info.to_broadcaster_value_sat -= 1;
+        next_info.to_countersigner_value_sat += 1;
+
+        channel.enforcement_state.next_holder_commit_info =
+            Some((next_info, CommitmentSignatures(Channel::dummy_sig(), Vec::new())));
+
+        let commitment_tx = channel.get_current_holder_commitment_transaction().unwrap();
+
+        assert_eq!(commitment_tx, current_tx);
     }
 
     #[test]
