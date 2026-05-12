@@ -1,17 +1,17 @@
 #[cfg(test)]
 mod tests {
-    use bitcoin::bip32::DerivationPath;
-    use bitcoin::{self, Amount, OutPoint, ScriptBuf, Transaction};
+    use bitcoin::{self, ScriptBuf, Transaction};
     use lightning::ln::chan_utils::{
         build_htlc_transaction, get_htlc_redeemscript, make_funding_redeemscript,
     };
 
     use test_log::test;
 
-    use crate::channel::{Channel, ChannelBase, CommitmentType, InputUtxo, TypedSignature};
+    use crate::channel::{Channel, ChannelBase, CommitmentType, TypedSignature};
     use crate::node::NodeMonitor;
     use crate::policy::validator::{ChainState, EnforcementState};
     use crate::util::status::{Code, Status};
+    use crate::util::test_utils::key::make_test_pubkey;
     use crate::util::test_utils::*;
     use crate::util::transaction_utils::expected_commitment_tx_weight;
 
@@ -106,6 +106,129 @@ mod tests {
             commit_tx_ctx,
             mutate_sign_inputs,
         )
+    }
+
+    fn setup_pending_next_holder_commitment(
+        commitment_type: CommitmentType,
+    ) -> Result<(TestNodeContext, TestChannelContext, TestCommitmentTxContext), Status> {
+        let next_holder_commit_num = HOLD_COMMIT_NUM;
+        let next_counterparty_commit_num = HOLD_COMMIT_NUM + 1;
+        let next_counterparty_revoke_num = next_counterparty_commit_num - 1;
+        let mut setup = make_test_channel_setup();
+        setup.commitment_type = commitment_type;
+        let (node_ctx, chan_ctx) = setup_funded_channel_with_setup(
+            setup,
+            next_holder_commit_num,
+            next_counterparty_commit_num,
+            next_counterparty_revoke_num,
+        );
+
+        let current_commit_tx_ctx = setup_validated_holder_commitment(
+            &node_ctx,
+            &chan_ctx,
+            HOLD_COMMIT_NUM,
+            |_commit_tx_ctx| {},
+            |_keys| {},
+        )?;
+
+        let mut next_commit_tx_ctx = channel_commitment(
+            &node_ctx,
+            &chan_ctx,
+            HOLD_COMMIT_NUM + 1,
+            current_commit_tx_ctx.feerate_per_kw,
+            current_commit_tx_ctx.to_broadcaster,
+            current_commit_tx_ctx.to_countersignatory,
+            current_commit_tx_ctx.offered_htlcs.clone(),
+            current_commit_tx_ctx.received_htlcs.clone(),
+        );
+        let (commit_sig, htlc_sigs) =
+            counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut next_commit_tx_ctx);
+
+        for offered_htlc in next_commit_tx_ctx.offered_htlcs.clone() {
+            node_ctx.node.add_keysend(
+                make_test_pubkey(1),
+                offered_htlc.payment_hash,
+                offered_htlc.value_sat * 1000,
+            )?;
+        }
+
+        node_ctx.node.with_channel(&chan_ctx.channel_id, |chan| {
+            chan.validate_holder_commitment_tx_phase2(
+                next_commit_tx_ctx.commit_num,
+                next_commit_tx_ctx.feerate_per_kw,
+                next_commit_tx_ctx.to_broadcaster,
+                next_commit_tx_ctx.to_countersignatory,
+                next_commit_tx_ctx.offered_htlcs.clone(),
+                next_commit_tx_ctx.received_htlcs.clone(),
+                &commit_sig,
+                &htlc_sigs,
+            )?;
+            assert_eq!(
+                chan.enforcement_state.next_holder_commit_num,
+                next_commit_tx_ctx.commit_num
+            );
+            assert!(chan.enforcement_state.next_holder_commit_info.is_some());
+            Ok(())
+        })?;
+
+        Ok((node_ctx, chan_ctx, next_commit_tx_ctx))
+    }
+
+    fn sign_pending_next_holder_commitment(commitment_type: CommitmentType) -> Result<(), Status> {
+        let (node_ctx, chan_ctx, next_commit_tx_ctx) =
+            setup_pending_next_holder_commitment(commitment_type)?;
+
+        let (sig, tx) = node_ctx.node.with_channel(&chan_ctx.channel_id, |chan| {
+            let trusted_tx = next_commit_tx_ctx.tx.as_ref().unwrap().trust();
+            let tx = trusted_tx.built_transaction().transaction.clone();
+
+            let sig = chan.sign_holder_commitment_tx_phase2(next_commit_tx_ctx.commit_num)?;
+
+            assert_eq!(chan.enforcement_state.channel_closed, true);
+
+            let spent = vec![false; trusted_tx.htlcs().len()];
+            let (tx_r, _htlc_txs_r, _revocable_script_r, _uck_r, _revocation_pubkey_r) =
+                chan.sign_holder_commitment_tx_for_recovery(&spent)?;
+            assert_eq!(tx_r.compute_txid(), tx.compute_txid());
+
+            Ok((sig, tx))
+        })?;
+
+        let funding_pubkey = get_channel_funding_pubkey(&node_ctx.node, &chan_ctx.channel_id);
+        let channel_funding_redeemscript = make_funding_redeemscript(
+            &funding_pubkey,
+            &chan_ctx.setup.counterparty_points.funding_pubkey,
+        );
+
+        check_signature(
+            &tx,
+            0,
+            TypedSignature::all(sig),
+            &funding_pubkey,
+            chan_ctx.setup.channel_value_sat,
+            &channel_funding_redeemscript,
+        );
+
+        Ok(())
+    }
+
+    fn recover_pending_next_holder_commitment(
+        commitment_type: CommitmentType,
+    ) -> Result<(), Status> {
+        let (node_ctx, chan_ctx, next_commit_tx_ctx) =
+            setup_pending_next_holder_commitment(commitment_type)?;
+
+        node_ctx.node.with_channel(&chan_ctx.channel_id, |chan| {
+            let trusted_tx = next_commit_tx_ctx.tx.as_ref().unwrap().trust();
+            let spent = vec![false; trusted_tx.htlcs().len()];
+            let (tx_r, _htlc_txs_r, _revocable_script_r, _uck_r, _revocation_pubkey_r) =
+                chan.sign_holder_commitment_tx_for_recovery(&spent)?;
+            assert_eq!(
+                tx_r.compute_txid(),
+                trusted_tx.built_transaction().transaction.compute_txid()
+            );
+            Ok(())
+        })
     }
 
     fn sign_holder_commitment_tx_with_mutators_common<SignInputMutator>(
@@ -270,6 +393,28 @@ mod tests {
     generate_status_ok_variations!(ok_after_mutual_close, |sms| {
         sms.estate.channel_closed = true;
     });
+
+    #[test]
+    fn pending_next_success_static() {
+        assert_status_ok!(sign_pending_next_holder_commitment(CommitmentType::StaticRemoteKey));
+    }
+
+    #[test]
+    fn pending_next_success_zerofee() {
+        assert_status_ok!(sign_pending_next_holder_commitment(CommitmentType::AnchorsZeroFeeHtlc));
+    }
+
+    #[test]
+    fn pending_next_recovery_static() {
+        assert_status_ok!(recover_pending_next_holder_commitment(CommitmentType::StaticRemoteKey));
+    }
+
+    #[test]
+    fn pending_next_recovery_zerofee() {
+        assert_status_ok!(recover_pending_next_holder_commitment(
+            CommitmentType::AnchorsZeroFeeHtlc
+        ));
+    }
 
     generate_status_ok_retry_variations!(success, |_| {});
 
