@@ -22,7 +22,7 @@ use lightning_signer::util::status::Status;
 use lightning_signer::util::transaction_utils::maybe_add_change_output;
 use lightning_signer::{bitcoin, lightning};
 use log::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use url::Url;
 
 /// Iterator
@@ -258,24 +258,34 @@ async fn get_feerate(esplora: &EsploraClient) -> Result<u64, ()> {
     Ok(feerate)
 }
 
+struct HtlcSpendStatus {
+    spent_indices: Vec<bool>,
+    spender_txs: Vec<Transaction>,
+}
+
 /// Checks which HTLC outputs from the commitment transaction have been spent on-chain.
-/// Returns a vector of booleans where `true` means the output is already spent.
-async fn get_spent_htlc_indices(
+/// `spent_indices` contains `true` for already-spent outputs.  When supported,
+/// `spender_txs` contains the actual on-chain spending transactions for those
+/// spent outputs so their delayed HTLC outputs can be swept once mature.
+async fn get_htlc_spend_status(
     explorer_client: &Option<Box<dyn Explorer>>,
     commitment_tx: &CommitmentTransaction,
-) -> Result<Vec<bool>, Status> {
+    lookup_spending_txs: bool,
+) -> Result<HtlcSpendStatus, Status> {
     let htlcs = commitment_tx.htlcs();
     let htlc_count = htlcs.len();
 
     if htlc_count == 0 {
-        return Ok(Vec::new());
+        return Ok(HtlcSpendStatus { spent_indices: Vec::new(), spender_txs: Vec::new() });
     }
 
     let mut spent_indices = vec![false; htlc_count];
+    let mut spender_txs = Vec::new();
+    let mut seen_spender_txids = BTreeSet::new();
 
     let Some(client) = explorer_client else {
         warn!("No block explorer available. Assuming all HTLCs are unspent.");
-        return Ok(spent_indices);
+        return Ok(HtlcSpendStatus { spent_indices, spender_txs });
     };
 
     let commitment_txid = commitment_tx.trust().built_transaction().transaction.compute_txid();
@@ -294,6 +304,37 @@ async fn get_spent_htlc_indices(
                     // so a missing HTLC UTXO here is treated as already spent/missing on-chain.
                     spent_indices[htlc_idx] = true;
                     info!("HTLC index {} (vout {}) is already spent/missing", htlc_idx, vout);
+                    if lookup_spending_txs {
+                        match client.get_utxo_spending_tx(&outpoint).await {
+                            Ok(Some(spender_tx)) => {
+                                let spender_txid = spender_tx.compute_txid();
+                                if seen_spender_txids.insert(spender_txid) {
+                                    info!(
+                                        "found HTLC index {} spending transaction {}",
+                                        htlc_idx, spender_txid
+                                    );
+                                    spender_txs.push(spender_tx);
+                                }
+                            }
+                            Ok(None) => {
+                                warn!(
+                                    "HTLC index {} is spent, but no spending transaction was found",
+                                    htlc_idx
+                                );
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Failed to look up spending transaction for HTLC index {}: {}",
+                                    htlc_idx, e
+                                );
+                            }
+                        }
+                    } else {
+                        warn!(
+                            "HTLC index {} is spent, but this recovery backend cannot look up spending transactions; already-spent HTLC delayed outputs cannot be swept",
+                            htlc_idx
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -302,7 +343,7 @@ async fn get_spent_htlc_indices(
         }
     }
 
-    Ok(spent_indices)
+    Ok(HtlcSpendStatus { spent_indices, spender_txs })
 }
 
 /// Constant for the combined size of a witness component in bytes.
@@ -452,6 +493,69 @@ fn add_fee_to_htlc_tx<R: RecoveryKeys>(
     Ok((tx, change_utxo))
 }
 
+async fn collect_delayed_sweep_outputs<E: Explorer + ?Sized>(
+    explorer: &E,
+    source: &str,
+    tx: &Transaction,
+    delayed_script_pubkey: &ScriptBuf,
+    required_confirms: u16,
+    per_commitment_point: PublicKey,
+    revocation_pubkey: PublicKey,
+) -> Vec<DelayedPaymentOutputDescriptor> {
+    let txid = tx.compute_txid();
+    let mut outputs = Vec::new();
+
+    for (idx, output) in tx.output.iter().enumerate() {
+        if &output.script_pubkey != delayed_script_pubkey {
+            continue;
+        }
+
+        let Ok(index) = u16::try_from(idx) else {
+            warn!("{} output index {} does not fit in a recovery outpoint; skipping", source, idx);
+            continue;
+        };
+        let outpoint = OutPoint { txid, index };
+        info!("our delayed output {} @ {} in {}", output.value, idx, source);
+
+        let confirms =
+            match explorer.get_utxo_confirmations(&outpoint.into_bitcoin_outpoint()).await {
+                Ok(confirms) => confirms,
+                Err(e) => {
+                    warn!(
+                        "failed to check delayed output {} from {}: {}; skipping",
+                        outpoint, source, e
+                    );
+                    continue;
+                }
+            };
+        if let Some(confirms) = confirms {
+            info!("delayed output from {} is unspent ({} confirms)", source, confirms);
+            if confirms >= u64::from(required_confirms) {
+                info!("delayed output from {} is mature, queueing sweep", source);
+                outputs.push(DelayedPaymentOutputDescriptor {
+                    outpoint,
+                    per_commitment_point,
+                    to_self_delay: required_confirms,
+                    output: output.clone(),
+                    revocation_pubkey: RevocationKey(revocation_pubkey),
+                    channel_keys_id: [0; 32], // unused
+                    channel_value_satoshis: 0,
+                    channel_transaction_parameters: None,
+                });
+            } else {
+                warn!(
+                    "delayed output from {} is immature ({} < {})",
+                    source, confirms, required_confirms
+                );
+            }
+        } else {
+            info!("delayed output from {} is spent, skipping", source);
+        }
+    }
+
+    outputs
+}
+
 async fn broadcast_htlc_txs<E: Explorer + ?Sized>(
     explorer: &E,
     htlc_txs: &[Transaction],
@@ -597,16 +701,20 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
             None
         };
 
-        let spent_htlc_indices = if explorer_client.is_none() || funding_confirms.is_some() {
-            vec![false; current_commitment_tx.htlcs().len()]
+        let htlc_spend_status = if explorer_client.is_none() || funding_confirms.is_some() {
+            HtlcSpendStatus {
+                spent_indices: vec![false; current_commitment_tx.htlcs().len()],
+                spender_txs: Vec::new(),
+            }
         } else {
-            get_spent_htlc_indices(&explorer_client, &current_commitment_tx)
+            get_htlc_spend_status(&explorer_client, &current_commitment_tx, can_lookup_spending_tx)
                 .await
                 .expect("block explorer must be reachable to check HTLC spend status")
         };
 
-        let (tx, htlc_txs, revocable_script, uck, revocation_pubkey) =
-            signer.sign_holder_commitment_tx_for_recovery(&spent_htlc_indices, dry_run).expect("sign");
+        let (tx, htlc_txs, revocable_script, uck, revocation_pubkey) = signer
+            .sign_holder_commitment_tx_for_recovery(&htlc_spend_status.spent_indices, dry_run)
+            .expect("sign");
         let htlc_txs = if let Some(fee_rate) = anchor_fee_rate {
             match add_fee_to_htlc_txs(&keys, htlc_txs, fee_rate, input_utxos, &funding_outpoint) {
                 Ok(htlc_txs) => htlc_txs,
@@ -694,44 +802,36 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                     required_confirms
                 );
 
-                for (idx, out) in tx.output.iter().enumerate() {
-                    let script = out.script_pubkey.clone();
-                    if script == revocable_script {
-                        info!("our revocable output {} @ {}", out.value, idx);
-                        let out_point = OutPoint { txid, index: idx as u16 };
-                        let confirms = bitcoind_client
-                            .get_utxo_confirmations(&out_point.into_bitcoin_outpoint())
-                            .await
-                            .expect("get_txout for our output");
-                        if let Some(confirms) = confirms {
-                            info!("revocable output is unspent ({} confirms)", confirms);
-                            if confirms >= required_confirms as u64 {
-                                info!("revocable output is mature, broadcasting sweep");
-                                let to_self_delay = signer.counterparty_selected_contest_delay();
-                                let descriptor = DelayedPaymentOutputDescriptor {
-                                    outpoint: out_point,
-                                    per_commitment_point: signer
-                                        .get_per_commitment_point()
-                                        .expect("commitment point"),
-                                    to_self_delay,
-                                    output: tx.output[idx].clone(),
-                                    revocation_pubkey: RevocationKey(revocation_pubkey),
-                                    channel_keys_id: [0; 32], // unused
-                                    channel_value_satoshis: 0,
-                                    channel_transaction_parameters: None,
-                                };
-                                sweeps.push((descriptor, uck.clone()));
-                            } else {
-                                warn!(
-                                    "revocable output is immature ({} < {})",
-                                    confirms, required_confirms
-                                );
-                            }
-                        } else {
-                            info!("revocable output is spent, skipping");
-                        }
-                    }
+                let per_commitment_point =
+                    signer.get_per_commitment_point().expect("commitment point");
+                let mut sweep_outputs = collect_delayed_sweep_outputs(
+                    bitcoind_client.as_ref(),
+                    "commitment transaction",
+                    &tx,
+                    &revocable_script,
+                    required_confirms,
+                    per_commitment_point,
+                    revocation_pubkey,
+                )
+                .await;
+
+                for (idx, htlc_tx) in htlc_spend_status.spender_txs.iter().enumerate() {
+                    let source = format!("spent HTLC transaction {}", idx);
+                    sweep_outputs.extend(
+                        collect_delayed_sweep_outputs(
+                            bitcoind_client.as_ref(),
+                            &source,
+                            htlc_tx,
+                            &revocable_script,
+                            required_confirms,
+                            per_commitment_point,
+                            revocation_pubkey,
+                        )
+                        .await,
+                    );
                 }
+                sweeps
+                    .extend(sweep_outputs.into_iter().map(|descriptor| (descriptor, uck.clone())));
             }
         } else {
             info!("tx: {}", serialize_hex(&tx));
@@ -842,6 +942,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct MockExplorer {
         confirms: Arc<Mutex<HashMap<bitcoin::OutPoint, Option<u64>>>>,
+        confirmation_errors: Arc<Mutex<HashMap<bitcoin::OutPoint, String>>>,
         broadcasts: Arc<Mutex<Vec<Transaction>>>,
         spending_txs: Arc<Mutex<HashMap<bitcoin::OutPoint, Option<Transaction>>>>,
         spending_tx_errors: Arc<Mutex<HashMap<bitcoin::OutPoint, String>>>,
@@ -850,6 +951,10 @@ mod tests {
     impl MockExplorer {
         fn set_confirms(&self, outpoint: bitcoin::OutPoint, confirms: Option<u64>) {
             self.confirms.lock().unwrap().insert(outpoint, confirms);
+        }
+
+        fn set_confirmation_error(&self, outpoint: bitcoin::OutPoint, error: &str) {
+            self.confirmation_errors.lock().unwrap().insert(outpoint, error.to_string());
         }
 
         fn set_spending_tx(&self, outpoint: bitcoin::OutPoint, tx: Option<Transaction>) {
@@ -871,6 +976,9 @@ mod tests {
             &self,
             outpoint: &bitcoin::OutPoint,
         ) -> Result<Option<u64>, Error> {
+            if let Some(error) = self.confirmation_errors.lock().unwrap().get(outpoint).cloned() {
+                return Err(Error::Esplora(error));
+            }
             Ok(self.confirms.lock().unwrap().get(outpoint).cloned().unwrap_or(None))
         }
 
@@ -918,14 +1026,14 @@ mod tests {
 
         fn sign_onchain_tx(
             &self,
-            _tx: &Transaction,
+            tx: &Transaction,
             _segwit_flags: &[bool],
             _ipaths: &Vec<DerivationPath>,
             _prev_outs: &Vec<TxOut>,
             _uniclosekeys: Vec<Option<(SecretKey, Vec<Vec<u8>>)>>,
             _opaths: &Vec<DerivationPath>,
         ) -> Result<Vec<Vec<Vec<u8>>>, Status> {
-            panic!("not used by recover_close dry-run tests")
+            Ok(tx.input.iter().map(|_| Vec::new()).collect())
         }
 
         fn wallet_address_native(&self, _index: ChildNumber) -> Result<Address, Status> {
@@ -1091,6 +1199,10 @@ mod tests {
                 script_pubkey: make_p2wpkh_script(2),
             }],
         }
+    }
+
+    fn destination_address() -> String {
+        Address::p2wpkh(&make_test_bitcoin_pubkey(99), Network::Regtest).to_string()
     }
 
     fn make_fee_utxo(value_sat: u64) -> InputUtxo {
@@ -1278,17 +1390,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_spent_htlc_indices_without_explorer_assumes_unspent() {
+    async fn get_htlc_spend_status_without_explorer_assumes_unspent() {
         let commitment_tx = make_commitment_tx(vec![make_htlc_output(1), make_htlc_output(2)]);
         let explorer_client: Option<Box<dyn Explorer>> = None;
 
-        let spent = get_spent_htlc_indices(&explorer_client, &commitment_tx).await.unwrap();
+        let status = get_htlc_spend_status(&explorer_client, &commitment_tx, false).await.unwrap();
 
-        assert_eq!(spent, vec![false, false]);
+        assert_eq!(status.spent_indices, vec![false, false]);
+        assert!(status.spender_txs.is_empty());
     }
 
     #[tokio::test]
-    async fn get_spent_htlc_indices_marks_missing_outputs_spent() {
+    async fn get_htlc_spend_status_marks_missing_outputs_spent() {
         let commitment_tx =
             make_commitment_tx(vec![make_htlc_output(1), make_htlc_output(2), make_htlc_output(3)]);
         let commitment_txid = commitment_tx.trust().built_transaction().transaction.compute_txid();
@@ -1303,9 +1416,90 @@ mod tests {
         }
 
         let explorer_client: Option<Box<dyn Explorer>> = Some(Box::new(mock));
-        let spent = get_spent_htlc_indices(&explorer_client, &commitment_tx).await.unwrap();
+        let status = get_htlc_spend_status(&explorer_client, &commitment_tx, false).await.unwrap();
 
-        assert_eq!(spent, vec![true, false, true]);
+        assert_eq!(status.spent_indices, vec![true, false, true]);
+        assert!(status.spender_txs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_htlc_spend_status_collects_and_deduplicates_spenders() {
+        let commitment_tx =
+            make_commitment_tx(vec![make_htlc_output(1), make_htlc_output(2), make_htlc_output(3)]);
+        let commitment_txid = commitment_tx.trust().built_transaction().transaction.compute_txid();
+        let mock = MockExplorer::default();
+        let spender_tx = make_htlc_tx(10_000);
+
+        for htlc in commitment_tx.htlcs() {
+            let outpoint = bitcoin::OutPoint {
+                txid: commitment_txid,
+                vout: htlc.transaction_output_index.unwrap(),
+            };
+            mock.set_confirms(outpoint, None);
+            mock.set_spending_tx(outpoint, Some(spender_tx.clone()));
+        }
+
+        let explorer_client: Option<Box<dyn Explorer>> = Some(Box::new(mock));
+        let status = get_htlc_spend_status(&explorer_client, &commitment_tx, true).await.unwrap();
+
+        assert_eq!(status.spent_indices, vec![true, true, true]);
+        assert_eq!(status.spender_txs.len(), 1);
+        assert_eq!(status.spender_txs[0].compute_txid(), spender_tx.compute_txid());
+    }
+
+    #[tokio::test]
+    async fn collect_delayed_sweep_outputs_finds_htlc_tx_outputs() {
+        let delayed_script = make_p2wpkh_script(9);
+        let mut htlc_tx = make_htlc_tx(10_000);
+        htlc_tx.output[0].script_pubkey = delayed_script.clone();
+
+        let mock = MockExplorer::default();
+        mock.set_confirms(bitcoin::OutPoint { txid: htlc_tx.compute_txid(), vout: 0 }, Some(6));
+
+        let outputs = collect_delayed_sweep_outputs(
+            &mock,
+            "HTLC transaction 0",
+            &htlc_tx,
+            &delayed_script,
+            6,
+            make_test_pubkey(3),
+            make_test_pubkey(2),
+        )
+        .await;
+
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].outpoint, OutPoint { txid: htlc_tx.compute_txid(), index: 0 });
+        assert_eq!(outputs[0].output, htlc_tx.output[0]);
+    }
+
+    #[tokio::test]
+    async fn collect_delayed_sweep_outputs_skips_failed_explorer_lookup() {
+        let delayed_script = make_p2wpkh_script(9);
+        let mut htlc_tx = make_htlc_tx(10_000);
+        htlc_tx.output = vec![
+            TxOut { value: Amount::from_sat(4_000), script_pubkey: delayed_script.clone() },
+            TxOut { value: Amount::from_sat(6_000), script_pubkey: delayed_script.clone() },
+        ];
+
+        let mock = MockExplorer::default();
+        let txid = htlc_tx.compute_txid();
+        mock.set_confirmation_error(bitcoin::OutPoint { txid, vout: 0 }, "lookup failed");
+        mock.set_confirms(bitcoin::OutPoint { txid, vout: 1 }, Some(6));
+
+        let outputs = collect_delayed_sweep_outputs(
+            &mock,
+            "HTLC transaction 0",
+            &htlc_tx,
+            &delayed_script,
+            6,
+            make_test_pubkey(3),
+            make_test_pubkey(2),
+        )
+        .await;
+
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].outpoint, OutPoint { txid, index: 1 });
+        assert_eq!(outputs[0].output, htlc_tx.output[1]);
     }
 
     #[tokio::test]
@@ -1418,6 +1612,94 @@ mod tests {
 
         let state = state.lock().unwrap();
         assert_eq!(state.spent_htlc_indices, vec![vec![false, false]]);
+        assert!(state.wallet_signs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_close_inner_closed_static_sweeps_spent_htlc_spender_outputs() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let commitment_tx = make_commitment_tx(vec![make_htlc_output(1)]);
+        let commitment_txid = commitment_tx.trust().built_transaction().transaction.compute_txid();
+        let htlc_outpoint = bitcoin::OutPoint {
+            txid: commitment_txid,
+            vout: commitment_tx.htlcs()[0].transaction_output_index.unwrap(),
+        };
+        let mut htlc_spender_tx = make_htlc_tx(10_000);
+        htlc_spender_tx.output[0].script_pubkey = ScriptBuf::new();
+        let delayed_outpoint = bitcoin::OutPoint { txid: htlc_spender_tx.compute_txid(), vout: 0 };
+        let signer =
+            TestRecoverySigner::new(CommitmentType::StaticRemoteKey, Vec::new(), state.clone())
+                .with_current_commitment_tx(commitment_tx);
+        let keys = TestRecoveryKeys::new(vec![signer], state.clone());
+        let mock = MockExplorer::default();
+        mock.set_confirms(funding_bitcoin_outpoint(), None);
+        mock.set_confirms(htlc_outpoint, None);
+        mock.set_spending_tx(htlc_outpoint, Some(htlc_spender_tx));
+        mock.set_confirms(delayed_outpoint, Some(6));
+
+        recover_close_inner(
+            Network::Regtest,
+            &destination_address(),
+            keys,
+            None,
+            &[],
+            Some(Box::new(mock.clone())),
+            true,
+            false,
+        )
+        .await;
+
+        let broadcasts = mock.broadcasts();
+        assert_eq!(broadcasts.len(), 1);
+        assert_eq!(broadcasts[0].input[0].previous_output, delayed_outpoint);
+
+        let state = state.lock().unwrap();
+        assert_eq!(state.spent_htlc_indices, vec![vec![true]]);
+        assert!(state.wallet_signs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn recover_close_inner_closed_static_does_not_collect_new_htlc_txs() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let commitment_tx = make_commitment_tx(vec![make_htlc_output(1)]);
+        let commitment_txid = commitment_tx.trust().built_transaction().transaction.compute_txid();
+        let htlc_outpoint = bitcoin::OutPoint {
+            txid: commitment_txid,
+            vout: commitment_tx.htlcs()[0].transaction_output_index.unwrap(),
+        };
+        let mut new_htlc_tx = make_htlc_tx(10_000);
+        new_htlc_tx.output[0].script_pubkey = ScriptBuf::new();
+        let new_delayed_outpoint = bitcoin::OutPoint { txid: new_htlc_tx.compute_txid(), vout: 0 };
+        let signer = TestRecoverySigner::new(
+            CommitmentType::StaticRemoteKey,
+            vec![new_htlc_tx.clone()],
+            state.clone(),
+        )
+        .with_current_commitment_tx(commitment_tx);
+        let keys = TestRecoveryKeys::new(vec![signer], state.clone());
+        let mock = MockExplorer::default();
+        mock.set_confirms(funding_bitcoin_outpoint(), None);
+        mock.set_confirms(htlc_outpoint, Some(1));
+        mock.set_confirms(new_delayed_outpoint, Some(6));
+
+        recover_close_inner(
+            Network::Regtest,
+            &destination_address(),
+            keys,
+            None,
+            &[],
+            Some(Box::new(mock.clone())),
+            true,
+            false,
+        )
+        .await;
+
+        let broadcasts = mock.broadcasts();
+        assert_eq!(broadcasts.len(), 1);
+        assert_eq!(broadcasts[0].compute_txid(), new_htlc_tx.compute_txid());
+
+        let state = state.lock().unwrap();
+        assert_eq!(state.spent_htlc_indices, vec![vec![false]]);
         assert!(state.wallet_signs.is_empty());
     }
 
