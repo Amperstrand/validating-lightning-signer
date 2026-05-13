@@ -570,14 +570,14 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
             }
             CommitmentType::StaticRemoteKey => {
                 info!(
-                    "skipping second-level HTLC broadcasting for StaticRemoteKey channel {:?}; only holder close and delayed-output sweep recovery are supported",
+                    "StaticRemoteKey HTLC recovery enabled for channel {:?}; second-level HTLC transactions carry their own fees",
                     funding_outpoint
                 );
                 None
             }
             unsupported => {
                 warn!(
-                    "skipping channel {:?}: recovery supports StaticRemoteKey close/delayed-sweep recovery and AnchorsZeroFeeHtlc second-level HTLC recovery; found unsupported commitment type {:?}",
+                    "skipping channel {:?}: recovery supports StaticRemoteKey and AnchorsZeroFeeHtlc holder force-close recovery; found unsupported commitment type {:?}",
                     funding_outpoint, unsupported
                 );
                 continue;
@@ -597,9 +597,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
             None
         };
 
-        let spent_htlc_indices = if anchor_fee_rate.is_none() {
-            vec![true; current_commitment_tx.htlcs().len()]
-        } else if explorer_client.is_none() || funding_confirms.is_some() {
+        let spent_htlc_indices = if explorer_client.is_none() || funding_confirms.is_some() {
             vec![false; current_commitment_tx.htlcs().len()]
         } else {
             get_spent_htlc_indices(&explorer_client, &current_commitment_tx)
@@ -621,7 +619,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                 }
             }
         } else {
-            Vec::new()
+            htlc_txs
         };
         let txid = tx.compute_txid();
         debug!("closing tx {:?}", &tx);
@@ -1348,7 +1346,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recover_close_inner_open_static_channel_broadcasts_close_only() {
+    async fn recover_close_inner_open_static_channel_broadcasts_close_and_htlc_txs() {
         let state = Arc::new(Mutex::new(TestRecoveryState::default()));
         let signer = TestRecoverySigner::new(
             CommitmentType::StaticRemoteKey,
@@ -1376,14 +1374,15 @@ mod tests {
         .await;
 
         let broadcasts = mock.broadcasts();
-        assert_eq!(broadcasts.len(), 1);
+        assert_eq!(broadcasts.len(), 2);
         assert!(broadcasts[0]
             .input
             .iter()
             .any(|input| { input.previous_output == funding_bitcoin_outpoint() }));
+        assert_eq!(broadcasts[1].input[0].previous_output, bitcoin_outpoint(43, 0));
 
         let state = state.lock().unwrap();
-        assert_eq!(state.spent_htlc_indices, vec![vec![true, true]]);
+        assert_eq!(state.spent_htlc_indices, vec![vec![false, false]]);
         assert!(state.wallet_signs.is_empty());
     }
 
@@ -1418,7 +1417,7 @@ mod tests {
         assert!(mock.broadcasts().is_empty());
 
         let state = state.lock().unwrap();
-        assert_eq!(state.spent_htlc_indices, vec![vec![true, true]]);
+        assert_eq!(state.spent_htlc_indices, vec![vec![false, false]]);
         assert!(state.wallet_signs.is_empty());
     }
 
@@ -1627,7 +1626,7 @@ mod tests {
         .await;
 
         let state = state.lock().unwrap();
-        assert_eq!(state.spent_htlc_indices, vec![vec![true, true]]);
+        assert_eq!(state.spent_htlc_indices, vec![vec![false, false]]);
         assert!(state.wallet_signs.is_empty());
     }
 }
