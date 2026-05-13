@@ -1461,6 +1461,32 @@ impl Channel {
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
     > {
+        self.sign_holder_commitment_tx_for_recovery_inner(spent_htlc_indices, true)
+    }
+
+    /// Sign a holder commitment and HTLCs for a recovery dry-run.
+    ///
+    /// This builds and signs the same transactions as
+    /// [`Self::sign_holder_commitment_tx_for_recovery`], but does not mark the
+    /// channel closed or persist channel-closed state.
+    pub fn sign_holder_commitment_tx_for_recovery_dry_run(
+        &mut self,
+        spent_htlc_indices: &[bool],
+    ) -> Result<
+        (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
+        Status,
+    > {
+        self.sign_holder_commitment_tx_for_recovery_inner(spent_htlc_indices, false)
+    }
+
+    fn sign_holder_commitment_tx_for_recovery_inner(
+        &mut self,
+        spent_htlc_indices: &[bool],
+        persist_close: bool,
+    ) -> Result<
+        (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
+        Status,
+    > {
         let holder_commitment = self.get_latest_holder_commitment_for_close()?;
         let CommitmentSignatures(counterparty_commit_sig, counterparty_htlc_sigs) =
             holder_commitment.counterparty_signatures;
@@ -1513,8 +1539,10 @@ impl Channel {
             spent_htlc_indices,
         )?;
 
-        self.enforcement_state.channel_closed = true;
-        trace_enforcement_state!(self);
+        if persist_close {
+            self.enforcement_state.channel_closed = true;
+            trace_enforcement_state!(self);
+        }
 
         let revocation_basepoint = self.counterparty_pubkeys().revocation_basepoint;
         let revocation_pubkey = derive_public_revocation_key(
@@ -1526,7 +1554,9 @@ impl Channel {
         let ck =
             self.get_unilateral_close_key(&Some(per_commitment_point), &Some(revocation_pubkey))?;
 
-        self.persist()?;
+        if persist_close {
+            self.persist()?;
+        }
         Ok((tx, htlc_txs, revocable_redeemscript.to_p2wsh(), ck, revocation_pubkey.0))
     }
 
@@ -3826,6 +3856,20 @@ mod tests {
 
         assert!(htlc_txs.is_empty());
 
+        verify_recovery_result(&channel, &commitment_tx, &htlc_txs);
+    }
+
+    #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_dry_run_leaves_channel_open() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _) = setup_test_channel(&node, &node1, false, 0);
+
+        assert!(!channel.enforcement_state.channel_closed);
+        let (commitment_tx, htlc_txs, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery_dry_run(&[]).unwrap();
+
+        assert!(!channel.enforcement_state.channel_closed);
         verify_recovery_result(&channel, &commitment_tx, &htlc_txs);
     }
 

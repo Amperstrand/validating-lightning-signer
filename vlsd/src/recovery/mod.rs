@@ -74,6 +74,7 @@ pub trait RecoverySign {
     fn sign_holder_commitment_tx_for_recovery(
         &self,
         spent_htlc_indices: &[bool],
+        dry_run: bool,
     ) -> Result<
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
@@ -85,6 +86,10 @@ pub trait RecoverySign {
     fn commitment_type(&self) -> CommitmentType;
 }
 
+fn recovery_mode(dry_run: bool) -> &'static str {
+    if dry_run { "dry-run" } else { "broadcast" }
+}
+
 pub async fn recover_l1<R: RecoveryKeys>(
     network: Network,
     block_explorer_type: BlockExplorerType,
@@ -92,6 +97,7 @@ pub async fn recover_l1<R: RecoveryKeys>(
     destination: &str,
     keys: R,
     max_index: u32,
+    dry_run: bool,
 ) {
     match block_explorer_type {
         BlockExplorerType::Esplora => {}
@@ -102,6 +108,8 @@ pub async fn recover_l1<R: RecoveryKeys>(
 
     let url = block_explorer_rpc.expect("must have block explorer rpc");
     let esplora = EsploraClient::new(url).await;
+
+    info!("starting l1 recovery scan: max_index={} mode={}", max_index, recovery_mode(dry_run));
 
     let mut utxos = Vec::new();
     for index in 0..max_index {
@@ -130,9 +138,11 @@ pub async fn recover_l1<R: RecoveryKeys>(
         );
     }
 
-    if destination == "none" {
-        info!("no destination specified, only printing txs");
-    }
+    info!(
+        "l1 recovery scan complete: scanned {} derivation indexes, found {} spendable outputs",
+        max_index,
+        utxos.len()
+    );
 
     let destination_address: Address<NetworkUnchecked> =
         destination.parse().expect("destination address must be valid");
@@ -144,14 +154,35 @@ pub async fn recover_l1<R: RecoveryKeys>(
     let destination_address = destination_address.assume_checked();
     let feerate_per_kw = get_feerate(&esplora).await.expect("get feerate");
 
-    for chunk in utxos.chunks(10) {
+    let total_sweep_txs = (utxos.len() + 9) / 10;
+    let mut prepared_sweep_txs = 0;
+    for (chunk_index, chunk) in utxos.chunks(10).enumerate() {
         let tx = match make_l1_sweep(&keys, &destination_address, chunk, feerate_per_kw) {
             Some(value) => value,
             None => continue,
         };
 
-        esplora.broadcast_transaction(&tx).await.expect("broadcast tx");
+        let txid = tx.compute_txid();
+        prepared_sweep_txs += 1;
+        info!(
+            "l1 recovery progress: sweep tx {}/{} prepared with {} inputs: {}",
+            chunk_index + 1,
+            total_sweep_txs,
+            chunk.len(),
+            txid
+        );
+        if dry_run {
+            info!("dry-run: would broadcast l1 sweep tx {}: {}", txid, serialize_hex(&tx));
+        } else {
+            esplora.broadcast_transaction(&tx).await.expect("broadcast tx");
+            info!("broadcast l1 sweep tx {}", txid);
+        }
     }
+    info!(
+        "l1 recovery complete: prepared {} sweep transactions from {} spendable outputs",
+        prepared_sweep_txs,
+        utxos.len()
+    );
 }
 
 // chunk is a list of (derivation-index, utxo)
@@ -425,9 +456,20 @@ async fn broadcast_htlc_txs<E: Explorer + ?Sized>(
     explorer: &E,
     htlc_txs: &[Transaction],
     funding_outpoint: &OutPoint,
+    dry_run: bool,
 ) {
     for (idx, htlc_tx) in htlc_txs.iter().enumerate() {
         let txid = htlc_tx.compute_txid();
+        if dry_run {
+            info!(
+                "dry-run: would broadcast HTLC recovery transaction {} for channel {:?}: {}: {}",
+                idx,
+                funding_outpoint,
+                txid,
+                serialize_hex(htlc_tx)
+            );
+            continue;
+        }
         match explorer.broadcast_transaction(htlc_tx).await {
             Ok(()) => {
                 info!(
@@ -453,6 +495,7 @@ pub async fn recover_close<R: RecoveryKeys>(
     keys: R,
     fee_rate: Option<u32>,
     input_utxos: &[InputUtxo],
+    dry_run: bool,
 ) {
     let can_lookup_spending_tx = matches!(block_explorer_type, BlockExplorerType::Esplora);
     let explorer_client = match block_explorer_rpc {
@@ -468,6 +511,7 @@ pub async fn recover_close<R: RecoveryKeys>(
         input_utxos,
         explorer_client,
         can_lookup_spending_tx,
+        dry_run,
     )
     .await;
 }
@@ -480,6 +524,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
     input_utxos: &[InputUtxo],
     explorer_client: Option<Box<dyn Explorer>>,
     can_lookup_spending_tx: bool,
+    dry_run: bool,
 ) {
     let mut sweeps = Vec::new();
 
@@ -563,7 +608,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
         };
 
         let (tx, htlc_txs, revocable_script, uck, revocation_pubkey) =
-            signer.sign_holder_commitment_tx_for_recovery(&spent_htlc_indices).expect("sign");
+            signer.sign_holder_commitment_tx_for_recovery(&spent_htlc_indices, dry_run).expect("sign");
         let htlc_txs = if let Some(fee_rate) = anchor_fee_rate {
             match add_fee_to_htlc_txs(&keys, htlc_txs, fee_rate, input_utxos, &funding_outpoint) {
                 Ok(htlc_txs) => htlc_txs,
@@ -583,9 +628,22 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
         info!("closing txid {}", txid);
         if let Some(bitcoind_client) = &explorer_client {
             if let Some(confirms) = funding_confirms {
-                info!("channel is open ({} confirms), broadcasting force-close {}", confirms, txid);
-                bitcoind_client.broadcast_transaction(&tx).await.expect("failed to broadcast");
-                broadcast_htlc_txs(bitcoind_client.as_ref(), &htlc_txs, &funding_outpoint).await;
+                if dry_run {
+                    info!(
+                        "dry-run: channel is open ({} confirms), would broadcast force-close {}: {}",
+                        confirms,
+                        txid,
+                        serialize_hex(&tx)
+                    );
+                } else {
+                    info!(
+                        "channel is open ({} confirms), broadcasting force-close {}",
+                        confirms, txid
+                    );
+                    bitcoind_client.broadcast_transaction(&tx).await.expect("failed to broadcast");
+                }
+                broadcast_htlc_txs(bitcoind_client.as_ref(), &htlc_txs, &funding_outpoint, dry_run)
+                    .await;
             } else {
                 if anchor_fee_rate.is_some() && !can_lookup_spending_tx {
                     error!(
@@ -630,7 +688,8 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                         }
                     }
                 }
-                broadcast_htlc_txs(bitcoind_client.as_ref(), &htlc_txs, &funding_outpoint).await;
+                broadcast_htlc_txs(bitcoind_client.as_ref(), &htlc_txs, &funding_outpoint, dry_run)
+                    .await;
                 let required_confirms = signer.counterparty_selected_contest_delay();
                 info!(
                     "channel is already closed, check outputs, waiting until {} confirms",
@@ -684,8 +743,8 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
         }
     }
 
-    if destination == "none" {
-        info!("no address specified, not sweeping");
+    if sweeps.is_empty() {
+        info!("no delayed outputs ready to sweep");
         return;
     }
 
@@ -705,7 +764,13 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
         );
         debug!("sweep tx {:?}", &sweep_tx);
         info!("sweep txid {}", sweep_tx.compute_txid());
-        if let Some(bitcoind_client) = &explorer_client {
+        if dry_run {
+            info!(
+                "dry-run: would broadcast delayed-output sweep tx {}: {}",
+                sweep_tx.compute_txid(),
+                serialize_hex(&sweep_tx)
+            );
+        } else if let Some(bitcoind_client) = &explorer_client {
             bitcoind_client.broadcast_transaction(&sweep_tx).await.expect("failed to broadcast");
         }
     }
@@ -931,14 +996,22 @@ mod tests {
         fn sign_holder_commitment_tx_for_recovery(
             &self,
             spent_htlc_indices: &[bool],
+            _dry_run: bool,
         ) -> Result<
             (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
             Status,
         > {
             self.state.lock().unwrap().spent_htlc_indices.push(spent_htlc_indices.to_vec());
+            let htlc_txs = if !spent_htlc_indices.is_empty()
+                && spent_htlc_indices.iter().all(|spent| *spent)
+            {
+                Vec::new()
+            } else {
+                self.htlc_txs.clone()
+            };
             Ok((
                 self.closing_tx.clone(),
-                self.htlc_txs.clone(),
+                htlc_txs,
                 ScriptBuf::new(),
                 (make_test_privkey(1), Vec::new()),
                 make_test_pubkey(2),
@@ -1258,6 +1331,7 @@ mod tests {
             &input_utxos,
             Some(Box::new(mock.clone())),
             false,
+            false,
         )
         .await;
 
@@ -1296,6 +1370,7 @@ mod tests {
             None,
             &[],
             Some(Box::new(mock.clone())),
+            false,
             false,
         )
         .await;
@@ -1336,6 +1411,7 @@ mod tests {
             &[],
             Some(Box::new(mock.clone())),
             false,
+            false,
         )
         .await;
 
@@ -1368,6 +1444,7 @@ mod tests {
             &input_utxos,
             Some(Box::new(mock.clone())),
             true,
+            false,
         )
         .await;
 
@@ -1405,6 +1482,7 @@ mod tests {
             &input_utxos,
             Some(Box::new(mock.clone())),
             true,
+            false,
         )
         .await;
 
@@ -1432,6 +1510,7 @@ mod tests {
             &input_utxos,
             Some(Box::new(mock.clone())),
             true,
+            false,
         )
         .await;
 
@@ -1475,6 +1554,7 @@ mod tests {
                 keys,
                 fee_rate,
                 &input_utxos,
+                false,
             )
             .await;
 
@@ -1485,7 +1565,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recover_close_dry_run_signs_and_funds_anchor_htlc_txs() {
+    async fn recover_close_dry_run_signs_and_funds_anchor_htlc_txs_without_broadcasting() {
         let state = Arc::new(Mutex::new(TestRecoveryState::default()));
         let signer = TestRecoverySigner::new(
             CommitmentType::AnchorsZeroFeeHtlc,
@@ -1494,17 +1574,22 @@ mod tests {
         );
         let keys = TestRecoveryKeys::new(vec![signer], state.clone());
         let input_utxos = vec![make_fee_utxo(60_000)];
+        let mock = MockExplorer::default();
+        mock.set_confirms(funding_bitcoin_outpoint(), Some(3));
 
-        recover_close(
+        recover_close_inner(
             Network::Regtest,
-            BlockExplorerType::Bitcoind,
-            None,
             "none",
             keys,
             Some(1000),
             &input_utxos,
+            Some(Box::new(mock.clone())),
+            false,
+            true,
         )
         .await;
+
+        assert!(mock.broadcasts().is_empty());
 
         let state = state.lock().unwrap();
         assert_eq!(state.spent_htlc_indices, vec![Vec::<bool>::new()]);
@@ -1529,8 +1614,17 @@ mod tests {
         ]));
         let keys = TestRecoveryKeys::new(vec![signer], state.clone());
 
-        recover_close(Network::Regtest, BlockExplorerType::Bitcoind, None, "none", keys, None, &[])
-            .await;
+        recover_close(
+            Network::Regtest,
+            BlockExplorerType::Bitcoind,
+            None,
+            "none",
+            keys,
+            None,
+            &[],
+            true,
+        )
+        .await;
 
         let state = state.lock().unwrap();
         assert_eq!(state.spent_htlc_indices, vec![vec![true, true]]);

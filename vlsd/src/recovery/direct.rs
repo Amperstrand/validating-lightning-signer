@@ -120,12 +120,18 @@ impl RecoverySign for DirectRecoverySigner {
     fn sign_holder_commitment_tx_for_recovery(
         &self,
         spent_htlc_indices: &[bool],
+        dry_run: bool,
     ) -> Result<
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
     > {
         let mut lock = self.lock();
-        Self::channel(&mut lock).sign_holder_commitment_tx_for_recovery(spent_htlc_indices)
+        if dry_run {
+            Self::channel(&mut lock)
+                .sign_holder_commitment_tx_for_recovery_dry_run(spent_htlc_indices)
+        } else {
+            Self::channel(&mut lock).sign_holder_commitment_tx_for_recovery(spent_htlc_indices)
+        }
     }
 
     fn funding_outpoint(&self) -> OutPoint {
