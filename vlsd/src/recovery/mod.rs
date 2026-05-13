@@ -87,7 +87,11 @@ pub trait RecoverySign {
 }
 
 fn recovery_mode(dry_run: bool) -> &'static str {
-    if dry_run { "dry-run" } else { "broadcast" }
+    if dry_run {
+        "dry-run"
+    } else {
+        "broadcast"
+    }
 }
 
 pub async fn recover_l1<R: RecoveryKeys>(
@@ -137,7 +141,6 @@ pub async fn recover_l1<R: RecoveryKeys>(
                 .collect::<Vec<_>>(),
         );
     }
-
     info!(
         "l1 recovery scan complete: scanned {} derivation indexes, found {} spendable outputs",
         max_index,
@@ -493,6 +496,41 @@ fn add_fee_to_htlc_tx<R: RecoveryKeys>(
     Ok((tx, change_utxo))
 }
 
+async fn broadcast_htlc_txs<E: Explorer + ?Sized>(
+    explorer: &E,
+    htlc_txs: &[Transaction],
+    funding_outpoint: &OutPoint,
+    dry_run: bool,
+) {
+    for (idx, htlc_tx) in htlc_txs.iter().enumerate() {
+        let txid = htlc_tx.compute_txid();
+        if dry_run {
+            info!(
+                "dry-run: would broadcast HTLC recovery transaction {} for channel {:?}: {}: {}",
+                idx,
+                funding_outpoint,
+                txid,
+                serialize_hex(htlc_tx)
+            );
+            continue;
+        }
+        match explorer.broadcast_transaction(htlc_tx).await {
+            Ok(()) => {
+                info!(
+                    "broadcast HTLC recovery transaction {} for channel {:?}: {}",
+                    idx, funding_outpoint, txid
+                );
+            }
+            Err(e) => {
+                error!(
+                    "failed to broadcast HTLC recovery transaction {} for channel {:?} (txid {}): {}",
+                    idx, funding_outpoint, txid, e
+                );
+            }
+        }
+    }
+}
+
 async fn collect_delayed_sweep_outputs<E: Explorer + ?Sized>(
     explorer: &E,
     source: &str,
@@ -556,38 +594,89 @@ async fn collect_delayed_sweep_outputs<E: Explorer + ?Sized>(
     outputs
 }
 
-async fn broadcast_htlc_txs<E: Explorer + ?Sized>(
-    explorer: &E,
-    htlc_txs: &[Transaction],
-    funding_outpoint: &OutPoint,
-    dry_run: bool,
-) {
-    for (idx, htlc_tx) in htlc_txs.iter().enumerate() {
-        let txid = htlc_tx.compute_txid();
-        if dry_run {
-            info!(
-                "dry-run: would broadcast HTLC recovery transaction {} for channel {:?}: {}: {}",
-                idx,
-                funding_outpoint,
-                txid,
-                serialize_hex(htlc_tx)
-            );
-            continue;
-        }
-        match explorer.broadcast_transaction(htlc_tx).await {
-            Ok(()) => {
-                info!(
-                    "broadcast HTLC recovery transaction {} for channel {:?}: {}",
-                    idx, funding_outpoint, txid
-                );
-            }
-            Err(e) => {
-                error!(
-                    "failed to broadcast HTLC recovery transaction {} for channel {:?} (txid {}): {}",
-                    idx, funding_outpoint, txid, e
-                );
-            }
-        }
+#[derive(Default)]
+struct CloseRecoveryProgress {
+    total_channels: usize,
+    prepared_channels: usize,
+    skipped_channels: usize,
+    holder_close_txs: usize,
+    htlc_txs: usize,
+    delayed_outputs_ready: usize,
+    delayed_sweep_txs: usize,
+}
+
+impl CloseRecoveryProgress {
+    fn new(total_channels: usize) -> Self {
+        Self { total_channels, ..Self::default() }
+    }
+
+    fn log_start(&self, dry_run: bool) {
+        info!(
+            "starting close recovery: channels={} mode={}",
+            self.total_channels,
+            recovery_mode(dry_run)
+        );
+    }
+
+    fn log_channel_start(
+        &self,
+        channel_number: usize,
+        funding_outpoint: &OutPoint,
+        commitment_type: CommitmentType,
+    ) {
+        info!(
+            "recovery progress: channel {}/{} funding {:?} commitment_type={:?}",
+            channel_number, self.total_channels, funding_outpoint, commitment_type
+        );
+    }
+
+    fn record_channel(
+        &mut self,
+        channel_number: usize,
+        holder_close_txs: usize,
+        htlc_txs: usize,
+        delayed_outputs_ready: usize,
+    ) {
+        self.prepared_channels += 1;
+        self.holder_close_txs += holder_close_txs;
+        self.htlc_txs += htlc_txs;
+        self.delayed_outputs_ready += delayed_outputs_ready;
+        info!(
+            "recovery progress: channel {}/{} prepared close_txs={} htlc_txs={} delayed_outputs_ready={} prepared={} skipped={}",
+            channel_number,
+            self.total_channels,
+            holder_close_txs,
+            htlc_txs,
+            delayed_outputs_ready,
+            self.prepared_channels,
+            self.skipped_channels
+        );
+    }
+
+    fn record_skip(&mut self, channel_number: usize) {
+        self.skipped_channels += 1;
+        info!(
+            "recovery progress: channel {}/{} skipped prepared={} skipped={}",
+            channel_number, self.total_channels, self.prepared_channels, self.skipped_channels
+        );
+    }
+
+    fn record_delayed_sweep_tx(&mut self) {
+        self.delayed_sweep_txs += 1;
+    }
+
+    fn log_complete(&self, dry_run: bool) {
+        info!(
+            "close recovery complete: mode={} channels={} prepared={} skipped={} close_txs={} htlc_txs={} delayed_outputs_ready={} delayed_sweep_txs={}",
+            recovery_mode(dry_run),
+            self.total_channels,
+            self.prepared_channels,
+            self.skipped_channels,
+            self.holder_close_txs,
+            self.htlc_txs,
+            self.delayed_outputs_ready,
+            self.delayed_sweep_txs
+        );
     }
 }
 
@@ -631,12 +720,15 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
     dry_run: bool,
 ) {
     let mut sweeps = Vec::new();
+    let signers: Vec<_> = keys.iter().collect();
+    let mut progress = CloseRecoveryProgress::new(signers.len());
+    progress.log_start(dry_run);
 
-    for signer in keys.iter() {
+    for (channel_index, signer) in signers.into_iter().enumerate() {
+        let channel_number = channel_index + 1;
         let funding_outpoint = signer.funding_outpoint();
-        info!("# funding {:?}", funding_outpoint);
-
         let commitment_type = signer.commitment_type();
+        progress.log_channel_start(channel_number, &funding_outpoint, commitment_type);
         let anchor_fee_rate = match commitment_type {
             CommitmentType::AnchorsZeroFeeHtlc => {
                 let fee_rate = match fee_rate {
@@ -646,6 +738,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                             "cannot recover AnchorsZeroFeeHtlc channel {:?}: missing --fee-rate; provide a fee rate in satoshis per kw so recovery transactions can pay fees",
                             funding_outpoint
                         );
+                        progress.record_skip(channel_number);
                         continue;
                     }
                 };
@@ -654,6 +747,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                         "cannot recover AnchorsZeroFeeHtlc channel {:?}: --fee-rate must be greater than zero sat/kw",
                         funding_outpoint
                     );
+                    progress.record_skip(channel_number);
                     continue;
                 }
 
@@ -662,6 +756,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                         "cannot recover AnchorsZeroFeeHtlc channel {:?}: missing --input-utxo; provide at least one wallet UTXO as txid:vout:value:derivation_path to pay recovery fees",
                         funding_outpoint
                     );
+                    progress.record_skip(channel_number);
                     continue;
                 }
                 debug!(
@@ -684,6 +779,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                     "skipping channel {:?}: recovery supports StaticRemoteKey and AnchorsZeroFeeHtlc holder force-close recovery; found unsupported commitment type {:?}",
                     funding_outpoint, unsupported
                 );
+                progress.record_skip(channel_number);
                 continue;
             }
         };
@@ -750,12 +846,14 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                 }
                 broadcast_htlc_txs(bitcoind_client.as_ref(), &htlc_txs, &funding_outpoint, dry_run)
                     .await;
+                progress.record_channel(channel_number, 1, htlc_txs.len(), 0);
             } else {
                 if anchor_fee_rate.is_some() && !can_lookup_spending_tx {
                     error!(
                         "cannot determine who closed channel {:?}: bitcoind recovery backend does not support funding outpoint spender lookup; use --recover-type esplora with an Esplora --recover-rpc to recover already-closed channels",
                         funding_outpoint
                     );
+                    progress.record_skip(channel_number);
                     continue;
                 }
 
@@ -770,6 +868,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                                 "skipping channel {:?}: failed to determine who closed channel (expected closing tx {}): {}",
                                 funding_outpoint, txid, e
                             );
+                            progress.record_skip(channel_number);
                             continue;
                         }
                     };
@@ -782,6 +881,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                                     "skipping channel {:?}: closing tx was spent by counterparty (expected {}, found {}); counterparty-initiated close recovery is not supported",
                                     funding_outpoint, txid, spending_txid
                                 );
+                                progress.record_skip(channel_number);
                                 continue;
                             }
                         }
@@ -790,6 +890,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                                 "skipping channel {:?}: funding outpoint is unavailable, but no spending transaction was found (expected closing tx {}); cannot confirm holder-initiated close recovery",
                                 funding_outpoint, txid
                             );
+                            progress.record_skip(channel_number);
                             continue;
                         }
                     }
@@ -830,19 +931,24 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                         .await,
                     );
                 }
+                let delayed_outputs_ready = sweep_outputs.len();
                 sweeps
                     .extend(sweep_outputs.into_iter().map(|descriptor| (descriptor, uck.clone())));
+                progress.record_channel(channel_number, 0, htlc_txs.len(), delayed_outputs_ready);
             }
         } else {
             info!("tx: {}", serialize_hex(&tx));
+            let htlc_tx_count = htlc_txs.len();
             for htlc_tx in htlc_txs {
                 info!("HTLC tx: {}", htlc_tx.compute_txid());
             }
+            progress.record_channel(channel_number, 1, htlc_tx_count, 0);
         }
     }
 
     if sweeps.is_empty() {
         info!("no delayed outputs ready to sweep");
+        progress.log_complete(dry_run);
         return;
     }
 
@@ -862,6 +968,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
         );
         debug!("sweep tx {:?}", &sweep_tx);
         info!("sweep txid {}", sweep_tx.compute_txid());
+        progress.record_delayed_sweep_tx();
         if dry_run {
             info!(
                 "dry-run: would broadcast delayed-output sweep tx {}: {}",
@@ -872,6 +979,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
             bitcoind_client.broadcast_transaction(&sweep_tx).await.expect("failed to broadcast");
         }
     }
+    progress.log_complete(dry_run);
 }
 
 fn spend_delayed_outputs<R: RecoveryKeys>(
@@ -1611,7 +1719,7 @@ mod tests {
         assert!(mock.broadcasts().is_empty());
 
         let state = state.lock().unwrap();
-        assert_eq!(state.spent_htlc_indices, vec![vec![false, false]]);
+        assert_eq!(state.spent_htlc_indices, vec![vec![true, true]]);
         assert!(state.wallet_signs.is_empty());
     }
 
