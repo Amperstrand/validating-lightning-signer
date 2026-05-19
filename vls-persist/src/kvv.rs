@@ -2,6 +2,7 @@ pub mod cloud;
 pub mod memory;
 #[cfg(any(feature = "redb-kvv", test))]
 pub mod redb;
+pub mod transactional;
 
 use crate::model::*;
 use alloc::format;
