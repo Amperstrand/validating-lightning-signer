@@ -25,8 +25,17 @@ use lightning_signer::SendSync;
 pub struct BackupPersister<M: Persist, B: Persist> {
     main: M,
     backup: B,
-    // this flag prevents reads/writes to the main persister if it requires recovery
-    // until the initial restore from persistence is complete
+    // This flag prevents reads/writes from going to the main persister while it
+    // requires recovery, until the initial restore from persistence is complete.
+    //
+    // This is a cross-thread handoff. While `main` requires recovery, calls are
+    // routed through `backup`. Once startup restore finishes, `on_initial_restore`
+    // stores `true` with `Release`, and `main_is_ready` loads it with `Acquire`.
+    // That pairing ensures that a thread observing `true` also observes the restore
+    // work that happened before the flag was set.
+    //
+    // `Relaxed` would only make the boolean read/write atomic; it would not publish
+    // the restored state to the thread that switches back to `main`.
     initial_restore_complete: AtomicBool,
 }
 
@@ -39,7 +48,7 @@ impl<M: Persist, B: Persist> BackupPersister<M, B> {
     // the main persister is ready if it doesn't require recovery, or if the initial restore
     // from the backup persister is complete.
     fn main_is_ready(&self) -> bool {
-        !self.main.recovery_required() || self.initial_restore_complete.load(Ordering::Relaxed)
+        !self.main.recovery_required() || self.initial_restore_complete.load(Ordering::Acquire)
     }
 }
 
@@ -183,7 +192,7 @@ impl<M: Persist, B: Persist> Persist for BackupPersister<M, B> {
     }
 
     fn on_initial_restore(&self) -> bool {
-        self.initial_restore_complete.store(true, Ordering::Relaxed);
+        self.initial_restore_complete.store(true, Ordering::Release);
         // we always want a sync on startup, either main -> backup in normal
         // operation or backup -> main when recovering from main persister failure
         true
