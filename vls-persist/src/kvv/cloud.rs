@@ -8,6 +8,17 @@ use log::*;
 /// The key used to store the last-writer record.
 pub const LAST_WRITER_KEY: &str = "_WRITER";
 
+/// An iterator over a cloud KVVStore range.
+pub struct Iter(alloc::vec::IntoIter<KVV>);
+
+impl Iterator for Iter {
+    type Item = KVV;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
 /// A cloud key-version-value store backed by a local KVVStore.
 /// The local store maintains an up to date copy of the cloud store.
 /// Updating the stores is transactional:
@@ -88,7 +99,7 @@ impl<L: KVVStore> CloudKVVStore<L> {
 impl<L: KVVStore> SendSync for CloudKVVStore<L> {}
 
 impl<L: KVVStore> KVVStore for CloudKVVStore<L> {
-    type Iter = L::Iter;
+    type Iter = Iter;
 
     fn put(&self, key: &str, value: Vec<u8>) -> Result<(), Error> {
         let version = self.local.get_version(key)?.map(|v| v + 1).unwrap_or(0);
@@ -139,8 +150,26 @@ impl<L: KVVStore> KVVStore for CloudKVVStore<L> {
     }
 
     fn get_prefix(&self, prefix: &str) -> Result<Self::Iter, Error> {
-        // TODO merge with commit log
-        self.local.get_prefix(prefix)
+        let mut result = self
+            .local
+            .get_prefix(prefix)?
+            .map(KVV::into_inner)
+            .collect::<BTreeMap<String, (u64, Vec<u8>)>>();
+
+        let commit_log_opt = self.commit_log.lock().unwrap();
+        if let Some(commit_log) = commit_log_opt.as_ref() {
+            for (key, version_value) in commit_log.iter() {
+                if key.starts_with(prefix) {
+                    result.insert(key.clone(), version_value.clone());
+                }
+            }
+        }
+
+        let kvvs = result
+            .into_iter()
+            .map(|(key, version_value)| KVV(key, version_value))
+            .collect::<Vec<_>>();
+        Ok(Iter(kvvs.into_iter()))
     }
 
     fn delete(&self, key: &str) -> Result<(), Error> {
@@ -318,15 +347,25 @@ mod tests {
     #[test]
     fn test_get_prefix() {
         let cloud = make_cloud_store();
-        cloud.enter().unwrap();
-
         cloud.local.put("prefix/key1", vec![1, 2, 3]).unwrap();
         cloud.local.put("prefix/key2", vec![4, 5, 6]).unwrap();
         cloud.local.put("other/key", vec![7, 8, 9]).unwrap();
 
-        let iter: crate::kvv::memory::Iter = cloud.get_prefix("prefix/").unwrap();
-        let results: Vec<KVV> = iter.collect();
-        assert_eq!(results.len(), 2);
+        let committed_results: Vec<_> =
+            cloud.get_prefix("prefix/").unwrap().map(KVV::into_inner).collect();
+        assert_eq!(committed_results.len(), 2);
+        assert_eq!(committed_results[0], ("prefix/key1".to_string(), (0, vec![1, 2, 3])));
+        assert_eq!(committed_results[1], ("prefix/key2".to_string(), (0, vec![4, 5, 6])));
+
+        cloud.enter().unwrap();
+        cloud.put("prefix/key1", vec![9, 9, 9]).unwrap();
+        cloud.put("prefix/key3", vec![10, 11, 12]).unwrap();
+
+        let results: Vec<_> = cloud.get_prefix("prefix/").unwrap().map(KVV::into_inner).collect();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0], ("prefix/key1".to_string(), (1, vec![9, 9, 9])));
+        assert_eq!(results[1], ("prefix/key2".to_string(), (0, vec![4, 5, 6])));
+        assert_eq!(results[2], ("prefix/key3".to_string(), (0, vec![10, 11, 12])));
 
         let iter = cloud.get_prefix("nonexistent/").unwrap();
         let results: Vec<KVV> = iter.collect();
