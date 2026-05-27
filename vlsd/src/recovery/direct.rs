@@ -165,7 +165,7 @@ impl DirectRecoverySigner {
         }
     }
 
-    fn lock(&self) -> MutexGuard<ChannelSlot> {
+    fn lock(&self) -> MutexGuard<'_, ChannelSlot> {
         self.channel.lock().unwrap()
     }
 }

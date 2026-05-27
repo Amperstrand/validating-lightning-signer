@@ -17,7 +17,7 @@ impl<T> Mutex<T> {
         Self { inner: RefCell::new(inner) }
     }
 
-    pub fn lock(&self) -> Result<MutexGuard<T>, ()> {
+    pub fn lock(&self) -> Result<MutexGuard<'_, T>, ()> {
         Ok(MutexGuard(self.inner.borrow_mut()))
     }
 }

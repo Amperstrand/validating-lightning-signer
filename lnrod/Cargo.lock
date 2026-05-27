@@ -3766,8 +3766,10 @@ version = "0.15.0-rc.1"
 dependencies = [
  "bit-vec",
  "log",
+ "serde_json",
  "vls-common",
  "vls-core",
+ "vls-persist",
  "vls-protocol",
 ]
 

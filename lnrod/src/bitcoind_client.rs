@@ -255,7 +255,7 @@ impl BlockSource for BitcoindClient {
         })
     }
 
-    fn get_best_block(&self) -> AsyncBlockSourceResult<(BlockHash, Option<u32>)> {
+    fn get_best_block(&self) -> AsyncBlockSourceResult<'_, (BlockHash, Option<u32>)> {
         Box::pin(async move {
             let info = self.get_blockchain_info().await;
             let mut latest_tip = self.latest_tip.lock().await;

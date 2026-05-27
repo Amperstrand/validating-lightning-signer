@@ -95,6 +95,7 @@ fn get_address_for_type(
     addr_type: AddressType,
 ) -> Result<Address, Status> {
     match addr_type {
+        #[allow(deprecated)]
         AddressType::Wrapped => node.get_wrapped_address(&derivation_path),
         AddressType::Native => node.get_native_address(&derivation_path),
         AddressType::Taproot => node.get_taproot_address(&derivation_path),

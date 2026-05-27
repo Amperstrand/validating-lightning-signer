@@ -750,8 +750,6 @@ mod tests {
             hex_encode(&manager.channel_seed_base),
             "ab7f29780659755f14afb82342dc19db7d817ace8c312e759a244648dfc25e53"
         );
-        let mut channel_id = [0u8; 32];
-        channel_id[0] = 1u8;
         let keys = make_test_keys(manager);
         assert_eq!(
             hex_encode(&keys.funding_key[..]),
@@ -783,8 +781,6 @@ mod tests {
             Network::Testnet,
             FixedStartingTimeFactory::new(0, 0).borrow(),
         );
-        let mut channel_id = [0u8; 32];
-        channel_id[0] = 1u8;
         let keys = make_test_keys(manager);
         assert_eq!(
             hex_encode(&keys.commitment_seed),

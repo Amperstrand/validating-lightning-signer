@@ -1564,7 +1564,7 @@ impl Node {
     }
 
     /// Lock and return the node state
-    pub fn get_state(&self) -> MutexGuard<NodeState> {
+    pub fn get_state(&self) -> MutexGuard<'_, NodeState> {
         self.state.lock().unwrap()
     }
 
@@ -2515,7 +2515,7 @@ impl Node {
         self.validator_factory().policy(self.network())
     }
 
-    pub(crate) fn validator_factory(&self) -> MutexGuard<Arc<dyn ValidatorFactory>> {
+    pub(crate) fn validator_factory(&self) -> MutexGuard<'_, Arc<dyn ValidatorFactory>> {
         self.validator_factory.lock().unwrap()
     }
 
@@ -2558,7 +2558,7 @@ impl Node {
     }
 
     /// Lock and return all the channels this node knows about.
-    pub fn get_channels(&self) -> MutexGuard<OrderedMap<ChannelId, Arc<Mutex<ChannelSlot>>>> {
+    pub fn get_channels(&self) -> MutexGuard<'_, OrderedMap<ChannelId, Arc<Mutex<ChannelSlot>>>> {
         self.channels.lock().unwrap()
     }
 
@@ -3094,7 +3094,6 @@ mod tests {
     use bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
     use bitcoin::secp256k1::SecretKey;
     use bitcoin::transaction::Version;
-    use bitcoin::{self, Txid};
     use bitcoin::{secp256k1, BlockHash, Sequence, TxIn, Witness};
     use bitcoin::{Address, Amount, OutPoint};
     use lightning::ln::chan_utils;
@@ -3107,7 +3106,7 @@ mod tests {
     use test_log::test;
     use vls_common::to_derivation_path;
 
-    use crate::channel::{ChannelBase, CommitmentType, InputUtxo};
+    use crate::channel::{ChannelBase, CommitmentType};
     use crate::policy::filter::{FilterRule, PolicyFilter};
     use crate::policy::simple_validator::{
         make_default_simple_policy, SimpleValidatorFactory, TestSimpleValidatorBuilder,
