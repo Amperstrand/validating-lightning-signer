@@ -80,8 +80,8 @@ fn policy_error_with_filter(
 ) -> Result<(), ValidationError> {
     warn!("policy failed: {} {}", tag, msg);
     let res = make_policy_error_with_filter(tag.clone(), msg.clone(), filter);
+    #[cfg(feature = "use_backtrace")]
     if let Err(ref e) = res {
-        #[cfg(feature = "use_backtrace")]
         warn!("BACKTRACE:\n{:?}", &e.bt);
     }
     res

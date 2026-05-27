@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+#[cfg_attr(not(feature = "device"), allow(dead_code))]
 mod tests;
 
 #[cfg(feature = "device")]

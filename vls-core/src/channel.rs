@@ -3198,7 +3198,7 @@ impl ChannelCommitmentPointProvider {
         Self { chan }
     }
 
-    fn get_channel(&self) -> MutexGuard<ChannelSlot> {
+    fn get_channel(&self) -> MutexGuard<'_, ChannelSlot> {
         self.chan.lock().unwrap()
     }
 }

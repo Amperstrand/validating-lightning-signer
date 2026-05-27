@@ -25,12 +25,18 @@ async fn test_redb_database() {
     do_basic_with_db(Arc::new(db)).await;
 }
 
+#[cfg(any(feature = "postgres", feature = "etcd"))]
 const DB_HOST: &'static str = "127.0.0.1";
+#[cfg(feature = "postgres")]
 const PG_PORT: u16 = 5432;
+#[cfg(feature = "postgres")]
 const PG_USER: &'static str = "dev";
+#[cfg(feature = "postgres")]
 const PG_PASSWORD: &'static str = "mysecretpassword";
+#[cfg(feature = "postgres")]
 const PG_DB: &'static str = "dev";
 
+#[cfg(feature = "postgres")]
 fn load_env_vars(port: u16) {
     std::env::set_var("PG_HOST", std::env::var("DB_HOST").unwrap_or(DB_HOST.to_string()));
     std::env::set_var("PG_PORT", port.to_string());

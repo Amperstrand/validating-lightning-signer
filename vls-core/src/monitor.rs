@@ -930,7 +930,7 @@ impl ChainMonitorBase {
     }
 
     // Add this getter method
-    fn get_state(&self) -> MutexGuard<State> {
+    fn get_state(&self) -> MutexGuard<'_, State> {
         self.state.lock().expect("lock")
     }
 }
@@ -957,7 +957,7 @@ impl ChainMonitor {
     }
 
     /// Get the locked state
-    pub fn get_state(&self) -> MutexGuard<State> {
+    pub fn get_state(&self) -> MutexGuard<'_, State> {
         self.state.lock().expect("lock")
     }
 

@@ -298,6 +298,30 @@ changelog:
         fi
       fi
 
+lints:
+  tags: [ $RUNNER_TAG ]
+  stage: build
+  image: rust:latest
+  cache:
+    key: vls-lints
+    paths:
+      - .cache/cargo
+  variables:
+    RUSTFLAGS: "-D warnings"
+  script:
+    - apt-get update
+    - apt-get install -y protobuf-compiler
+    # Main workspace: default features, then features other jobs exercise.
+    # No --all-features here because vls-core's std and no-std features don't coexist.
+    - cargo check --workspace --all-targets
+    - cargo check --workspace --all-targets --features vls-proxy/developer,vls-proxy/test_cli,vls-core/shuttle,vls-proxy/system-test
+    # Excluded crates (each is its own workspace).
+    - (cd lnrod && cargo check --workspace --all-targets --all-features)
+    - (cd lightning-storage-server && cargo check --workspace --all-targets --all-features)
+    - (cd wasm && cargo check --all-targets --all-features)
+    # embedded host build only; device build needs nightly and a thumb target (covered by the embedded job).
+    - (cd embedded && cargo check --no-default-features --features std --all-targets)
+
 cargo-fmt:
   tags: [ saas-linux-small-amd64 ]
   stage: build
