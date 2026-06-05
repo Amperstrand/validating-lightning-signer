@@ -36,7 +36,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::transport::Channel;
 use tracing::*;
-use vls_persist::kvv::{redb::RedbKVVStore, JsonFormat, KVVPersister, KVVStore};
+use vls_persist::kvv::{
+    redb::RedbKVVStore, transactional::TransactionalKVVStore, JsonFormat, KVVPersister, KVVStore,
+};
 use vls_protocol::Error as ProtocolError;
 use vls_protocol_signer::approver::WarningPositiveApprover;
 use vls_protocol_signer::handler::{
@@ -108,7 +110,7 @@ pub async fn start_signer(
 }
 
 /// Create a signer protocol handler.
-/// Must commit the transaction if persisting to cloud.
+/// Returns mutations to store remotely when using LSS; local-only commits before returning.
 pub fn make_handler(datadir: &str, args: &SignerArgs) -> (InitHandler, Mutations) {
     let persister = make_persister(datadir, args);
     // TODO error handling
@@ -116,6 +118,10 @@ pub fn make_handler(datadir: &str, args: &SignerArgs) -> (InitHandler, Mutations
     let handler =
         make_handler_builder(datadir, args, persister.clone()).build().expect("handler build");
     let muts = persister.prepare();
+    if args.lss.is_none() {
+        persister.commit().expect("local handler build should commit the entered transaction");
+        return (handler, Mutations::new());
+    }
     (handler, muts)
 }
 
@@ -182,7 +188,7 @@ fn make_persister(datadir: &str, args: &SignerArgs) -> Arc<dyn Persist> {
     if args.lss.is_some() {
         Arc::new(KVVPersister(CloudKVVStore::new(local_store), JsonFormat))
     } else {
-        Arc::new(KVVPersister(local_store, JsonFormat))
+        Arc::new(KVVPersister(TransactionalKVVStore::new(local_store), JsonFormat))
     }
 }
 
@@ -274,7 +280,7 @@ async fn connect(datadir: &str, uri: Uri, args: &SignerArgs, shutdown_signal: tr
         (handler, Some(external_persist))
     } else {
         let (handler, muts) = make_handler(datadir, args);
-        assert!(muts.is_empty(), "got memorized mutations, but not persisting to cloud");
+        assert!(muts.is_empty(), "local-only handler build should commit before returning");
         (handler, None)
     };
 
@@ -385,14 +391,23 @@ impl InitHandleLoop {
         let msg = msgs::from_vec(request.message)?;
         Span::current().record("message_name", msg.inner().name());
 
-        let (is_done, reply) = if let Some(external_persist) = &self.external_persist {
-            let node = self.handler.node();
-            let persister = node.get_persister();
-            persister.enter()?;
+        let node = self.handler.node();
+        let persister = node.get_persister();
+        persister.enter()?;
 
-            // see comments in HandleLoop::handle_request
-            let persist_client = external_persist.persist_client.lock().await;
-            let result = self.handler.handle(msg);
+        // see comments in HandleLoop::handle_request
+        let external_persist = self.external_persist.clone();
+        let persist_client = match external_persist.as_ref() {
+            Some(external_persist) => Some(external_persist.persist_client.lock().await),
+            None => None,
+        };
+
+        let result = self.handler.handle(msg);
+
+        if let Some(persist_client) = persist_client {
+            let external_persist = external_persist
+                .as_ref()
+                .expect("persist client is only locked when external persist is configured");
             let muts = persister.prepare();
 
             // if this fails, our in-memory state is out of sync with both the local store and the cloud, which is fatal
@@ -400,12 +415,10 @@ impl InitHandleLoop {
             store_with_client(muts, &*persist_client, &external_persist.helper)
                 .await
                 .expect("store during init handle");
-            persister.commit()?;
-            result?
-        } else {
-            let (is_done, reply) = self.handler.handle(msg)?;
-            (is_done, reply)
-        };
+        }
+
+        persister.commit()?;
+        let (is_done, reply) = result?;
 
         let response = reply.map(|reply| SignerResponse {
             request_id,
@@ -647,8 +660,8 @@ impl HandleLoop {
             self.handler.commit();
             res?
         } else {
-            let (res, muts) = self.do_handle(context.as_ref(), msg);
-            assert!(muts.is_empty(), "got memorized mutations, but not persisting to cloud");
+            let (res, _muts) = self.do_handle(context.as_ref(), msg);
+            self.handler.commit();
             res?
         };
         info!("signer sending reply {} - {:?}", request.request_id, res);
@@ -779,4 +792,55 @@ async fn make_external_persist(uri: &Url, builder: &HandlerBuilder) -> ExternalP
     let persist_client = Arc::new(AsyncMutex::new(Box::new(client) as Box<dyn ExternalPersist>));
     let state = Arc::new(Mutex::new(Default::default()));
     ExternalPersistWithHelper { persist_client, state, helper }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lightning_signer::bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
+    use std::fs;
+
+    #[test]
+    fn local_persister_returns_transactional_mutations() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let args = SignerArgs::parse_from(["signer", "--integration-test", "--network", "regtest"]);
+        let secp = Secp256k1::new();
+        let secret_key = SecretKey::from_slice(&[42; 32]).unwrap();
+        let node_id = PublicKey::from_secret_key(&secp, &secret_key);
+
+        let persister = make_persister(tempdir.path().to_str().unwrap(), &args);
+
+        persister.enter().unwrap();
+        persister
+            .update_node_allowlist(&node_id, vec!["test-allowlist-entry".to_string()])
+            .unwrap();
+
+        let muts = persister.prepare();
+        assert_eq!(
+            muts.len(),
+            1,
+            "local-only vlsd persister should stage writes during a transaction"
+        );
+    }
+
+    #[test]
+    fn make_handler_commits_local_transaction() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let datadir = tempdir.path().join("data");
+        fs::create_dir_all(datadir.join("regtest")).unwrap();
+        fs::create_dir_all(tempdir.path().join("regtest")).unwrap();
+
+        let args = SignerArgs::parse_from(["signer", "--integration-test", "--network", "regtest"]);
+        let (handler, muts) = make_handler(datadir.to_str().unwrap(), &args);
+        assert!(muts.is_empty(), "local-only handler build should commit before returning");
+
+        let node_id = handler.node().get_id();
+        drop(handler);
+
+        let persisted = KVVPersister(RedbKVVStore::new(datadir.join("regtest")), JsonFormat);
+        let nodes = persisted.get_nodes().unwrap();
+
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].0, node_id);
+    }
 }
