@@ -797,7 +797,19 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
             None
         };
 
-        let htlc_spend_status = if explorer_client.is_none() || funding_confirms.is_some() {
+        let reconstruct_holder_htlcs =
+            funding_confirms.is_none() && !can_lookup_spending_tx && anchor_fee_rate.is_some();
+
+        let htlc_spend_status = if explorer_client.is_none()
+            || funding_confirms.is_some()
+            || reconstruct_holder_htlcs
+        {
+            if reconstruct_holder_htlcs {
+                warn!(
+                    "best-effort holder HTLC recovery for already-closed channel {:?}: backend cannot look up spending transactions, so reconstructing holder HTLC transactions from local signer state",
+                    funding_outpoint
+                );
+            }
             HtlcSpendStatus {
                 spent_indices: vec![false; current_commitment_tx.htlcs().len()],
                 spender_txs: Vec::new(),
@@ -848,16 +860,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                     .await;
                 progress.record_channel(channel_number, 1, htlc_txs.len(), 0);
             } else {
-                if anchor_fee_rate.is_some() && !can_lookup_spending_tx {
-                    error!(
-                        "cannot determine who closed channel {:?}: bitcoind recovery backend does not support funding outpoint spender lookup; use --recover-type esplora with an Esplora --recover-rpc to recover already-closed channels",
-                        funding_outpoint
-                    );
-                    progress.record_skip(channel_number);
-                    continue;
-                }
-
-                if anchor_fee_rate.is_some() {
+                if anchor_fee_rate.is_some() && can_lookup_spending_tx {
                     let spending_tx = match bitcoind_client
                         .get_utxo_spending_tx(&funding_outpoint.into_bitcoin_outpoint())
                         .await
@@ -894,6 +897,11 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                             continue;
                         }
                     }
+                } else if reconstruct_holder_htlcs {
+                    warn!(
+                        "cannot determine funding outpoint spender for channel {:?}; best-effort holder recovery will only use the expected holder commitment and reconstructed holder HTLC transactions, and may miss already-broadcast anchor HTLC transactions if a later run uses different fee inputs",
+                        funding_outpoint
+                    );
                 }
                 broadcast_htlc_txs(bitcoind_client.as_ref(), &htlc_txs, &funding_outpoint, dry_run)
                     .await;
@@ -915,6 +923,24 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                     revocation_pubkey,
                 )
                 .await;
+
+                if reconstruct_holder_htlcs {
+                    for (idx, htlc_tx) in htlc_txs.iter().enumerate() {
+                        let source = format!("reconstructed holder HTLC transaction {}", idx);
+                        sweep_outputs.extend(
+                            collect_delayed_sweep_outputs(
+                                bitcoind_client.as_ref(),
+                                &source,
+                                htlc_tx,
+                                &revocable_script,
+                                required_confirms,
+                                per_commitment_point,
+                                revocation_pubkey,
+                            )
+                            .await,
+                        );
+                    }
+                }
 
                 for (idx, htlc_tx) in htlc_spend_status.spender_txs.iter().enumerate() {
                     let source = format!("spent HTLC transaction {}", idx);
@@ -1847,6 +1873,45 @@ mod tests {
             .input
             .iter()
             .any(|input| input.previous_output == funding_bitcoin_outpoint()));
+    }
+
+    #[tokio::test]
+    async fn recover_close_inner_closed_anchor_best_effort_holder_htlc_fallback() {
+        let state = Arc::new(Mutex::new(TestRecoveryState::default()));
+        let signer = TestRecoverySigner::new(
+            CommitmentType::AnchorsZeroFeeHtlc,
+            vec![make_htlc_tx(10_000)],
+            state.clone(),
+        )
+        .with_current_commitment_tx(make_commitment_tx(vec![make_htlc_output(1)]));
+        let keys = TestRecoveryKeys::new(vec![signer], state.clone());
+        let input_utxos = vec![make_fee_utxo(60_000)];
+        let mock = MockExplorer::default();
+        mock.set_confirms(funding_bitcoin_outpoint(), None);
+
+        // bitcoind-style recovery cannot identify funding/HTLC spenders, so this
+        // verifies the explicit best-effort holder reconstruction fallback.
+        recover_close_inner(
+            Network::Regtest,
+            "none",
+            keys,
+            Some(1000),
+            &input_utxos,
+            Some(Box::new(mock.clone())),
+            false,
+            false,
+        )
+        .await;
+
+        let broadcasts = mock.broadcasts();
+        assert_eq!(broadcasts.len(), 1);
+        assert!(broadcasts[0]
+            .input
+            .iter()
+            .any(|input| input.previous_output == input_utxos[0].outpoint));
+
+        let state = state.lock().unwrap();
+        assert_eq!(state.spent_htlc_indices, vec![vec![false]]);
     }
 
     #[tokio::test]
