@@ -976,6 +976,20 @@ pub struct GetSecureRandomBytesReply {
     pub random_bytes: Secret,
 }
 
+/// LDK-only: sign a BOLT-12 invoice
+#[derive(SerBolt, Debug, Encodable, Decodable)]
+#[message_id(1037)]
+pub struct SignBolt12Invoice {
+    pub invoice_bytes: Octets,
+}
+
+///
+#[derive(SerBolt, Debug, Encodable, Decodable)]
+#[message_id(1137)]
+pub struct SignBolt12InvoiceReply {
+    pub signature: Signature,
+}
+
 ///
 #[derive(SerBolt, Debug, Encodable, Decodable)]
 #[message_id(2002)]
@@ -1230,6 +1244,8 @@ pub enum Message {
     ValidateCommitmentTx2(ValidateCommitmentTx2),
     GetSecureRandomBytes(GetSecureRandomBytes),
     GetSecureRandomBytesReply(GetSecureRandomBytesReply),
+    SignBolt12Invoice(SignBolt12Invoice),
+    SignBolt12InvoiceReply(SignBolt12InvoiceReply),
     TipInfo(TipInfo),
     TipInfoReply(TipInfoReply),
     ForwardWatches(ForwardWatches),

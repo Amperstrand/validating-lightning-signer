@@ -801,6 +801,17 @@ impl Handler for RootHandler {
                 sig_slice[64] = rid.to_i32() as u8;
                 Ok(Box::new(msgs::SignInvoiceReply { signature: RecoverableSignature(sig_slice) }))
             }
+            Message::SignBolt12Invoice(m) => {
+                let invoice =
+                    lightning_signer::lightning::offers::invoice::UnsignedBolt12Invoice::try_from(
+                        m.invoice_bytes.0,
+                    )
+                    .map_err(|e| {
+                        Status::invalid_argument(format!("bad bolt12 invoice: {:?}", e))
+                    })?;
+                let sig = self.node.sign_bolt12_invoice(&invoice)?;
+                Ok(Box::new(msgs::SignBolt12InvoiceReply { signature: Signature(*sig.as_ref()) }))
+            }
             Message::SignHtlcTxMingle(m) => {
                 // this is just an alias for SignWithdrawal (?!), and doesn't actually sign the HTLC tx -
                 // those are signed by calls such as `SignAnyLocalHtlcTx`

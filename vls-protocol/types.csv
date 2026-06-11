@@ -105,3 +105,5 @@ msgtype,ldk_sign_commitment_tx_with_htlcs_reply,1119,done
 msgtype,ldk_sign_mutual_close_tx_2,1021,done
 msgtype,ldk_validate_commitment_tx_2,1035,done
 msgtype,ldk_get_secure_random_bytes,1036,done
+msgtype,ldk_sign_bolt12_invoice,1037,done
+msgtype,ldk_sign_bolt12_invoice_reply,1137,done

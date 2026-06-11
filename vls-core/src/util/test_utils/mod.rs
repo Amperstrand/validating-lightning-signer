@@ -60,14 +60,14 @@ use crate::invoice::Invoice;
 use crate::node::{Node, NodeConfig};
 use crate::node::{NodeServices, SpendType};
 use crate::persist::DummyPersister;
-use crate::policy::simple_validator::SimpleValidatorFactory;
-use crate::policy::validator::ChainState;
+use crate::policy::simple_validator::{SimplePolicy, SimpleValidatorFactory};
+use crate::policy::validator::{ChainState, ValidatorFactory};
 use crate::prelude::*;
 use crate::signer::derive::KeyDerivationStyle;
 use crate::signer::StartingTimeFactory;
 use crate::tx::script::{get_p2wpkh_redeemscript, ANCHOR_OUTPUT_VALUE_SATOSHI};
 use crate::tx::tx::{CommitmentInfo2, HTLCInfo2};
-use crate::util::clock::StandardClock;
+use crate::util::clock::{Clock, StandardClock};
 use crate::util::crypto_utils::derive_public_key;
 use crate::util::loopback::LoopbackChannelSigner;
 use crate::util::status::Status;
@@ -486,23 +486,43 @@ pub fn make_genesis_starting_time_factory(network: Network) -> Arc<dyn StartingT
 }
 
 pub fn init_node(node_config: NodeConfig, seedstr: &str) -> Arc<Node> {
+    init_node_with_services(
+        node_config,
+        seedstr,
+        make_test_services(
+            node_config.network,
+            Arc::new(SimpleValidatorFactory::new()),
+            Arc::new(StandardClock()),
+        ),
+    )
+}
+
+pub fn init_node_with_policy_and_clock(
+    node_config: NodeConfig,
+    seedstr: &str,
+    policy: SimplePolicy,
+    clock: Arc<dyn Clock>,
+) -> Arc<Node> {
+    init_node_with_services(
+        node_config,
+        seedstr,
+        make_test_services(
+            node_config.network,
+            Arc::new(SimpleValidatorFactory::new_with_policy(policy)),
+            clock,
+        ),
+    )
+}
+
+pub fn init_node_with_services(
+    node_config: NodeConfig,
+    seedstr: &str,
+    services: NodeServices,
+) -> Arc<Node> {
     let mut seed = [0; 32];
     seed.copy_from_slice(Vec::from_hex(seedstr).unwrap().as_slice());
 
-    let persister = Arc::new(DummyPersister {});
-    let validator_factory = Arc::new(SimpleValidatorFactory::new());
-    let starting_time_factory = make_genesis_starting_time_factory(node_config.network);
-    let clock = Arc::new(StandardClock());
-    let services = NodeServices {
-        validator_factory,
-        starting_time_factory,
-        persister,
-        clock,
-        trusted_oracle_pubkeys: vec![],
-    };
-
-    let node = Node::new(node_config, &seed, vec![], services);
-    Arc::new(node)
+    Arc::new(Node::new(node_config, &seed, vec![], services))
 }
 
 pub fn init_node_and_channel(
@@ -1925,19 +1945,28 @@ pub fn make_node() -> (PublicKey, Arc<Node>, [u8; 32]) {
 }
 
 pub fn make_services() -> NodeServices {
-    let persister = Arc::new(DummyPersister {});
-    let validator_factory = Arc::new(SimpleValidatorFactory::new());
-    let starting_time_factory = make_genesis_starting_time_factory(TEST_NODE_CONFIG.network);
-    let clock = Arc::new(StandardClock());
+    make_test_services(
+        TEST_NODE_CONFIG.network,
+        Arc::new(SimpleValidatorFactory::new()),
+        Arc::new(StandardClock()),
+    )
+}
 
-    let services = NodeServices {
+pub fn make_test_services(
+    network: Network,
+    validator_factory: Arc<dyn ValidatorFactory>,
+    clock: Arc<dyn Clock>,
+) -> NodeServices {
+    let persister = Arc::new(DummyPersister {});
+    let starting_time_factory = make_genesis_starting_time_factory(network);
+
+    NodeServices {
         validator_factory,
         starting_time_factory,
         persister,
         clock,
         trusted_oracle_pubkeys: vec![],
-    };
-    services
+    }
 }
 
 pub fn create_test_channel_setup(dummy_pubkey: PublicKey) -> ChannelSetup {

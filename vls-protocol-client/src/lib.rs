@@ -51,11 +51,12 @@ use vls_protocol::msgs::{
     GetPerCommitmentPoint, GetPerCommitmentPoint2, GetPerCommitmentPoint2Reply,
     GetPerCommitmentPointReply, GetSecureRandomBytes, GetSecureRandomBytesReply, HsmdInit2,
     HsmdInit2Reply, NewChannel, NewChannelReply, SerBolt, SetupChannel, SetupChannelReply,
-    SignChannelAnnouncement, SignChannelAnnouncementReply, SignCommitmentTxReply,
-    SignCommitmentTxWithHtlcsReply, SignGossipMessage, SignGossipMessageReply, SignInvoice,
-    SignInvoiceReply, SignLocalCommitmentTx2, SignLocalHtlcTx2, SignMutualCloseTx2,
-    SignRemoteCommitmentTx2, SignTxReply, SignWithdrawal, SignWithdrawalReply,
-    ValidateCommitmentTx2, ValidateCommitmentTxReply, ValidateRevocation, ValidateRevocationReply,
+    SignBolt12Invoice, SignBolt12InvoiceReply, SignChannelAnnouncement,
+    SignChannelAnnouncementReply, SignCommitmentTxReply, SignCommitmentTxWithHtlcsReply,
+    SignGossipMessage, SignGossipMessageReply, SignInvoice, SignInvoiceReply,
+    SignLocalCommitmentTx2, SignLocalHtlcTx2, SignMutualCloseTx2, SignRemoteCommitmentTx2,
+    SignTxReply, SignWithdrawal, SignWithdrawalReply, ValidateCommitmentTx2,
+    ValidateCommitmentTxReply, ValidateRevocation, ValidateRevocationReply,
 };
 #[cfg(feature = "developer")]
 use vls_protocol::msgs::{HsmdDevPreinit, HsmdDevPreinitReply};
@@ -671,9 +672,15 @@ impl NodeSigner for KeysManagerClient {
 
     fn sign_bolt12_invoice(
         &self,
-        _invoice: &lightning::offers::invoice::UnsignedBolt12Invoice,
+        invoice: &lightning::offers::invoice::UnsignedBolt12Invoice,
     ) -> Result<bitcoin::secp256k1::schnorr::Signature, ()> {
-        unimplemented!()
+        let mut bytes = Vec::new();
+        invoice.write(&mut bytes).map_err(|_| ())?;
+
+        let message = SignBolt12Invoice { invoice_bytes: Octets(bytes) };
+        let result: SignBolt12InvoiceReply = self.call(message).expect("sign_bolt12_invoice");
+
+        bitcoin::secp256k1::schnorr::Signature::from_slice(&result.signature.0).map_err(|_| ())
     }
 
     fn sign_gossip_message(&self, msg: UnsignedGossipMessage) -> Result<Signature, ()> {
@@ -842,5 +849,34 @@ mod tests {
         let bytes = kmc.get_secure_random_bytes();
 
         assert_eq!(bytes, [42u8; 32]);
+    }
+
+    #[test]
+    fn test_sign_bolt12_invoice() {
+        let mut mock_transport = MockTestTransport::new();
+
+        mock_transport.expect_node_call().times(1).returning(|message| {
+            let msg = msgs::from_vec(message).unwrap();
+            assert!(matches!(msg, Message::SignBolt12Invoice(_)));
+
+            let fake_sig = vls_protocol::model::Signature([0xABu8; 64]);
+            Ok(msgs::SignBolt12InvoiceReply { signature: fake_sig }.as_vec())
+        });
+
+        let kmc = make_test_keys_manager_client(Arc::new(mock_transport));
+
+        let fake_invoice_bytes = vec![0x01, 0x02, 0x03, 0x04];
+        let message = msgs::SignBolt12Invoice { invoice_bytes: Octets(fake_invoice_bytes) };
+        let msg_bytes = message.as_vec();
+
+        let response = kmc.transport.node_call(msg_bytes).unwrap();
+        let reply: Message = msgs::from_vec(response).unwrap();
+
+        match reply {
+            Message::SignBolt12InvoiceReply(r) => {
+                assert_eq!(r.signature.0, [0xABu8; 64]);
+            }
+            _ => panic!("expected SignBolt12InvoiceReply"),
+        }
     }
 }
