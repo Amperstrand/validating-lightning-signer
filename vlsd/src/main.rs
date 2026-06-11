@@ -66,6 +66,14 @@ pub async fn main() {
     tracing::info!("{} git_desc={} starting", bin_name, vls_util::GIT_DESC);
 
     if let Some(ref address) = args.recover_to {
+        if address == "none" {
+            Args::command()
+                .error(
+                    ErrorKind::InvalidValue,
+                    "--recover-to=none is no longer used for dry runs; use --dry-run with a recovery address",
+                )
+                .exit();
+        }
         let recover_type = match args.recover_type.as_str() {
             "bitcoind" => BlockExplorerType::Bitcoind,
             "esplora" => BlockExplorerType::Esplora,
@@ -73,12 +81,19 @@ pub async fn main() {
         };
         let (root_handler, _muts) = make_handler(&datadir, &args);
         let node = root_handler.node().clone();
-        if address != "none" {
-            node.set_allowlist(&[address.to_string()]).expect("add destination to allowlist");
-        }
+        node.set_allowlist(&[address.to_string()]).expect("add destination to allowlist");
         let keys = DirectRecoveryKeys { node };
         if let Some(max_index) = args.recover_l1_range {
-            recover_l1(network, recover_type, args.recover_rpc, &address, keys, max_index).await;
+            recover_l1(
+                network,
+                recover_type,
+                args.recover_rpc,
+                &address,
+                keys,
+                max_index,
+                args.dry_run,
+            )
+            .await;
         } else {
             recover_close(
                 network,
@@ -88,6 +103,7 @@ pub async fn main() {
                 keys,
                 args.fee_rate,
                 &args.input_utxos,
+                args.dry_run,
             )
             .await;
         }

@@ -111,10 +111,13 @@ pub struct SignerArgs {
     #[clap(
         long,
         value_parser,
-        help = "recover funds to the given address.  By default, l2 funds are recovered (force-close), but you can also recover l1 funds by specifying --recover-l1-range.  You can also perform a dry-run by specifying --recover-to=none.",
+        help = "recover funds to the given address.  By default, l2 funds are recovered (force-close), but you can also recover l1 funds by specifying --recover-l1-range.",
         value_name = "BITCOIN_ADDRESS"
     )]
     pub recover_to: Option<String>,
+
+    #[clap(long, help = "build, sign, and log recovery transactions without broadcasting them")]
+    pub dry_run: bool,
 
     #[clap(
         long,
@@ -416,6 +419,7 @@ mod tests {
             "hour:100",
             "--recover-to",
             "abc123",
+            "--dry-run",
             "--recover-l1-range",
             "100",
             "--rpc-server-address",
@@ -435,6 +439,7 @@ mod tests {
         assert_eq!(args.recover_rpc.unwrap().as_str(), "http://localhost:3000/");
         assert_eq!(args.recover_type, "bitcoind");
         assert_eq!(args.recover_to.unwrap().as_str(), "abc123");
+        assert!(args.dry_run);
         assert_eq!(args.recover_l1_range, Some(100));
         assert_eq!(args.rpc_server_address, IpAddr::V4(Ipv4Addr::LOCALHOST));
         assert_eq!(args.rpc_server_port, 8011);

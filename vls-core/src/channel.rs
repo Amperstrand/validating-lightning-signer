@@ -1461,6 +1461,32 @@ impl Channel {
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
     > {
+        self.sign_holder_commitment_tx_for_recovery_inner(spent_htlc_indices, true)
+    }
+
+    /// Sign a holder commitment and HTLCs for a recovery dry-run.
+    ///
+    /// This builds and signs the same transactions as
+    /// [`Self::sign_holder_commitment_tx_for_recovery`], but does not mark the
+    /// channel closed or persist channel-closed state.
+    pub fn sign_holder_commitment_tx_for_recovery_dry_run(
+        &mut self,
+        spent_htlc_indices: &[bool],
+    ) -> Result<
+        (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
+        Status,
+    > {
+        self.sign_holder_commitment_tx_for_recovery_inner(spent_htlc_indices, false)
+    }
+
+    fn sign_holder_commitment_tx_for_recovery_inner(
+        &mut self,
+        spent_htlc_indices: &[bool],
+        persist_close: bool,
+    ) -> Result<
+        (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
+        Status,
+    > {
         let holder_commitment = self.get_latest_holder_commitment_for_close()?;
         let CommitmentSignatures(counterparty_commit_sig, counterparty_htlc_sigs) =
             holder_commitment.counterparty_signatures;
@@ -1513,8 +1539,10 @@ impl Channel {
             spent_htlc_indices,
         )?;
 
-        self.enforcement_state.channel_closed = true;
-        trace_enforcement_state!(self);
+        if persist_close {
+            self.enforcement_state.channel_closed = true;
+            trace_enforcement_state!(self);
+        }
 
         let revocation_basepoint = self.counterparty_pubkeys().revocation_basepoint;
         let revocation_pubkey = derive_public_revocation_key(
@@ -1526,18 +1554,24 @@ impl Channel {
         let ck =
             self.get_unilateral_close_key(&Some(per_commitment_point), &Some(revocation_pubkey))?;
 
-        self.persist()?;
+        if persist_close {
+            self.persist()?;
+        }
         Ok((tx, htlc_txs, revocable_redeemscript.to_p2wsh(), ck, revocation_pubkey.0))
     }
 
-    /// Sign HTLC transactions for recovery with batching.
+    /// Sign HTLC transactions for recovery.
     ///
     /// For AnchorsZeroFeeHtlc channels, transactions have zero fees and use
     /// SIGHASH_SINGLE|SIGHASH_ANYONECANPAY, allowing fee inputs to be added later.
     ///
-    /// Batches compatible HTLCs to reduce on-chain footprint and fees:
+    /// For AnchorsZeroFeeHtlc channels, compatible HTLCs are batched to reduce
+    /// on-chain footprint and fees:
     /// - All received HTLCs are batched into one transaction (no timelock constraint)
     /// - Offered HTLCs are batched by CLTV expiry (each group shares the same locktime)
+    ///
+    /// For StaticRemoteKey channels, HTLC signatures use SIGHASH_ALL, so each
+    /// HTLC claim remains a separate one-input transaction.
     ///
     /// Only returns HTLCs that are currently claimable (skips unexpired or missing preimages).
     fn sign_holder_htlc_txs_for_recovery(
@@ -1553,6 +1587,8 @@ impl Channel {
         let features = self.setup.features();
         let node = self.get_node();
         let current_height = self.get_chain_state().current_height;
+        let htlc_feerate_per_kw =
+            if self.setup.is_zero_fee_htlc() { 0 } else { holder_tx.feerate_per_kw() };
 
         let htlc_count = holder_tx.htlcs().len();
         if spent_htlc_indices.len() != htlc_count {
@@ -1592,40 +1628,75 @@ impl Channel {
             }
         }
         let mut signed_htlc_txs = Vec::new();
-        if !received_htlcs.is_empty() {
-            debug!("batching {} received HTLCs into single transaction", received_htlcs.len());
-            signed_htlc_txs.push(self.build_and_sign_batched_htlc_tx(
-                commitment_txid,
-                txkeys,
-                &features,
-                commitment_number,
-                per_commitment_point,
-                cp_htlc_sigs,
-                &received_htlcs,
-                0,
-            )?);
-        }
 
-        for (cltv, htlcs) in offered_by_cltv {
-            debug!(
-                "batching {} offered HTLCs with CLTV {} into single transaction",
-                htlcs.len(),
-                cltv
-            );
+        if self.setup.is_zero_fee_htlc() {
+            if !received_htlcs.is_empty() {
+                debug!("batching {} received HTLCs into single transaction", received_htlcs.len());
+                signed_htlc_txs.push(self.build_and_sign_batched_htlc_tx(
+                    commitment_txid,
+                    txkeys,
+                    &features,
+                    commitment_number,
+                    per_commitment_point,
+                    cp_htlc_sigs,
+                    &received_htlcs,
+                    0,
+                    htlc_feerate_per_kw,
+                )?);
+            }
 
-            let htlcs_to_sign: Vec<_> =
-                htlcs.into_iter().map(|(idx, htlc)| (idx, htlc, None)).collect();
+            for (cltv, htlcs) in offered_by_cltv {
+                debug!(
+                    "batching {} offered HTLCs with CLTV {} into single transaction",
+                    htlcs.len(),
+                    cltv
+                );
 
-            signed_htlc_txs.push(self.build_and_sign_batched_htlc_tx(
-                commitment_txid,
-                txkeys,
-                &features,
-                commitment_number,
-                per_commitment_point,
-                cp_htlc_sigs,
-                &htlcs_to_sign,
-                cltv,
-            )?);
+                let htlcs_to_sign: Vec<_> =
+                    htlcs.into_iter().map(|(idx, htlc)| (idx, htlc, None)).collect();
+
+                signed_htlc_txs.push(self.build_and_sign_batched_htlc_tx(
+                    commitment_txid,
+                    txkeys,
+                    &features,
+                    commitment_number,
+                    per_commitment_point,
+                    cp_htlc_sigs,
+                    &htlcs_to_sign,
+                    cltv,
+                    htlc_feerate_per_kw,
+                )?);
+            }
+        } else {
+            for htlc in received_htlcs {
+                signed_htlc_txs.push(self.build_and_sign_batched_htlc_tx(
+                    commitment_txid,
+                    txkeys,
+                    &features,
+                    commitment_number,
+                    per_commitment_point,
+                    cp_htlc_sigs,
+                    &[htlc],
+                    0,
+                    htlc_feerate_per_kw,
+                )?);
+            }
+
+            for (cltv, htlcs) in offered_by_cltv {
+                for (htlc_idx, htlc) in htlcs {
+                    signed_htlc_txs.push(self.build_and_sign_batched_htlc_tx(
+                        commitment_txid,
+                        txkeys,
+                        &features,
+                        commitment_number,
+                        per_commitment_point,
+                        cp_htlc_sigs,
+                        &[(htlc_idx, htlc, None)],
+                        cltv,
+                        htlc_feerate_per_kw,
+                    )?);
+                }
+            }
         }
 
         Ok(signed_htlc_txs)
@@ -1641,6 +1712,7 @@ impl Channel {
         cp_htlc_sigs: &[Signature],
         htlcs: &[(usize, &HTLCOutputInCommitment, Option<PaymentPreimage>)],
         lock_time: u32,
+        feerate_per_kw: u32,
     ) -> Result<Transaction, Status> {
         let channel_derivation_parameters = ChannelDerivationParameters {
             value_satoshis: self.setup.channel_value_sat,
@@ -1663,7 +1735,7 @@ impl Channel {
         for (htlc_idx, htlc, preimage) in htlcs {
             let htlc_tx = build_htlc_transaction(
                 commitment_txid,
-                0,
+                feerate_per_kw,
                 self.setup.counterparty_selected_contest_delay,
                 htlc,
                 features,
@@ -1709,7 +1781,7 @@ impl Channel {
                 commitment_txid: *commitment_txid,
                 per_commitment_number: commitment_number,
                 per_commitment_point,
-                feerate_per_kw: 0, // AnchorZeroFee: fee added elsewhere via external input
+                feerate_per_kw,
                 htlc: sd.htlc.clone(),
                 preimage: sd.preimage,
                 counterparty_sig: sd.cp_sig.clone(),
@@ -3830,6 +3902,20 @@ mod tests {
     }
 
     #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_dry_run_leaves_channel_open() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _) = setup_test_channel(&node, &node1, false, 0);
+
+        assert!(!channel.enforcement_state.channel_closed);
+        let (commitment_tx, htlc_txs, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery_dry_run(&[]).unwrap();
+
+        assert!(!channel.enforcement_state.channel_closed);
+        verify_recovery_result(&channel, &commitment_tx, &htlc_txs);
+    }
+
+    #[test]
     fn test_sign_holder_commitment_tx_for_recovery_all_htlcs_spent() {
         let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
         let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
@@ -3945,11 +4031,49 @@ mod tests {
         assert_eq!(htlc_batches.len(), 3);
     }
 
+    #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_static_htlcs_are_not_batched() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let (_, mut channel, _) = setup_test_channel_with_commitment_type(
+            &node,
+            &node1,
+            true,
+            400,
+            CommitmentType::StaticRemoteKey,
+        );
+
+        let (commitment_tx, htlc_txs, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5]).unwrap();
+
+        verify_recovery_result(&channel, &commitment_tx, &htlc_txs);
+
+        assert_eq!(htlc_txs.len(), 4);
+        assert!(htlc_txs.iter().all(|tx| tx.input.len() == 1));
+        assert!(htlc_txs.iter().all(|tx| tx.output.len() == 1));
+    }
+
     fn setup_test_channel(
         node: &Arc<Node>,
         counterparty: &Arc<Node>,
         with_htlcs: bool,
         chain_height: u32,
+    ) -> (ChannelId, Channel, Channel) {
+        setup_test_channel_with_commitment_type(
+            node,
+            counterparty,
+            with_htlcs,
+            chain_height,
+            CommitmentType::AnchorsZeroFeeHtlc,
+        )
+    }
+
+    fn setup_test_channel_with_commitment_type(
+        node: &Arc<Node>,
+        counterparty: &Arc<Node>,
+        with_htlcs: bool,
+        chain_height: u32,
+        commitment_type: CommitmentType,
     ) -> (ChannelId, Channel, Channel) {
         let (channel_id, _) = node.new_channel_with_random_id(node).unwrap();
         let (channel_id1, _) = counterparty.new_channel_with_random_id(counterparty).unwrap();
@@ -3963,22 +4087,16 @@ mod tests {
             .unwrap()
             .get_channel_basepoints();
         let holder_shutdown_key_path = DerivationPath::from(vec![]);
+        let mut setup = make_test_channel_setup_with_points(true, points1.clone());
+        setup.commitment_type = commitment_type;
+        let mut counterparty_setup = make_test_channel_setup_with_points(false, points.clone());
+        counterparty_setup.commitment_type = commitment_type;
 
         let mut channel = node
-            .setup_channel(
-                channel_id.clone(),
-                None,
-                make_test_channel_setup_with_points(true, points1.clone()),
-                &holder_shutdown_key_path,
-            )
+            .setup_channel(channel_id.clone(), None, setup, &holder_shutdown_key_path)
             .expect("setup_channel");
         let mut channel1 = counterparty
-            .setup_channel(
-                channel_id1.clone(),
-                None,
-                make_test_channel_setup_with_points(false, points.clone()),
-                &holder_shutdown_key_path,
-            )
+            .setup_channel(channel_id1.clone(), None, counterparty_setup, &holder_shutdown_key_path)
             .expect("setup_channel 1");
 
         channel.monitor =
