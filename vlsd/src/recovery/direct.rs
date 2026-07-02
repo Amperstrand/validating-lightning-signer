@@ -121,16 +121,20 @@ impl RecoverySign for DirectRecoverySigner {
         &self,
         spent_htlc_indices: &[bool],
         dry_run: bool,
+        chain_height_override: Option<u32>,
     ) -> Result<
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
     > {
         let mut lock = self.lock();
         if dry_run {
-            Self::channel(&mut lock)
-                .sign_holder_commitment_tx_for_recovery_dry_run(spent_htlc_indices)
+            Self::channel(&mut lock).sign_holder_commitment_tx_for_recovery_dry_run(
+                spent_htlc_indices,
+                chain_height_override,
+            )
         } else {
-            Self::channel(&mut lock).sign_holder_commitment_tx_for_recovery(spent_htlc_indices)
+            Self::channel(&mut lock)
+                .sign_holder_commitment_tx_for_recovery(spent_htlc_indices, chain_height_override)
         }
     }
 

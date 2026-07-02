@@ -1457,11 +1457,16 @@ impl Channel {
     pub fn sign_holder_commitment_tx_for_recovery(
         &mut self,
         spent_htlc_indices: &[bool],
+        chain_height_override: Option<u32>,
     ) -> Result<
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
     > {
-        self.sign_holder_commitment_tx_for_recovery_inner(spent_htlc_indices, true)
+        self.sign_holder_commitment_tx_for_recovery_inner(
+            spent_htlc_indices,
+            true,
+            chain_height_override,
+        )
     }
 
     /// Sign a holder commitment and HTLCs for a recovery dry-run.
@@ -1472,17 +1477,23 @@ impl Channel {
     pub fn sign_holder_commitment_tx_for_recovery_dry_run(
         &mut self,
         spent_htlc_indices: &[bool],
+        chain_height_override: Option<u32>,
     ) -> Result<
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
     > {
-        self.sign_holder_commitment_tx_for_recovery_inner(spent_htlc_indices, false)
+        self.sign_holder_commitment_tx_for_recovery_inner(
+            spent_htlc_indices,
+            false,
+            chain_height_override,
+        )
     }
 
     fn sign_holder_commitment_tx_for_recovery_inner(
         &mut self,
         spent_htlc_indices: &[bool],
         persist_close: bool,
+        chain_height_override: Option<u32>,
     ) -> Result<
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
@@ -1537,6 +1548,7 @@ impl Channel {
             &txkeys,
             &counterparty_htlc_sigs,
             spent_htlc_indices,
+            chain_height_override,
         )?;
 
         if persist_close {
@@ -1581,12 +1593,14 @@ impl Channel {
         txkeys: &TxCreationKeys,
         cp_htlc_sigs: &[Signature],
         spent_htlc_indices: &[bool],
+        chain_height_override: Option<u32>,
     ) -> Result<Vec<Transaction>, Status> {
         let commitment_number = self.enforcement_state.next_holder_commit_num - 1;
         let per_commitment_point = self.get_per_commitment_point(commitment_number)?;
         let features = self.setup.features();
         let node = self.get_node();
-        let current_height = self.get_chain_state().current_height;
+        let current_height =
+            chain_height_override.unwrap_or_else(|| self.get_chain_state().current_height);
         let htlc_feerate_per_kw =
             if self.setup.is_zero_fee_htlc() { 0 } else { holder_tx.feerate_per_kw() };
 
@@ -3894,7 +3908,7 @@ mod tests {
         let (_, mut channel, _) = setup_test_channel(&node, &node1, false, 0);
 
         let (commitment_tx, htlc_txs, _, _, _) =
-            channel.sign_holder_commitment_tx_for_recovery(&[]).unwrap();
+            channel.sign_holder_commitment_tx_for_recovery(&[], None).unwrap();
 
         assert!(htlc_txs.is_empty());
 
@@ -3909,7 +3923,7 @@ mod tests {
 
         assert!(!channel.enforcement_state.channel_closed);
         let (commitment_tx, htlc_txs, _, _, _) =
-            channel.sign_holder_commitment_tx_for_recovery_dry_run(&[]).unwrap();
+            channel.sign_holder_commitment_tx_for_recovery_dry_run(&[], None).unwrap();
 
         assert!(!channel.enforcement_state.channel_closed);
         verify_recovery_result(&channel, &commitment_tx, &htlc_txs);
@@ -3922,7 +3936,7 @@ mod tests {
         let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 400);
 
         let (commitment_tx, htlc_batches, _, _, _) =
-            channel.sign_holder_commitment_tx_for_recovery(&vec![true; 5]).unwrap();
+            channel.sign_holder_commitment_tx_for_recovery(&vec![true; 5], None).unwrap();
 
         assert!(htlc_batches.is_empty());
 
@@ -3936,14 +3950,14 @@ mod tests {
         let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 400);
 
         let (commitment_tx, all_batches, _, _, _) =
-            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5]).unwrap();
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5], None).unwrap();
 
         let mut spent = vec![false; 5];
         spent[0] = true;
         spent[2] = true;
 
         let (commitment_tx2, filtered_batches, _, _, _) =
-            channel.sign_holder_commitment_tx_for_recovery(&spent).unwrap();
+            channel.sign_holder_commitment_tx_for_recovery(&spent, None).unwrap();
 
         verify_recovery_result(&channel, &commitment_tx, &all_batches);
         verify_recovery_result(&channel, &commitment_tx2, &filtered_batches);
@@ -3970,7 +3984,8 @@ mod tests {
         let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
         let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 400);
 
-        let err = channel.sign_holder_commitment_tx_for_recovery(&vec![false; 8]).unwrap_err();
+        let err =
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 8], None).unwrap_err();
         assert!(err.message().contains("spent_htlc_indices length mismatch: 8 != 5"));
     }
 
@@ -3981,7 +3996,7 @@ mod tests {
         let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 120);
 
         let (commitment_tx, htlc_batches, _, _, _) =
-            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5]).unwrap();
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5], None).unwrap();
 
         verify_recovery_result(&channel, &commitment_tx, &htlc_batches);
 
@@ -4003,7 +4018,7 @@ mod tests {
         let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 150);
 
         let (commitment_tx, htlc_batches, _, _, _) =
-            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5]).unwrap();
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5], None).unwrap();
 
         verify_recovery_result(&channel, &commitment_tx, &htlc_batches);
 
@@ -4024,7 +4039,7 @@ mod tests {
         let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 400);
 
         let (commitment_tx, htlc_batches, _, _, _) =
-            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5]).unwrap();
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5], None).unwrap();
 
         verify_recovery_result(&channel, &commitment_tx, &htlc_batches);
 
@@ -4044,13 +4059,30 @@ mod tests {
         );
 
         let (commitment_tx, htlc_txs, _, _, _) =
-            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5]).unwrap();
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5], None).unwrap();
 
         verify_recovery_result(&channel, &commitment_tx, &htlc_txs);
 
         assert_eq!(htlc_txs.len(), 4);
         assert!(htlc_txs.iter().all(|tx| tx.input.len() == 1));
         assert!(htlc_txs.iter().all(|tx| tx.output.len() == 1));
+    }
+
+    #[test]
+    fn test_sign_holder_commitment_tx_for_recovery_chain_height_override() {
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[0]);
+        let node1 = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        // chain_height=120: the CLTV=150 offered HTLC is in the future and should be skipped
+        let (_, mut channel, _) = setup_test_channel(&node, &node1, true, 120);
+
+        let (_, batches_without_override, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5], None).unwrap();
+        assert_eq!(batches_without_override.len(), 2);
+
+        // override to height=150: the CLTV=150 HTLC is now includeable
+        let (_, batches_with_override, _, _, _) =
+            channel.sign_holder_commitment_tx_for_recovery(&vec![false; 5], Some(150)).unwrap();
+        assert_eq!(batches_with_override.len(), 3);
     }
 
     fn setup_test_channel(
