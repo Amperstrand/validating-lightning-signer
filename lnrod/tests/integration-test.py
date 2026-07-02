@@ -3,6 +3,7 @@ import os
 import signal
 import subprocess
 import argparse
+import re
 from contextlib import contextmanager
 
 import time
@@ -19,7 +20,10 @@ import grpc
 from retrying import retry
 
 from admin_pb2_grpc import AdminStub
-from admin_pb2 import PingRequest, ChannelNewRequest, ChannelCloseRequest, Void, InvoiceNewRequest, PaymentSendRequest, Payment, PeerConnectRequest
+from admin_pb2 import (
+    ChannelCloseRequest, ChannelNewRequest, HoldPaymentsRequest, InvoiceNewRequest, Payment,
+    PaymentSendRequest, PeerConnectRequest, PingRequest, Void,
+)
 
 OUTPUT_DIR = 'test-output'
 INSTANCE_OFFSET = 0  # this helps us ensure we use different ports when we run concurrent tests
@@ -29,6 +33,8 @@ CHANNEL_BALANCE_SYNC_INTERVAL = 50
 CHANNEL_VALUE_SAT = 10_000_000
 EXPECTED_FEE_SAT = 1458
 PAYMENT_MSAT = 4_000_000  # FIXME 2_000_000 fails with dust limit policy violation
+NUM_HTLC_HOLD_PAYMENTS = 3
+HTLC_HOLD_PAYMENT_MSAT = PAYMENT_MSAT
 DEBUG_ON_FAIL = os.environ.get('DEBUG_ON_FAIL', '0') == '1'
 USE_RELEASE_BINARIES = False
 OPTIMIZATION = 'release' if USE_RELEASE_BINARIES else 'debug'
@@ -53,6 +59,11 @@ def new_proc(args, log_file):
     else:
         log_file = open(OUTPUT_DIR + '/' + log_file, 'w')
         return Popen(args, stdout=log_file, stderr=log_file)
+
+
+PREPARED_HTLC_RE = re.compile(
+    r'prepared (\d+) HTLC recovery transaction\(s\).*current_holder_commitment_htlcs=(\d+)'
+)
 
 
 class ProcessDied(Exception):
@@ -255,7 +266,7 @@ def run(disaster_recovery_block_explorer, existing_bitcoin_rpc):
 
         print('Starting nodes')
         alice, _, _ = start_node(1, bitcoin_rpc, proc_mgr)
-        bob, _, _ = start_node(2, bitcoin_rpc, proc_mgr)
+        bob, bob_proc, bob_proc1 = start_node(2, bitcoin_rpc, proc_mgr)
         charlie, charlie_proc, charlie_proc1 = start_node(3, bitcoin_rpc, proc_mgr)
 
         print('Generate initial blocks')
@@ -368,6 +379,68 @@ def run(disaster_recovery_block_explorer, existing_bitcoin_rpc):
         def get_swept_value(node_id):
             return int(btc.getreceivedbylabel(f'sweep-{node_id.hex()}') * 100000000)
 
+        def send_held_htlcs():
+            # Charlie sends to Bob; Bob holds before claiming so the HTLCs
+            # stay committed as outbound on the Bob-Charlie channel.
+            # When Charlie crashes, recovery sweeps them via HTLC-timeout —
+            # no preimage required.
+            bob.HoldPayments(HoldPaymentsRequest(hold=True))
+            invoices = [
+                bob.InvoiceNew(InvoiceNewRequest(value_msat=HTLC_HOLD_PAYMENT_MSAT)).invoice
+                for _ in range(NUM_HTLC_HOLD_PAYMENTS)
+            ]
+            for invoice in invoices:
+                charlie.PaymentSend(PaymentSendRequest(invoice=invoice))
+
+        def wait_for_htlcs():
+            def htlcs_pending_at_charlie():
+                chan = charlie.ChannelList(Void()).channels[0]
+                return chan.pending_htlc_count >= NUM_HTLC_HOLD_PAYMENTS
+            wait('htlcs pending at charlie', htlcs_pending_at_charlie)
+            # Wait for Bob to have received the HTLCs so we know the messages
+            # crossed the network and Charlie's commitment_signed reached Bob.
+            def htlcs_at_bob():
+                return any(
+                    c.pending_htlc_count >= NUM_HTLC_HOLD_PAYMENTS
+                    for c in bob.ChannelList(Void()).channels
+                )
+            wait('htlcs received at bob', htlcs_at_bob)
+            # Sleep to allow Bob to send commitment_signed back to Charlie so
+            # Charlie's holder commitment is updated before Bob is killed.
+            time.sleep(2)
+
+        def run_recovery(recover_args, input_utxo, log_path):
+            with open(log_path, 'w') as log:
+                p = call(recover_args + ['--input-utxo', input_utxo], stdout=log, stderr=log)
+            assert p == 0, f'recovery failed with exit code {p}; see {log_path}'
+
+        def prepared_htlc_counts(log_path):
+            with open(log_path) as log:
+                contents = log.read()
+            matches = [(int(m.group(1)), int(m.group(2))) for m in PREPARED_HTLC_RE.finditer(contents)]
+            if not matches:
+                raise AssertionError(f'could not find HTLC recovery summary in {log_path}')
+            return matches
+
+        def assert_timeout_recovery_prepared_htlc_txs(*log_paths):
+            max_prepared = 0
+            summaries = []
+            for log_path in log_paths:
+                matches = prepared_htlc_counts(log_path)
+                prepared = max(count for count, _ in matches)
+                current_htlcs = max(htlcs for _, htlcs in matches)
+                max_prepared = max(max_prepared, prepared)
+                summaries.append((log_path, prepared, current_htlcs))
+            if max_prepared == 0:
+                details = ', '.join(
+                    f'{path}: prepared={prepared}, current_holder_commitment_htlcs={current_htlcs}'
+                    for path, prepared, current_htlcs in summaries
+                )
+                raise AssertionError(
+                    'recovery never prepared an HTLC-timeout transaction; '
+                    f'{details}'
+                )
+
         print('Closing alice - bob')
         alice_channel = alice.ChannelList(Void()).channels[0]
         alice.ChannelClose(ChannelCloseRequest(channel_id=alice_channel.channel_id))
@@ -380,7 +453,12 @@ def run(disaster_recovery_block_explorer, existing_bitcoin_rpc):
         assert_equal_delta((NUM_PAYMENTS * PAYMENT_MSAT) / 1000 - 1000, bob_sweep)
 
         if disaster_recovery_block_explorer is not None:
-            utxos = fund_vls_addresses(btc, vls_port=6600 + INSTANCE_OFFSET + 3, count=2, amount=0.01)
+            send_held_htlcs()
+            wait_for_htlcs()
+            proc_mgr.stop('nodes', bob_proc)
+            proc_mgr.stop('signers', bob_proc1)
+
+            utxos = fund_vls_addresses(btc, vls_port=6600 + INSTANCE_OFFSET + 3, count=1, amount=0.01)
 
             print('Disaster recovery at charlie')
             proc_mgr.stop('nodes', charlie_proc)
@@ -397,10 +475,10 @@ def run(disaster_recovery_block_explorer, existing_bitcoin_rpc):
                 raise ValueError(f'Unknown block explorer {disaster_recovery_block_explorer}')
 
             input_utxo = format_input_utxo(utxos[0])
-            input_utxo2 = format_input_utxo(utxos[1])
             fee_rate = 100
 
             recover_args = [vlsd,
+                            '--log-level', 'info',
                             '--network=regtest',
                             '--datadir', f'{OUTPUT_DIR}/vls3',
                             '--recover-type', recover_type,
@@ -408,17 +486,29 @@ def run(disaster_recovery_block_explorer, existing_bitcoin_rpc):
                             '--recover-to', destination,
                             '--fee-rate', str(fee_rate)]
 
-            with open(f'{OUTPUT_DIR}/recover1.log', 'w') as log:
-                p = call(recover_args + ['--input-utxo', input_utxo], stdout=log, stderr=log)
-            assert p == 0
+            run_recovery(recover_args, input_utxo, f'{OUTPUT_DIR}/recover1.log')
+
             print('Sweep at charlie')
             btc.mine(145)
             # wait for Charlie to see the mined blocks
             time.sleep(5)
 
-            with open(f'{OUTPUT_DIR}/recover2.log', 'w') as log:
-                p = call(recover_args + ['--input-utxo', input_utxo2], stdout=log, stderr=log)
-            assert p == 0
+            # Reuse the same fee UTXO description so bitcoind recovery can
+            # reconstruct the holder HTLC transaction ids once the CLTV has
+            # expired. This pass broadcasts the HTLC-timeout transactions.
+            run_recovery(recover_args, input_utxo, f'{OUTPUT_DIR}/recover2.log')
+
+            # The timeout transactions themselves need confirmations before
+            # their delayed outputs become sweepable (to_self_delay = 144 blocks),
+            # so run one more pass after they have matured enough for sweeping.
+            btc.mine(150)
+            time.sleep(5)
+            run_recovery(recover_args, input_utxo, f'{OUTPUT_DIR}/recover3.log')
+            assert_timeout_recovery_prepared_htlc_txs(
+                f'{OUTPUT_DIR}/recover1.log',
+                f'{OUTPUT_DIR}/recover2.log',
+                f'{OUTPUT_DIR}/recover3.log',
+            )
             print('Swept at charlie')
         else:
             print('Force closing bob - charlie at charlie')
@@ -433,10 +523,17 @@ def run(disaster_recovery_block_explorer, existing_bitcoin_rpc):
             charlie_sweep = int(get_swept_value(charlie_id))
             assert charlie_sweep == 0
 
-        # charlie eventually sweeps their payments
-        wait('charlie sweep', lambda: wait_received(charlie_id))
+        # Charlie's total sweep is just the settled payments: the outbound
+        # HTLCs reduce his to_self output by htlc_sat, then the HTLC-timeout
+        # outputs return exactly htlc_sat, so the net is zero either way.
+        expected_charlie_sat = (NUM_PAYMENTS * PAYMENT_MSAT) // 1000
+        minimum_charlie_sat = expected_charlie_sat * 99 // 100
+        wait('charlie sweep', lambda: wait_received(charlie_id, minimum=minimum_charlie_sat))
         charlie_sweep = int(get_swept_value(charlie_id))
-        assert_equal_delta((NUM_PAYMENTS * PAYMENT_MSAT) / 1000 - 1000, charlie_sweep)
+        if disaster_recovery_block_explorer is not None:
+            assert minimum_charlie_sat <= charlie_sweep <= expected_charlie_sat
+        else:
+            assert_equal_delta(expected_charlie_sat - 1000, charlie_sweep)
 
         print('Done')
 

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{cmp, env};
@@ -93,6 +94,7 @@ pub struct MyEventHandler {
     inbound_payments: PaymentInfoStorage,
     outbound_payments: PaymentInfoStorage,
     network: Network,
+    pub hold_payments: Arc<AtomicBool>,
 }
 
 impl EventHandler for MyEventHandler {
@@ -105,6 +107,7 @@ impl EventHandler for MyEventHandler {
             self.inbound_payments.clone(),
             self.outbound_payments.clone(),
             self.network,
+            self.hold_payments.clone(),
             event.clone(),
         ))
     }
@@ -124,6 +127,8 @@ pub(crate) struct Node {
     pub(crate) chain_monitor: Arc<ArcChainMonitor>,
     pub(crate) connector: Arc<Connector>,
     pub(crate) logger: Arc<LoggerAdapter>,
+    /// Shared flag: when true, PaymentClaimable events are held rather than auto-claimed.
+    pub(crate) hold_payments: Arc<AtomicBool>,
 }
 
 pub(crate) struct NetworkController {}
@@ -440,6 +445,7 @@ async fn build_with_signer(
 
     let inbound_payments: PaymentInfoStorage = Arc::new(Mutex::new(HashMap::new()));
     let outbound_payments: PaymentInfoStorage = Arc::new(Mutex::new(HashMap::new()));
+    let hold_payments = Arc::new(AtomicBool::new(false));
 
     let handle = Handle::current();
 
@@ -458,6 +464,7 @@ async fn build_with_signer(
         inbound_payments: inbound_payments_for_events,
         outbound_payments: outbound_payments_for_events,
         network,
+        hold_payments: hold_payments.clone(),
     };
 
     let no_om = None::<
@@ -524,6 +531,7 @@ async fn build_with_signer(
         chain_monitor,
         connector,
         logger: logadapter,
+        hold_payments,
     };
 
     tokio::spawn(async move {
