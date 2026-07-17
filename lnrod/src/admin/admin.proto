@@ -26,6 +26,11 @@ service Admin {
       returns (PaymentSendReply);
   rpc PaymentList(Void)
       returns (PaymentListReply);
+  // Test-only: when hold=true, inbound PaymentClaimable events are buffered
+  // rather than auto-claimed. LDK will replay them on the next restart or when
+  // hold is set back to false. Allows the test to create in-flight HTLCs.
+  rpc HoldPayments(HoldPaymentsRequest)
+      returns (Void);
 }
 
 message PingRequest {
@@ -58,7 +63,13 @@ message Channel {
   uint64 value_sat = 4;
   bool is_active = 5;
   uint64 outbound_msat = 6;
+  // Total inbound + outbound HTLCs committed to the channel but not yet settled
+  uint32 pending_htlc_count = 7;
+}
 
+message HoldPaymentsRequest {
+  // true: buffer inbound PaymentClaimable; false: resume auto-claim
+  bool hold = 1;
 }
 
 message ChannelListReply {

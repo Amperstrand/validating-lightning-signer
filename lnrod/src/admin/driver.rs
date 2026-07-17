@@ -1,6 +1,8 @@
 use std::convert::TryInto;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use lightning_signer::bitcoin::hashes::Hash;
 use log::{debug, info};
@@ -20,9 +22,10 @@ use lightning_signer::{bitcoin, lightning, lightning_invoice};
 use tokio::runtime::{Builder, Handle};
 
 use crate::admin::admin_api::{
-    Channel, ChannelCloseRequest, ChannelNewReply, ChannelNewRequest, InvoiceNewReply,
-    InvoiceNewRequest, Payment, PaymentKeysendRequest, PaymentListReply, PaymentSendReply,
-    PaymentSendRequest, Peer, PeerConnectReply, PeerConnectRequest, PeerListReply, PeerListRequest,
+    Channel, ChannelCloseRequest, ChannelNewReply, ChannelNewRequest, HoldPaymentsRequest,
+    InvoiceNewReply, InvoiceNewRequest, Payment, PaymentKeysendRequest, PaymentListReply,
+    PaymentSendReply, PaymentSendRequest, Peer, PeerConnectReply, PeerConnectRequest,
+    PeerListReply, PeerListRequest,
 };
 use crate::node::{build_node, Node, NodeBuildArgs};
 use crate::util::Shutter;
@@ -32,11 +35,13 @@ use super::admin_api::{ChannelListReply, NodeInfoReply, PingReply, PingRequest, 
 
 struct AdminHandler {
     node: Node,
+    hold_payments: Arc<AtomicBool>,
 }
 
 impl AdminHandler {
     pub fn new(node: Node) -> Self {
-        AdminHandler { node }
+        let hold_payments = node.hold_payments.clone();
+        AdminHandler { node, hold_payments }
     }
 
     // TODO use (cp_id, channel_id) pairs for looking up channels, since channel ID set by counterparties
@@ -123,6 +128,8 @@ impl Admin for AdminHandler {
                 None
             };
             let balance = monitor_balance.unwrap_or(0) * 1000;
+            let pending_htlc_count =
+                (details.pending_inbound_htlcs.len() + details.pending_outbound_htlcs.len()) as u32;
             let channel = Channel {
                 peer_node_id: details.counterparty.node_id.serialize().to_vec(),
                 channel_id: details.channel_id.0.to_vec(),
@@ -130,6 +137,7 @@ impl Admin for AdminHandler {
                 value_sat: details.channel_value_satoshis,
                 is_active: details.is_usable,
                 outbound_msat: balance,
+                pending_htlc_count,
             };
             channels.push(channel);
         }
@@ -325,6 +333,16 @@ impl Admin for AdminHandler {
         }
         .map_err(|e| Status::aborted(format!("{:?}", e)))?;
         info!("REPLY channel_close");
+        Ok(Response::new(Void {}))
+    }
+
+    async fn hold_payments(
+        &self,
+        request: Request<HoldPaymentsRequest>,
+    ) -> Result<Response<Void>, Status> {
+        let hold = request.into_inner().hold;
+        self.hold_payments.store(hold, Ordering::Relaxed);
+        info!("hold_payments set to {}", hold);
         Ok(Response::new(Void {}))
     }
 }

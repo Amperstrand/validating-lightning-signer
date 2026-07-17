@@ -188,7 +188,7 @@ mod tests {
 
             let spent = vec![false; trusted_tx.htlcs().len()];
             let (tx_r, _htlc_txs_r, _revocable_script_r, _uck_r, _revocation_pubkey_r) =
-                chan.sign_holder_commitment_tx_for_recovery(&spent)?;
+                chan.sign_holder_commitment_tx_for_recovery(&spent, None)?;
             assert_eq!(tx_r.compute_txid(), tx.compute_txid());
 
             Ok((sig, tx))
@@ -222,7 +222,7 @@ mod tests {
             let trusted_tx = next_commit_tx_ctx.tx.as_ref().unwrap().trust();
             let spent = vec![false; trusted_tx.htlcs().len()];
             let (tx_r, _htlc_txs_r, _revocable_script_r, _uck_r, _revocation_pubkey_r) =
-                chan.sign_holder_commitment_tx_for_recovery(&spent)?;
+                chan.sign_holder_commitment_tx_for_recovery(&spent, None)?;
             assert_eq!(
                 tx_r.compute_txid(),
                 trusted_tx.built_transaction().transaction.compute_txid()
@@ -306,7 +306,7 @@ mod tests {
 
             let spent = vec![false; trusted_tx.htlcs().len()];
             let (tx_r, _htlc_txs_r, _revocable_script_r, _uck_r, _revocation_pubkey_r) =
-                chan.sign_holder_commitment_tx_for_recovery(&spent)?;
+                chan.sign_holder_commitment_tx_for_recovery(&spent, None)?;
             assert_eq!(tx_r.compute_txid(), tx.transaction.compute_txid());
 
             Ok((sig, tx.transaction.clone()))

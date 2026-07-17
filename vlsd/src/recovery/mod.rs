@@ -7,7 +7,7 @@ use bitcoin::secp256k1::{PublicKey, SecretKey};
 use bitcoin::transaction::Version;
 use bitcoin::{Address, Network, ScriptBuf, Transaction, Witness};
 use bitcoind_client::esplora_client::EsploraClient;
-use bitcoind_client::{explorer_from_url, BlockExplorerType, Explorer};
+use bitcoind_client::{bitcoind_client_from_url, explorer_from_url, BlockExplorerType, Explorer};
 use lightning::chain::transaction::OutPoint;
 use lightning::sign::DelayedPaymentOutputDescriptor;
 use lightning_signer::bitcoin::address::{NetworkChecked, NetworkUnchecked};
@@ -75,6 +75,7 @@ pub trait RecoverySign {
         &self,
         spent_htlc_indices: &[bool],
         dry_run: bool,
+        chain_height_override: Option<u32>,
     ) -> Result<
         (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
         Status,
@@ -691,6 +692,26 @@ pub async fn recover_close<R: RecoveryKeys>(
     dry_run: bool,
 ) {
     let can_lookup_spending_tx = matches!(block_explorer_type, BlockExplorerType::Esplora);
+    let chain_height_override = if matches!(block_explorer_type, BlockExplorerType::Bitcoind) {
+        if let Some(ref url) = block_explorer_rpc {
+            let btc = bitcoind_client_from_url(url.clone(), network).await;
+            match btc.get_blockchain_info().await {
+                Ok(info) => {
+                    let height = info.latest_height as u32;
+                    info!("recovery chain height override: queried bitcoind tip height={}", height);
+                    Some(height)
+                }
+                Err(e) => {
+                    warn!("failed to query bitcoind chain height for recovery override: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let explorer_client = match block_explorer_rpc {
         Some(url) => Some(explorer_from_url(network, block_explorer_type, url).await),
         None => None,
@@ -705,6 +726,7 @@ pub async fn recover_close<R: RecoveryKeys>(
         explorer_client,
         can_lookup_spending_tx,
         dry_run,
+        chain_height_override,
     )
     .await;
 }
@@ -718,6 +740,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
     explorer_client: Option<Box<dyn Explorer>>,
     can_lookup_spending_tx: bool,
     dry_run: bool,
+    chain_height_override: Option<u32>,
 ) {
     let mut sweeps = Vec::new();
     let signers: Vec<_> = keys.iter().collect();
@@ -797,8 +820,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
             None
         };
 
-        let reconstruct_holder_htlcs =
-            funding_confirms.is_none() && !can_lookup_spending_tx && anchor_fee_rate.is_some();
+        let reconstruct_holder_htlcs = funding_confirms.is_none() && !can_lookup_spending_tx;
 
         let htlc_spend_status = if explorer_client.is_none()
             || funding_confirms.is_some()
@@ -821,7 +843,11 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
         };
 
         let (tx, htlc_txs, revocable_script, uck, revocation_pubkey) = signer
-            .sign_holder_commitment_tx_for_recovery(&htlc_spend_status.spent_indices, dry_run)
+            .sign_holder_commitment_tx_for_recovery(
+                &htlc_spend_status.spent_indices,
+                dry_run,
+                chain_height_override,
+            )
             .expect("sign");
         let htlc_txs = if let Some(fee_rate) = anchor_fee_rate {
             match add_fee_to_htlc_txs(&keys, htlc_txs, fee_rate, input_utxos, &funding_outpoint) {
@@ -837,6 +863,15 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
         } else {
             htlc_txs
         };
+        let current_holder_commitment_htlcs = current_commitment_tx.htlcs().len();
+        let htlc_txids: Vec<_> = htlc_txs.iter().map(|tx| tx.compute_txid()).collect();
+        info!(
+            "prepared {} HTLC recovery transaction(s) for channel {:?}; current_holder_commitment_htlcs={}; txids={:?}",
+            htlc_txs.len(),
+            funding_outpoint,
+            current_holder_commitment_htlcs,
+            htlc_txids
+        );
         let txid = tx.compute_txid();
         debug!("closing tx {:?}", &tx);
         info!("closing txid {}", txid);
@@ -1237,6 +1272,7 @@ mod tests {
             &self,
             spent_htlc_indices: &[bool],
             _dry_run: bool,
+            _chain_height_override: Option<u32>,
         ) -> Result<
             (Transaction, Vec<Transaction>, ScriptBuf, (SecretKey, Vec<Vec<u8>>), PublicKey),
             Status,
@@ -1658,6 +1694,7 @@ mod tests {
             Some(Box::new(mock.clone())),
             false,
             false,
+            None,
         )
         .await;
 
@@ -1698,6 +1735,7 @@ mod tests {
             Some(Box::new(mock.clone())),
             false,
             false,
+            None,
         )
         .await;
 
@@ -1715,7 +1753,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recover_close_inner_closed_static_channel_does_not_require_spender_lookup() {
+    async fn recover_close_inner_closed_static_channel_reconstructs_htlc_txs_without_spender_lookup(
+    ) {
+        // When the channel is already closed and the recovery backend cannot look up
+        // spending transactions (bitcoind mode), static channels now also reconstruct
+        // HTLC-timeout transactions from signer state so their second-level delayed
+        // outputs can be swept once the CSV matures.
         let state = Arc::new(Mutex::new(TestRecoveryState::default()));
         let signer = TestRecoverySigner::new(
             CommitmentType::StaticRemoteKey,
@@ -1739,13 +1782,17 @@ mod tests {
             Some(Box::new(mock.clone())),
             false,
             false,
+            None,
         )
         .await;
 
-        assert!(mock.broadcasts().is_empty());
+        // The reconstructed HTLC-timeout transaction is broadcast (it may already be
+        // confirmed from an earlier run, but we try again so we can sweep its outputs).
+        assert_eq!(mock.broadcasts().len(), 1);
 
         let state = state.lock().unwrap();
-        assert_eq!(state.spent_htlc_indices, vec![vec![true, true]]);
+        // HTLCs are treated as unspent for reconstruction so they get signed.
+        assert_eq!(state.spent_htlc_indices, vec![vec![false, false]]);
         assert!(state.wallet_signs.is_empty());
     }
 
@@ -1780,6 +1827,7 @@ mod tests {
             Some(Box::new(mock.clone())),
             true,
             false,
+            None,
         )
         .await;
 
@@ -1825,6 +1873,7 @@ mod tests {
             Some(Box::new(mock.clone())),
             true,
             false,
+            None,
         )
         .await;
 
@@ -1860,6 +1909,7 @@ mod tests {
             Some(Box::new(mock.clone())),
             true,
             false,
+            None,
         )
         .await;
 
@@ -1900,6 +1950,7 @@ mod tests {
             Some(Box::new(mock.clone())),
             false,
             false,
+            None,
         )
         .await;
 
@@ -1937,6 +1988,7 @@ mod tests {
             Some(Box::new(mock.clone())),
             true,
             false,
+            None,
         )
         .await;
 
@@ -1965,6 +2017,7 @@ mod tests {
             Some(Box::new(mock.clone())),
             true,
             false,
+            None,
         )
         .await;
 
@@ -2040,6 +2093,7 @@ mod tests {
             Some(Box::new(mock.clone())),
             false,
             true,
+            None,
         )
         .await;
 

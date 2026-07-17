@@ -1,6 +1,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{fmt, io};
@@ -160,6 +161,7 @@ async fn handle_ldk_events(
     inbound_payments: PaymentInfoStorage,
     outbound_payments: PaymentInfoStorage,
     network: Network,
+    hold_payments: Arc<AtomicBool>,
     event: Event,
 ) -> Result<(), ReplayEvent> {
     let mut pending_txs: HashMap<OutPoint, Transaction> = HashMap::new();
@@ -235,6 +237,13 @@ async fn handle_ldk_events(
                 amount_msat / 1000
             );
             io::stdout().flush().unwrap();
+            if hold_payments.load(Ordering::Relaxed) {
+                info!(
+                    "EVENT: hold mode active, deferring claim for payment_hash {}",
+                    hex_utils::hex_str(&payment_hash.0)
+                );
+                return Err(ReplayEvent());
+            }
             channel_manager.claim_funds(payment_preimage.unwrap());
         }
         Event::PaymentClaimed { payment_hash, purpose, amount_msat, .. } => {

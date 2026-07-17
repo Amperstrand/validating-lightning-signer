@@ -4319,7 +4319,7 @@ mod tests {
         let commit_num = 0;
         next_state(&mut channel, &mut channel1, commit_num, 2_999_000, 0, vec![], vec![]);
 
-        let txs = channel.sign_holder_commitment_tx_for_recovery(&[]).unwrap();
+        let txs = channel.sign_holder_commitment_tx_for_recovery(&[], None).unwrap();
         let holder_tx = txs.0;
         // find anchor output by value
         let idx =
