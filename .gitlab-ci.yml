@@ -12,6 +12,15 @@ variables:
   RUST_QEMU_NIGHTLY_VERSION: "nightly-1-95-2026-02-26"
   RUNNER_TAG: "saas-linux-large-amd64"
 
+# Shared rules applied to every build/test job so they are skipped on the
+# Renovate *scan* pipeline (the scheduled run that only executes the `renovate`
+# job). The dependency-update merge requests Renovate opens are ordinary MRs and
+# still run the full matrix via the workflow rules below.
+.skip_on_renovate: &skip_on_renovate
+  - if: '$RENOVATE_SCHEDULE == "true"'
+    when: never
+  - when: on_success
+
 workflow:
   rules:
     # If the CI_PROJECT_NAMESPACE does not contain 'lightning-signer' (e.g., external MRs or forks),
@@ -19,6 +28,10 @@ workflow:
     - if: '$CI_PROJECT_NAMESPACE !~ /lightning-signer/'
       variables:
         RUNNER_TAG: "saas-linux-medium-amd64"
+    # Renovate scan pipeline: allow it to run. Only the `renovate` job executes here;
+    # every other job is gated off via *skip_on_renovate.
+    - if: '$RENOVATE_SCHEDULE == "true"'
+      when: always
     - if: '$CI_MERGE_REQUEST_ID || $CI_COMMIT_BRANCH == "main"'
       when: always
     - when: never
@@ -40,6 +53,7 @@ include:
 # later jobs can be flaky and cache is not written when a job fails.
 get-bitcoin:
   stage: build
+  rules: *skip_on_renovate
   cache:
     key: vls-bitcoin
     paths:
@@ -60,6 +74,7 @@ get-bitcoin:
 
 fuzz-channel:
   tags: [ $RUNNER_TAG ]
+  rules: *skip_on_renovate
   image: 'rustlang/rust:nightly'
   extends: .fuzz_base
   stage: test
@@ -82,6 +97,7 @@ fuzz-channel:
 
 random-scheduler:
   tags: [ $RUNNER_TAG ]
+  rules: *skip_on_renovate
   stage: test
   image: rust:latest
   timeout: 5m
@@ -96,6 +112,7 @@ random-scheduler:
 
 rust-latest:
   tags: [ $RUNNER_TAG ]
+  rules: *skip_on_renovate
   stage: build
   image: rust:latest
   needs: [ "get-bitcoin" ]
@@ -132,6 +149,7 @@ rust-latest:
 
 rust-latest-extras:
   tags: [ $RUNNER_TAG ]
+  rules: *skip_on_renovate
   stage: build
   image: rust:latest
   services:
@@ -161,6 +179,7 @@ rust-latest-extras:
 
 rust-msrv:
   tags: [ $RUNNER_TAG ]
+  rules: *skip_on_renovate
   stage: build
   image: rust:1.85.0
   cache:
@@ -177,6 +196,7 @@ rust-msrv:
 
 rust-msrv-lss:
   tags: [$RUNNER_TAG]
+  rules: *skip_on_renovate
   stage: build
   image: rust:1.85.0
   cache:
@@ -193,6 +213,7 @@ rust-msrv-lss:
 
 embedded:
   tags: [ saas-linux-medium-amd64 ]
+  rules: *skip_on_renovate
   stage: build
   image: $VLS_REGISTRY/rust-qemu:$RUST_QEMU_NIGHTLY_VERSION
   cache:
@@ -209,6 +230,7 @@ embedded:
 
 stm32:
   tags: [ saas-linux-medium-amd64 ]
+  rules: *skip_on_renovate
   stage: build
   image: $VLS_REGISTRY/rust-qemu:$RUST_QEMU_NIGHTLY_VERSION
   cache:
@@ -222,6 +244,7 @@ stm32:
 
 wasm:
   tags: [ saas-linux-medium-amd64 ]
+  rules: *skip_on_renovate
   stage: build
   image: $VLS_REGISTRY/rust-qemu:$RUST_QEMU_NIGHTLY_VERSION
   cache:
@@ -236,6 +259,7 @@ wasm:
 
 coverage:
   tags: [ $RUNNER_TAG ]
+  rules: *skip_on_renovate
   stage: build
   image: rust:latest
   needs: [ "get-bitcoin" ]
@@ -264,6 +288,7 @@ coverage:
 
 cargo-audit:
   tags: [ saas-linux-medium-amd64 ]
+  rules: *skip_on_renovate
   stage: build
   image: rust:latest
   cache:
@@ -279,6 +304,7 @@ cargo-audit:
 
 changelog:
   stage: build
+  rules: *skip_on_renovate
   before_script:
     - git fetch origin main:main
   allow_failure: true
@@ -324,6 +350,7 @@ lints:
 
 cargo-fmt:
   tags: [ saas-linux-small-amd64 ]
+  rules: *skip_on_renovate
   stage: build
   image: rust:latest
   cache:
@@ -342,6 +369,7 @@ cargo-fmt:
 
 cargo-mutants:
   tags: [ $RUNNER_TAG ]
+  rules: *skip_on_renovate
   stage: build
   image: rust:latest
   needs: [ "get-bitcoin" ]
@@ -373,6 +401,7 @@ cargo-mutants:
 
 integration-lnrod-local:
   stage: test
+  rules: *skip_on_renovate
   tags: [ $RUNNER_TAG ]
   needs: [ "rust-latest", "get-bitcoin" ]
   script:
@@ -392,6 +421,7 @@ integration-lnrod-local:
 
 integration-lnrod-grpc:
   stage: test
+  rules: *skip_on_renovate
   tags: [ $RUNNER_TAG ]
   needs: [ "rust-latest", "get-bitcoin" ]
   script:
@@ -411,6 +441,7 @@ integration-lnrod-grpc:
 
 integration-lnrod-grpc-disaster-recovery:
   stage: test
+  rules: *skip_on_renovate
   tags: [ $RUNNER_TAG ]
   needs: [ "rust-latest", "get-bitcoin" ]
   script:
@@ -427,3 +458,33 @@ integration-lnrod-grpc-disaster-recovery:
     when: always
     paths:
       - lnrod/test-output
+
+# ---------------------------------------------------------------------------
+# Self-hosted Renovate (replaces the Mend GitLab app). Invariants to keep:
+#
+# - This job is gated on RENOVATE_SCHEDULE=true, the same flag *skip_on_renovate
+#   uses to skip the matrix. The two MUST stay in sync: set it on the pipeline
+#   schedule (and nowhere else) so the scan runs alone and the bumps it opens
+#   still get the full matrix as ordinary MRs.
+# - Cadence lives in renovate.json, not in the cron. The schedule must fire more
+#   often than any renovate.json window (run it DAILY), or the "at any time"
+#   vuln fast-path and the monthly lockFileMaintenance sweep get starved.
+# - Requires a masked RENOVATE_TOKEN CI/CD variable (bot token, scopes:
+#   api, read_user, write_repository). Without it the job no-ops/fails.
+# ---------------------------------------------------------------------------
+renovate:
+  stage: build
+  image:
+    name: renovate/renovate:43
+    entrypoint: [""]
+  tags: [ saas-linux-medium-amd64 ]
+  before_script: []
+  cache: {}
+  variables:
+    RENOVATE_PLATFORM: gitlab
+    RENOVATE_ENDPOINT: "$CI_API_V4_URL"
+    LOG_LEVEL: info
+  rules:
+    - if: '$RENOVATE_SCHEDULE == "true"'
+  script:
+    - renovate "$CI_PROJECT_PATH"

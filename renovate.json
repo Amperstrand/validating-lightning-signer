@@ -1,0 +1,110 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(deps)"
+  ],
+  "timezone": "Etc/UTC",
+  "schedule": [
+    "after 2am and before 6am on monday"
+  ],
+
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "branchConcurrentLimit": 8,
+
+  "rangeStrategy": "update-lockfile",
+  "rebaseWhen": "conflicted",
+
+  "minimumReleaseAge": "14 days",
+  "internalChecksFilter": "strict",
+
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "minimumReleaseAge": "3 days",
+    "schedule": ["at any time"],
+    "labels": ["security", "renovate"],
+    "prPriority": 10
+  },
+
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"],
+    "commitMessageAction": "Refresh"
+  },
+
+  "labels": ["renovate", "dependencies"],
+
+  "packageRules": [
+    {
+      "description": "Hold major bumps longer — more likely to be retracted or hot-patched",
+      "matchUpdateTypes": ["major"],
+      "minimumReleaseAge": "21 days",
+      "labels": ["renovate", "dependencies", "major"]
+    },
+    {
+      "description": "Group LDK / lightning ecosystem — these versions move together",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "/^lightning/",
+        "/^ldk-/"
+      ],
+      "groupName": "lightning ecosystem"
+    },
+    {
+      "description": "Group bitcoin / secp256k1 ecosystem",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "/^bitcoin/",
+        "/^secp256k1/",
+        "bitcoincore-rpc"
+      ],
+      "groupName": "bitcoin ecosystem"
+    },
+    {
+      "description": "Group tokio runtime crates so async-stack bumps land together",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "/^tokio/",
+        "tower",
+        "tower-http",
+        "hyper",
+        "hyper-util"
+      ],
+      "groupName": "tokio / hyper stack"
+    },
+    {
+      "description": "Group serde + miniscript-adjacent crates",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": [
+        "/^serde/",
+        "/^miniscript/"
+      ],
+      "groupName": "serde / miniscript"
+    },
+    {
+      "description": "Embedded / bare-metal crates have bespoke toolchains — Renovate's sandbox may not be able to refresh their lockfiles. scripts/update-all covers these; let Renovate propose version bumps but skip whole-lockfile sweeps.",
+      "matchFileNames": [
+        "embedded/**",
+        "vls-signer-stm32/**",
+        "fuzz/**"
+      ],
+      "matchUpdateTypes": ["lockFileMaintenance"],
+      "enabled": false
+    },
+    {
+      "description": "Dev/test-only dependency updates are lower priority and can batch",
+      "matchManagers": ["cargo"],
+      "matchDepTypes": ["dev-dependencies", "build-dependencies"],
+      "groupName": "dev/build dependencies",
+      "schedule": ["before 6am on the first day of the month"]
+    }
+  ],
+
+  "cargo": {
+    "commitMessageTopic": "{{depName}}"
+  }
+}
