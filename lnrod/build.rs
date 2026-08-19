@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .field_attribute("best_block_hash", SERDE_SERIALIZE_HEX)
         .field_attribute("payment_hash", SERDE_SERIALIZE_HEX)
         .field_attribute("Payment.status", SERDE_SERIALIZE_PAYMENT_STATUS)
-        .compile(&["src/admin/admin.proto"], &["src/admin"])?;
+        .compile_protos(&["src/admin/admin.proto"], &["src/admin"])?;
 
     Ok(())
 }

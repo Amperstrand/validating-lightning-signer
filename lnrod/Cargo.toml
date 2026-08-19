@@ -30,9 +30,8 @@ time = "0.2"
 rand = "0.8"
 serde_json = { version = "1.0" }
 tokio = { version = "1.24", features = ["macros", "rt-multi-thread"] }
-hyper = "0.14"
-prost = "0.11"
-tonic = "0.9"
+prost = "0.13"
+tonic = "0.12"
 clap = "3.2"
 toml = "0.5.8"
 url = "2.3"
@@ -100,7 +99,7 @@ features = ["developer"]
 path = "../vls-proxy"
 
 [build-dependencies]
-tonic-build = "0.9"
+tonic-build = "0.12"
 
 [[bin]]
 name = "lnrod"
