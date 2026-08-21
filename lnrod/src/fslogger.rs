@@ -2,7 +2,11 @@ use std::fs;
 use std::io::Write;
 use std::sync::Mutex;
 
-use time::OffsetDateTime;
+use time::{macros::format_description, OffsetDateTime};
+
+// time 0.3 dropped strftime-style formatting; this is the old "%F %T".
+const LOG_TIMESTAMP: &[time::format_description::FormatItem<'static>] =
+    format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 
 use log::{LevelFilter, Log, Metadata, Record};
 
@@ -44,7 +48,7 @@ impl Log for FilesystemLogger {
             let raw_log = record.args().to_string();
             let log = format!(
                 "{} {:<5} [{}:{}] {}\n",
-                OffsetDateTime::now_utc().format("%F %T"),
+                OffsetDateTime::now_utc().format(LOG_TIMESTAMP).unwrap_or_default(),
                 record.level().to_string(),
                 record.module_path().unwrap_or_else(|| "<unknown-module-path>"),
                 record.line().unwrap_or_else(|| 0),

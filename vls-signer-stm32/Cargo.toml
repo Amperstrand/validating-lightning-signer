@@ -1,6 +1,7 @@
 [package]
 name = "vls-signer-stm32"
 version = "0.1.0"
+license = "Apache-2.0"
 authors = ["Ken Sedgwick <ken@bonsai.com>", "Devrandom <c1.devrandom@niftybox.net>"]
 edition = "2021"
 build = "build.rs"

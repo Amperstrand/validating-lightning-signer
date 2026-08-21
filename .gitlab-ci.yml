@@ -6,6 +6,13 @@ cache:
     - bin
 
 variables:
+  # Full clone. vls-util/build.rs derives GIT_DESC from `git describe --match=v*.*`,
+  # and the tests in vls-proxy/src/socket_main.rs assert it looks like a version.
+  # Under the runner's default shallow fetch the tag is not reachable from an
+  # MR ref, and describe's --always flag then degrades silently to a bare SHA,
+  # which surfaces as a confusing test failure rather than a build error.
+  # Measured cost of the full clone over depth 50: ~9MB, no measurable wall clock.
+  GIT_DEPTH: 0
   CARGO_HOME: "$CI_PROJECT_DIR/.cache/cargo"
   VLS_REPOSITORY: https://gitlab.com/lightning-signer/validating-lightning-signer.git
   VLS_REGISTRY: registry.gitlab.com/lightning-signer/validating-lightning-signer
@@ -286,7 +293,41 @@ coverage:
         path: target/cobertura.xml
     expire_in: 1 week
 
-cargo-audit:
+# Dependency checks are split by whether their verdict can change while the code
+# stands still.
+#
+# bans/licenses/sources are a pure function of the lockfile, so they gate MRs.
+#
+# advisories (and cargo audit) also depend on the RustSec database, which moves
+# underneath us: a newly published advisory against a crate already in the lock
+# would otherwise turn every unrelated MR red, and stay red for as long as
+# renovate.json's minimumReleaseAge holds the fix back -- or indefinitely, when
+# no fixed version exists yet. So on MRs they only warn, and the authoritative
+# run is the daily scheduled pipeline (the same one that runs `renovate`), where
+# a failure is a signal rather than noise. Triage there: take the Renovate bump
+# if one is open, otherwise add a deny.toml ignore with a reason.
+# Workspaces listed in the root Cargo.toml `exclude` (lss, lnrod, wasm,
+# embedded, stm32) have their own lockfiles and are invisible to a root
+# `cargo deny`, so each is checked explicitly. This replaces the previous
+# `cargo audit` runs over lss/lnrod: cargo-deny covers the same RustSec data,
+# also flags yanked crates, and shares deny.toml's ignore list, so a triage
+# decision is recorded in one place for the whole repo.
+#
+# cargo-deny is version-pinned: --config moved to a root flag in 0.20 and
+# changed how it resolves relative paths in 0.19, so an unpinned `cargo install`
+# silently changes the required argument order. Note also that a --config path
+# that does not resolve falls back to the built-in default config, which allows
+# no licenses at all -- it warns once and then reports every crate as rejected.
+.deny_excluded_workspaces: &deny_excluded_workspaces |
+  fail=0
+  for d in lightning-storage-server lnrod wasm embedded vls-signer-stm32; do
+    echo "--- cargo deny $DENY_CHECKS: $d"
+    cargo deny --config "$CI_PROJECT_DIR/deny.toml" \
+      --manifest-path "$d/Cargo.toml" check $DENY_CHECKS || fail=1
+  done
+  exit $fail
+
+cargo-deny:
   tags: [ saas-linux-medium-amd64 ]
   rules: *skip_on_renovate
   stage: build
@@ -295,12 +336,35 @@ cargo-audit:
     key: vls-audit
     paths:
       - .cache/cargo
+  variables:
+    DENY_CHECKS: "bans licenses sources"
   script:
-    - cargo install cargo-deny --locked
-    - cargo install cargo-audit --locked
-    - cargo deny check
-    - (cd lightning-storage-server && cargo audit)
-    - (cd lnrod && cargo audit)
+    - cargo install cargo-deny --locked --version 0.20.2
+    - cargo deny check bans licenses sources
+    - *deny_excluded_workspaces
+
+cargo-advisories:
+  tags: [ saas-linux-medium-amd64 ]
+  # Deliberately not *skip_on_renovate: this job is the point of the scheduled
+  # pipeline's second half, so it must run there -- and only there does it fail
+  # the pipeline.
+  rules:
+    - if: '$RENOVATE_SCHEDULE == "true"'
+      allow_failure: false
+    - when: on_success
+      allow_failure: true
+  stage: build
+  image: rust:latest
+  cache:
+    key: vls-audit
+    paths:
+      - .cache/cargo
+  variables:
+    DENY_CHECKS: "advisories"
+  script:
+    - cargo install cargo-deny --locked --version 0.20.2
+    - cargo deny check advisories
+    - *deny_excluded_workspaces
 
 changelog:
   stage: build

@@ -72,6 +72,14 @@ feature-depth = 1
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "Paste is not maintained but considered complete: https://github.com/rustsec/advisory-db/pull/2215#issuecomment-2709315704" },
     { id = "RUSTSEC-2026-0009", reason = "time crate is only used for formatting timestamps in logging, no parsing of untrusted input" },
+    # Reached only through the workspaces excluded from the root Cargo.toml.
+    # All are unmaintained/deprecation notices rather than exploitable defects;
+    # each names the upgrade that will retire the entry.
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile is unmaintained (superseded by rustls-pki-types), not vulnerable. Pulled in transitively by tonic 0.12 in lightning-storage-server; clears when the workspace tonic pin moves to a release that has dropped it" },
+    { id = "RUSTSEC-2021-0145", reason = "atty unaligned read, reached only via clap 3.2 in lnrod, which is the integration test harness and is never distributed. Clears when lnrod migrates to clap 4" },
+    { id = "RUSTSEC-2024-0375", reason = "atty is unmaintained; same clap 3.2 path in lnrod as RUSTSEC-2021-0145" },
+    { id = "RUSTSEC-2022-0073", reason = "alloc-cortex-m was renamed to embedded-alloc, no vulnerability. Direct dependency of embedded/ and vls-signer-stm32/; retiring this needs the rename applied to those crates" },
+    { id = "RUSTSEC-2026-0110", reason = "bare-metal 0.2 is deprecated, no vulnerability. Transitive via cortex-m 0.6/0.7 in embedded/ and vls-signer-stm32/; not actionable until those bump cortex-m" },
     #"RUSTSEC-0000-0000",
     #{ id = "RUSTSEC-0000-0000", reason = "you can specify a reason the advisory is ignored" },
     #"a-crate-that-is-yanked@0.1.1", # you can also ignore yanked crate versions if you wish
@@ -101,7 +109,8 @@ allow = [
     "Unicode-3.0",
     "CC0-1.0",
     "Zlib",
-    "CDLA-Permissive-2.0"
+    "CDLA-Permissive-2.0",
+    "0BSD"
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
@@ -234,7 +243,12 @@ unknown-git = "deny"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = []
+allow-git = [
+    # Embedded drivers used by vls-signer-stm32 that are not published to
+    # crates.io. Both are pinned by revision/tag in that workspace's lockfile.
+    "https://github.com/rafalh/rust-fatfs",
+    "https://github.com/Srg213/ft6x06",
+]
 
 [sources.allow-org]
 # github.com organizations to allow git sources for

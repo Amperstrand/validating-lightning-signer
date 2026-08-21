@@ -21,6 +21,14 @@
   "minimumReleaseAge": "14 days",
   "internalChecksFilter": "strict",
 
+  "description": [
+    "MSRV gate: Renovate does not yet read workspace.package.rust-version itself (renovatebot/renovate#26314), so the value below is a manual mirror of Cargo.toml's rust-version and MUST be bumped with it. Filtering only covers crates that publish rust_version to crates.io; anything without that metadata, and every transitive bump from lockFileMaintenance, still relies on the rust-msrv CI job."
+  ],
+  "constraints": {
+    "rust": "1.85.0"
+  },
+  "constraintsFiltering": "strict",
+
   "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
     "enabled": true,
