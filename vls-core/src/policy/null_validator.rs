@@ -1,9 +1,9 @@
+use crate::signer::vls_channel_signer::VlsChannelSigner;
 use bitcoin::bip32::DerivationPath;
 use bitcoin::secp256k1::{PublicKey, SecretKey};
 use bitcoin::sighash::{EcdsaSighashType, SegwitV0Sighash};
 use bitcoin::{self, Network, ScriptBuf, Transaction};
 use lightning::ln::chan_utils::{ClosingTransaction, HTLCOutputInCommitment, TxCreationKeys};
-use lightning::sign::InMemorySigner;
 
 use crate::channel::{ChannelId, ChannelSetup, ChannelSlot};
 use crate::policy::simple_validator::SimpleValidatorFactory;
@@ -76,7 +76,7 @@ impl Validator for NullValidator {
 
     fn decode_commitment_tx(
         &self,
-        keys: &InMemorySigner,
+        keys: &VlsChannelSigner,
         setup: &ChannelSetup,
         is_counterparty: bool,
         tx: &bitcoin::Transaction,

@@ -884,6 +884,16 @@ pub struct HsmdInit2Reply {
     pub node_id: PubKey,
     pub bip32: ExtKey,
     pub bolt12: PubKey,
+    /// Symmetric key used by LDK 0.2+ to encrypt peer-storage backups. Must
+    /// be re-derivable from the seed for state-loss recovery to work, so
+    /// the signer is the only entity that can supply it. See
+    /// `NodeSigner::get_peer_storage_key` in LDK.
+    pub peer_storage_key: Secret,
+    /// Seed for LDK 0.2+'s inbound-payment `ExpandedKey` (`NodeSigner::get_expanded_key`).
+    /// LDK derives inbound-payment secrets from it, so it must be stable across restarts or
+    /// invoices become unreceivable. Only the signer holds the seed, so it ships it here rather
+    /// than the client generating its own.
+    pub inbound_payment_key: Secret,
 }
 
 /// Get node public keys.
@@ -951,7 +961,7 @@ pub struct SignMutualCloseTx2 {
 
 ///
 /// LDK only
-#[derive(SerBolt, Debug, Encodable, Decodable)]
+#[derive(SerBolt, Debug, Clone, Encodable, Decodable)]
 #[message_id(1035)]
 pub struct ValidateCommitmentTx2 {
     pub commitment_number: u64,

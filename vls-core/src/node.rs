@@ -20,16 +20,12 @@ use bitcoin::sighash::{EcdsaSighashType, Prevouts, SighashCache, TapSighashType}
 use bitcoin::{secp256k1, Address, CompressedPublicKey, PrivateKey, ScriptBuf, Transaction, TxOut};
 use bitcoin::{Network, OutPoint, Script};
 use bitcoin_consensus_derive::{Decodable, Encodable};
-use lightning::chain;
-use lightning::ln::chan_utils::{
-    ChannelPublicKeys, ChannelTransactionParameters, CounterpartyChannelTransactionParameters,
-};
 use lightning::ln::inbound_payment::ExpandedKey;
 use lightning::ln::msgs::UnsignedGossipMessage;
 use lightning::ln::script::ShutdownScript;
 use lightning::offers::invoice::UnsignedBolt12Invoice;
 use lightning::sign::{
-    ChannelSigner, EntropySource, NodeSigner, Recipient, SignerProvider, SpendableOutputDescriptor,
+    EntropySource, NodeSigner, Recipient, SignerProvider, SpendableOutputDescriptor,
 };
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning::util::logger::Logger;
@@ -1333,7 +1329,7 @@ impl Node {
                 channel_id0,
                 channel_entry.channel_setup.as_ref().map(|s| s.funding_outpoint)
             );
-            let mut keys = node.keys_manager.get_channel_keys_with_id(
+            let (keys, payment_key) = node.keys_manager.get_channel_keys_with_id(
                 channel_id0.clone(),
                 channel_entry.channel_value_satoshis,
             );
@@ -1344,6 +1340,7 @@ impl Node {
                         node: Arc::downgrade(&node),
                         secp_ctx: Secp256k1::new(),
                         keys,
+                        payment_key,
                         id0: channel_id0.clone(),
                         blockheight: channel_entry.blockheight.unwrap_or(blockheight),
                     };
@@ -1352,12 +1349,6 @@ impl Node {
                     channel_id.map(|id| channels.insert(id, Arc::clone(&slot)));
                 }
                 Some(setup) => {
-                    let channel_transaction_parameters =
-                        Node::channel_setup_to_channel_transaction_parameters(
-                            &setup,
-                            keys.pubkeys(),
-                        );
-                    keys.provide_channel_parameters(&channel_transaction_parameters);
                     let funding_outpoint = setup.funding_outpoint;
                     // Clone the matching monitor from the chaintracker's listeners.
                     // Tracker is persisted with node, so this should not fail.
@@ -1374,6 +1365,7 @@ impl Node {
                         node: Arc::downgrade(&node),
                         secp_ctx: Secp256k1::new(),
                         keys,
+                        payment_key,
                         enforcement_state,
                         setup,
                         id0: channel_id0.clone(),
@@ -1579,7 +1571,20 @@ impl Node {
     ///
     /// This method must return the same value each time it is called.
     pub fn get_inbound_payment_key_material(&self) -> ExpandedKey {
-        self.keys_manager.get_inbound_payment_key()
+        self.keys_manager.get_expanded_key()
+    }
+
+    /// Get the 32-byte peer-storage encryption key derived from the seed. Used by
+    /// LDK 0.2+ to encrypt our state backup sent to peers; the signer is the only
+    /// component with the seed, so it's the source of truth for this key.
+    pub fn get_peer_storage_key_bytes(&self) -> [u8; 32] {
+        self.keys_manager.get_peer_storage_key().inner
+    }
+
+    /// Seed for LDK's inbound-payment `ExpandedKey`. Only the signer holds the seed, so it is
+    /// the source of truth; shipped to a remote client in `HsmdInit2Reply`.
+    pub fn get_inbound_payment_key_bytes(&self) -> [u8; 32] {
+        self.keys_manager.get_inbound_payment_key_bytes()
     }
 
     /// Get the [Mutex] protected channel slot
@@ -1712,7 +1717,7 @@ impl Node {
         }
 
         let channel_value_sat = 0; // Placeholder value, not known yet.
-        let keys =
+        let (keys, payment_key) =
             self.keys_manager.get_channel_keys_with_id(channel_id.clone(), channel_value_sat);
 
         let blockheight = arc_self.get_tracker().height();
@@ -1720,6 +1725,7 @@ impl Node {
             node: Arc::downgrade(arc_self),
             secp_ctx: Secp256k1::new(),
             keys,
+            payment_key,
             id0: channel_id.clone(),
             blockheight,
         };
@@ -1899,11 +1905,7 @@ impl Node {
                     return Ok(c.clone());
                 }
             };
-            let mut keys = stub.channel_keys_with_channel_value(setup.channel_value_sat);
-            let holder_pubkeys = keys.pubkeys();
-            let channel_transaction_parameters =
-                Node::channel_setup_to_channel_transaction_parameters(&setup, holder_pubkeys);
-            keys.provide_channel_parameters(&channel_transaction_parameters);
+            let (keys, payment_key) = stub.channel_keys();
             let funding_outpoint = setup.funding_outpoint;
             let monitor = ChainMonitorBase::new(funding_outpoint, tracker.height(), chan_id);
             monitor.add_funding_outpoint(&funding_outpoint);
@@ -1931,6 +1933,7 @@ impl Node {
                 node: Weak::clone(&stub.node),
                 secp_ctx: stub.secp_ctx.clone(),
                 keys,
+                payment_key,
                 enforcement_state,
                 setup: setup.clone(),
                 id0: channel_id0.clone(),
@@ -2363,29 +2366,6 @@ impl Node {
 
     fn validator(&self) -> Arc<dyn Validator> {
         self.validator_factory().make_validator(self.network(), self.get_id(), None)
-    }
-
-    fn channel_setup_to_channel_transaction_parameters(
-        setup: &ChannelSetup,
-        holder_pubkeys: &ChannelPublicKeys,
-    ) -> ChannelTransactionParameters {
-        let funding_outpoint = Some(chain::transaction::OutPoint {
-            txid: setup.funding_outpoint.txid,
-            index: setup.funding_outpoint.vout as u16,
-        });
-
-        let channel_transaction_parameters = ChannelTransactionParameters {
-            holder_pubkeys: holder_pubkeys.clone(),
-            holder_selected_contest_delay: setup.holder_selected_contest_delay,
-            is_outbound_from_holder: setup.is_outbound,
-            counterparty_parameters: Some(CounterpartyChannelTransactionParameters {
-                pubkeys: setup.counterparty_points.clone(),
-                selected_contest_delay: setup.counterparty_selected_contest_delay,
-            }),
-            funding_outpoint,
-            channel_type_features: setup.features(),
-        };
-        channel_transaction_parameters
     }
 
     pub(crate) fn get_wallet_privkey(
@@ -3824,11 +3804,14 @@ mod tests {
         policy.max_invoices = 1;
         let node = init_node_with_policy_and_clock(TEST_NODE_CONFIG, TEST_SEED[0], policy, clock);
 
+        // LDK 0.2 drops a zero offer amount to `None`, so the invoice request would otherwise
+        // fail to build with `MissingAmount`. Supply the zero amount on the request instead to
+        // construct the zero-amount invoice this test needs.
         let zero_amount_invoice = make_test_unsigned_bolt12_invoice_with_params(
             node.get_bolt12_pubkey(),
             PaymentHash([30; 32]),
             Some(0),
-            None,
+            Some(0),
             None,
             Quantity::One,
             now,
@@ -4220,7 +4203,8 @@ mod tests {
         let encmsg = Message::from_digest(ca_hash.to_byte_array());
         let secp_ctx = Secp256k1::new();
         node.with_channel(&channel_id, |chan| {
-            let funding_pubkey = PublicKey::from_secret_key(&secp_ctx, &chan.keys.funding_key);
+            let funding_pubkey =
+                PublicKey::from_secret_key(&secp_ctx, &chan.keys.funding_key(None));
             Ok(secp_ctx.verify_ecdsa(&encmsg, &bsig, &funding_pubkey).expect("verify bsig"))
         })
         .unwrap();
@@ -4338,7 +4322,7 @@ mod tests {
         };
         // sign the spend
         let sig = channel.sign_holder_anchor_input(&spend_tx, idx).unwrap();
-        let anchor_redeemscript = channel.get_anchor_redeemscript();
+        let anchor_redeemscript = channel.get_keyed_anchor_redeemscript();
         let witness = vec![signature_to_bitcoin_vec(sig), anchor_redeemscript.to_bytes()];
         spend_tx.input[0].witness = Witness::from_slice(&witness);
         // verify the transaction
@@ -4362,8 +4346,9 @@ mod tests {
             .with_channel(&channel_id, |chan| chan.get_unilateral_close_key(&None, &None))
             .unwrap();
         let keys = &chan.as_ref().unwrap().unwrap_stub().keys;
-        let pubkey = keys.pubkeys().payment_point;
-        let redeem_script = chan_utils::get_to_countersignatory_with_anchors_redeemscript(&pubkey);
+        let secp_ctx = Secp256k1::new();
+        let pubkey = keys.pubkeys(&secp_ctx).payment_point;
+        let redeem_script = chan_utils::get_to_countersigner_keyed_anchor_redeemscript(&pubkey);
 
         assert_eq!(
             uck,
@@ -4395,7 +4380,8 @@ mod tests {
             .with_channel(&channel_id, |chan| chan.get_unilateral_close_key(&None, &None))
             .unwrap();
         let keys = &chan.as_ref().unwrap().unwrap_stub().keys;
-        let key = keys.pubkeys().payment_point;
+        let secp_ctx = Secp256k1::new();
+        let key = keys.pubkeys(&secp_ctx).payment_point;
 
         assert_eq!(
             uck,
@@ -4520,6 +4506,32 @@ mod tests {
         let pubkey = secp_ctx.recover_ecdsa(&encmsg, &rsig).unwrap();
         assert!(secp_ctx.verify_ecdsa(&encmsg, &sig, &pubkey).is_ok());
         assert_eq!(pubkey.serialize().to_vec(), node.get_id().serialize().to_vec());
+    }
+
+    #[test]
+    fn peer_storage_key_bytes_test() {
+        use lightning::sign::NodeSigner;
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let bytes = node.get_peer_storage_key_bytes();
+        // The signer is the source of truth; this is shipped to the client in HsmdInit2Reply.
+        assert_eq!(bytes, node.keys_manager.get_peer_storage_key().inner);
+        // A real derived key is not a constant.
+        assert_ne!(bytes, [0u8; 32]);
+        assert_ne!(bytes, [1u8; 32]);
+    }
+
+    #[test]
+    fn inbound_payment_key_bytes_test() {
+        use lightning::ln::inbound_payment::ExpandedKey;
+        use lightning::sign::NodeSigner;
+        let node = init_node(TEST_NODE_CONFIG, TEST_SEED[1]);
+        let bytes = node.get_inbound_payment_key_bytes();
+        // The signer is the source of truth; this seed ships to the client in HsmdInit2Reply,
+        // where `ExpandedKey::new(bytes)` must reconstruct the signer's own expanded key.
+        assert_eq!(ExpandedKey::new(bytes), node.keys_manager.get_expanded_key());
+        // A real derived key is not a constant.
+        assert_ne!(bytes, [0u8; 32]);
+        assert_ne!(bytes, [1u8; 32]);
     }
 
     // TODO move this elsewhere

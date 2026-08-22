@@ -6,7 +6,6 @@ use bitcoin::secp256k1::ecdsa::RecoverableSignature;
 use bitcoin::secp256k1::ecdsa::Signature;
 use bitcoin::secp256k1::{ecdh::SharedSecret, All, PublicKey, Scalar, Secp256k1};
 use bitcoin::{Address, Network, Transaction, TxOut};
-use lightning::ln::msgs::DecodeError;
 use lightning::ln::msgs::UnsignedGossipMessage;
 use lightning::ln::script::ShutdownScript;
 use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
@@ -47,28 +46,13 @@ struct Adapter {
 impl SignerProvider for Adapter {
     type EcdsaSigner = DynSigner;
 
-    fn generate_channel_keys_id(
-        &self,
-        inbound: bool,
-        channel_value_satoshis: u64,
-        user_channel_id: u128,
-    ) -> [u8; 32] {
-        self.inner.generate_channel_keys_id(inbound, channel_value_satoshis, user_channel_id)
+    fn generate_channel_keys_id(&self, inbound: bool, user_channel_id: u128) -> [u8; 32] {
+        self.inner.generate_channel_keys_id(inbound, user_channel_id)
     }
 
-    fn derive_channel_signer(
-        &self,
-        channel_value_satoshis: u64,
-        channel_keys_id: [u8; 32],
-    ) -> Self::EcdsaSigner {
-        let inner = self.inner.derive_channel_signer(channel_value_satoshis, channel_keys_id);
+    fn derive_channel_signer(&self, channel_keys_id: [u8; 32]) -> Self::EcdsaSigner {
+        let inner = self.inner.derive_channel_signer(channel_keys_id);
         DynSigner { inner: Box::new(inner) }
-    }
-
-    fn read_chan_signer(&self, reader: &[u8]) -> Result<Self::EcdsaSigner, DecodeError> {
-        let inner = self.inner.read_chan_signer(reader)?;
-
-        Ok(DynSigner::new(inner))
     }
 
     fn get_destination_script(&self, channel_keys_id: [u8; 32]) -> Result<ScriptBuf, ()> {
@@ -87,8 +71,16 @@ impl EntropySource for Adapter {
 }
 
 impl NodeSigner for Adapter {
-    fn get_inbound_payment_key(&self) -> ExpandedKey {
-        self.inner.get_inbound_payment_key()
+    fn get_expanded_key(&self) -> ExpandedKey {
+        self.inner.get_expanded_key()
+    }
+
+    fn get_peer_storage_key(&self) -> lightning::sign::PeerStorageKey {
+        self.inner.get_peer_storage_key()
+    }
+
+    fn get_receive_auth_key(&self) -> lightning::sign::ReceiveAuthKey {
+        self.inner.get_receive_auth_key()
     }
 
     fn get_node_id(&self, recipient: Recipient) -> Result<PublicKey, ()> {
@@ -125,6 +117,10 @@ impl NodeSigner for Adapter {
         _invoice: &lightning::offers::invoice::UnsignedBolt12Invoice,
     ) -> Result<bitcoin::secp256k1::schnorr::Signature, ()> {
         todo!()
+    }
+
+    fn sign_message(&self, msg: &[u8]) -> Result<String, ()> {
+        self.inner.sign_message(msg)
     }
 }
 

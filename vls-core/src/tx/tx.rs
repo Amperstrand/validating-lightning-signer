@@ -2,15 +2,15 @@ use crate::prelude::*;
 use core::cmp;
 use core::fmt;
 
+use crate::signer::vls_channel_signer::VlsChannelSigner;
 use bitcoin::blockdata::opcodes::all::{
     OP_CHECKMULTISIG, OP_CHECKSIG, OP_CHECKSIGVERIFY, OP_CLTV, OP_CSV, OP_DROP, OP_DUP, OP_ELSE,
     OP_ENDIF, OP_EQUAL, OP_EQUALVERIFY, OP_HASH160, OP_IF, OP_IFDUP, OP_NOTIF, OP_PUSHNUM_1,
     OP_PUSHNUM_16, OP_PUSHNUM_2, OP_SIZE, OP_SWAP,
 };
-use bitcoin::secp256k1::PublicKey;
+use bitcoin::secp256k1::{PublicKey, Secp256k1};
 use bitcoin::{Address, Amount, Network, ScriptBuf};
 use bitcoin::{Script, TxOut};
-use lightning::sign::{ChannelSigner, InMemorySigner};
 use lightning::types::payment::PaymentHash;
 
 use serde_derive::{Deserialize, Serialize};
@@ -606,19 +606,23 @@ impl CommitmentInfo {
 
     fn handle_anchor_output(
         &mut self,
-        keys: &InMemorySigner,
+        keys: &VlsChannelSigner,
+        setup: &ChannelSetup,
         out: &TxOut,
         to_pubkey_data: Vec<u8>,
     ) -> Result<(), ValidationError> {
+        let secp_ctx = Secp256k1::new();
         let to_pubkey = PublicKey::from_slice(to_pubkey_data.as_slice())
             .map_err(|err| mismatch_error(format!("anchor to_pubkey malformed: {}", err)))?;
 
+        let holder_funding_pubkey = keys.pubkeys(&secp_ctx).funding_pubkey;
+        let counterparty_funding_pubkey = setup.counterparty_points.funding_pubkey;
         // These are dependent on which side owns this commitment.
         let (to_broadcaster_funding_pubkey, to_countersigner_funding_pubkey) =
             if self.is_counterparty_broadcaster {
-                (keys.counterparty_pubkeys().unwrap().funding_pubkey, keys.pubkeys().funding_pubkey)
+                (counterparty_funding_pubkey, holder_funding_pubkey)
             } else {
-                (keys.pubkeys().funding_pubkey, keys.counterparty_pubkeys().unwrap().funding_pubkey)
+                (holder_funding_pubkey, counterparty_funding_pubkey)
             };
 
         // policy-commitment-anchor-amount
@@ -644,7 +648,7 @@ impl CommitmentInfo {
 
     pub(crate) fn handle_output(
         &mut self,
-        keys: &InMemorySigner,
+        keys: &VlsChannelSigner,
         setup: &ChannelSetup,
         out: &TxOut,
         script_bytes: &[u8],
@@ -688,7 +692,7 @@ impl CommitmentInfo {
                 return self.handle_offered_htlc_output(out, vals);
             }
             if let Ok(vals) = self.parse_anchor_script(&script) {
-                return self.handle_anchor_output(keys, out, vals);
+                return self.handle_anchor_output(keys, setup, out, vals);
             }
             if setup.is_anchors() {
                 if let Ok(vals) = self.parse_to_countersigner_delayed_script(&script) {
@@ -790,9 +794,11 @@ mod tests {
     fn handle_anchor_wrong_size_test() {
         let mut info = CommitmentInfo::new_for_holder();
         let keys = make_test_channel_keys();
+        let setup = make_test_channel_setup();
+        let secp_ctx = Secp256k1::new();
         let out = TxOut { value: Amount::from_sat(329), script_pubkey: Default::default() };
-        let to_pubkey_data = keys.pubkeys().funding_pubkey.serialize().to_vec();
-        let res = info.handle_anchor_output(&keys, &out, to_pubkey_data);
+        let to_pubkey_data = keys.pubkeys(&secp_ctx).funding_pubkey.serialize().to_vec();
+        let res = info.handle_anchor_output(&keys, &setup, &out, to_pubkey_data);
         assert!(res.is_err());
         assert_eq!(
             res.unwrap_err(),
@@ -805,9 +811,10 @@ mod tests {
     fn handle_anchor_not_local_or_remote_test() {
         let mut info = CommitmentInfo::new_for_holder();
         let keys = make_test_channel_keys();
+        let setup = make_test_channel_setup();
         let out = TxOut { value: Amount::from_sat(330), script_pubkey: Default::default() };
         let to_pubkey_data = make_test_pubkey(42).serialize().to_vec(); // doesn't match
-        let res = info.handle_anchor_output(&keys, &out, to_pubkey_data.clone());
+        let res = info.handle_anchor_output(&keys, &setup, &out, to_pubkey_data.clone());
         assert!(res.is_err());
         assert_eq!(
             res.unwrap_err(),

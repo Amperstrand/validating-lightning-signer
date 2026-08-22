@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use std::{fmt, io};
 
 use lightning_signer::lightning::events::ReplayEvent;
@@ -110,6 +109,7 @@ type ArcChainMonitor = ChainMonitor<
     Arc<BitcoindClient>,
     Arc<LoggerAdapter>,
     Arc<FilesystemStore>,
+    Arc<MyEntropySource>,
 >;
 
 pub(crate) type PeerManager =
@@ -123,6 +123,7 @@ pub(crate) type SimpleArcPeerManager<SD, C, L, NS> = RLPeerManager<
     Arc<L>,
     IgnoringMessageHandler,
     Arc<NS>,
+    Arc<ArcChainMonitor>,
 >;
 
 type Scorer = ProbabilisticScorer<Arc<NetworkGraph<Arc<LoggerAdapter>>>, Arc<LoggerAdapter>>;
@@ -166,11 +167,21 @@ async fn handle_ldk_events(
 ) -> Result<(), ReplayEvent> {
     let mut pending_txs: HashMap<OutPoint, Transaction> = HashMap::new();
     match event {
-        Event::ProbeSuccessful { .. }
-        | Event::ProbeFailed { .. }
-        | Event::HTLCHandlingFailed { .. }
-        | Event::HTLCIntercepted { .. } => todo!(),
-        Event::ConnectionNeeded { .. } => todo!(),
+        Event::ProbeSuccessful { .. } => {
+            info!("EVENT: probe successful");
+        }
+        Event::ProbeFailed { .. } => {
+            info!("EVENT: probe failed");
+        }
+        Event::HTLCHandlingFailed { prev_channel_id, .. } => {
+            error!("EVENT: HTLC handling failed for channel {}", prev_channel_id);
+        }
+        Event::HTLCIntercepted { .. } => {
+            error!("EVENT: HTLC intercepted (not handled)");
+        }
+        Event::ConnectionNeeded { node_id, .. } => {
+            info!("EVENT: connection needed to {}", node_id);
+        }
         Event::FundingGenerationReady {
             temporary_channel_id,
             channel_value_satoshis,
@@ -296,18 +307,6 @@ async fn handle_ldk_events(
                 }
             }
         }
-        Event::PendingHTLCsForwardable { time_forwardable } => {
-            info!("EVENT: HTLCs available for forwarding");
-            let forwarding_channel_manager = channel_manager.clone();
-            tokio::spawn(async move {
-                let min = time_forwardable.as_millis() as u64;
-                if min > 0 {
-                    let millis_to_sleep = thread_rng().gen_range(min..min * 5) as u64;
-                    tokio::time::sleep(Duration::from_millis(millis_to_sleep)).await;
-                }
-                forwarding_channel_manager.process_pending_htlc_forwards();
-            });
-        }
         Event::PaymentPathFailed {
             payment_hash,
             payment_failed_permanently,
@@ -404,6 +403,10 @@ async fn handle_ldk_events(
         Event::OnionMessagePeerConnected { .. } => {
             unimplemented!()
         }
+        Event::SplicePending { .. } => {}
+        Event::SpliceFailed { .. } => {}
+        Event::PersistStaticInvoice { .. } => {}
+        _ => {}
     };
     Ok(())
 }

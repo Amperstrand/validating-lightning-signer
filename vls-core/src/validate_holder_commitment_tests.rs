@@ -9,7 +9,6 @@ mod tests {
     use bitcoin::{self, Amount, Transaction};
     use lightning::ln::chan_utils::TxCreationKeys;
     use lightning::ln::channel_keys::DelayedPaymentKey;
-    use lightning::sign::ChannelSigner;
     use lightning::types::payment::PaymentHash;
 
     use log::*;
@@ -127,7 +126,7 @@ mod tests {
                 commit_tx_ctx.to_countersignatory,
                 &htlcs,
                 &parameters,
-                &chan.keys.pubkeys().funding_pubkey,
+                &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
                 &chan.setup.counterparty_points.funding_pubkey,
             )
             .expect("scripts");
@@ -410,7 +409,7 @@ mod tests {
                 commit_tx_ctx.to_countersignatory,
                 &htlcs,
                 &parameters,
-                &chan.keys.pubkeys().funding_pubkey,
+                &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
                 &chan.setup.counterparty_points.funding_pubkey,
             )
             .expect("scripts");

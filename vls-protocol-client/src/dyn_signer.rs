@@ -4,7 +4,7 @@ use delegate::delegate;
 
 use crate::bitcoin::Address;
 use crate::HTLCDescriptor;
-use bitcoin::{secp256k1, Transaction, TxOut};
+use bitcoin::{secp256k1, Transaction, TxOut, Txid};
 use lightning::ln::chan_utils::{
     ChannelPublicKeys, ChannelTransactionParameters, ClosingTransaction, CommitmentTransaction,
     HTLCOutputInCommitment, HolderCommitmentTransaction,
@@ -14,7 +14,10 @@ use lightning::ln::script::ShutdownScript;
 use lightning::sign::ecdsa::EcdsaChannelSigner;
 use lightning::sign::ChannelSigner;
 use lightning::sign::InMemorySigner;
-use lightning::sign::{NodeSigner, Recipient, SignerProvider, SpendableOutputDescriptor};
+use lightning::sign::{
+    NodeSigner, PeerStorageKey, ReceiveAuthKey, Recipient, SignerProvider,
+    SpendableOutputDescriptor,
+};
 use lightning::types::payment::PaymentPreimage;
 use lightning::util::ser::Readable;
 use lightning::util::ser::{Writeable, Writer};
@@ -64,6 +67,7 @@ impl EcdsaChannelSigner for DynSigner {
         to self.inner {
             fn sign_counterparty_commitment(
                 &self,
+                channel_parameters: &ChannelTransactionParameters,
                 commitment_tx: &CommitmentTransaction,
                 inbound_htlc_preimages: Vec<PaymentPreimage>,
                 outbound_htlc_preimages: Vec<PaymentPreimage>,
@@ -72,18 +76,21 @@ impl EcdsaChannelSigner for DynSigner {
 
             fn sign_holder_commitment(
                 &self,
+                channel_parameters: &ChannelTransactionParameters,
                 commitment_tx: &HolderCommitmentTransaction,
                 secp_ctx: &Secp256k1<secp256k1::All>,
             ) -> Result<Signature, ()>;
 
             fn unsafe_sign_holder_commitment(
                 &self,
+                channel_parameters: &ChannelTransactionParameters,
                 commitment_tx: &HolderCommitmentTransaction,
                 secp_ctx: &Secp256k1<secp256k1::All>,
             ) -> Result<Signature, ()>;
 
             fn sign_justice_revoked_output(
                 &self,
+                channel_parameters: &ChannelTransactionParameters,
                 justice_tx: &Transaction,
                 input: usize,
                 amount: u64,
@@ -93,6 +100,7 @@ impl EcdsaChannelSigner for DynSigner {
 
             fn sign_justice_revoked_htlc(
                 &self,
+                channel_parameters: &ChannelTransactionParameters,
                 justice_tx: &Transaction,
                 input: usize,
                 amount: u64,
@@ -103,6 +111,7 @@ impl EcdsaChannelSigner for DynSigner {
 
             fn sign_counterparty_htlc_transaction(
                 &self,
+                channel_parameters: &ChannelTransactionParameters,
                 htlc_tx: &Transaction,
                 input: usize,
                 amount: u64,
@@ -113,26 +122,35 @@ impl EcdsaChannelSigner for DynSigner {
 
             fn sign_closing_transaction(
                 &self,
+                channel_parameters: &ChannelTransactionParameters,
                 closing_tx: &ClosingTransaction,
                 secp_ctx: &Secp256k1<secp256k1::All>,
             ) -> Result<Signature, ()>;
 
             fn sign_channel_announcement_with_funding_key(
                 &self,
+                channel_parameters: &ChannelTransactionParameters,
                 msg: &UnsignedChannelAnnouncement,
                 secp_ctx: &Secp256k1<secp256k1::All>,
             ) -> Result<Signature, ()>;
 
-            fn sign_holder_anchor_input(
-                &self, anchor_tx: &Transaction, input: usize, secp_ctx: &Secp256k1<secp256k1::All>,
+            fn sign_holder_keyed_anchor_input(
+                &self,
+                channel_parameters: &ChannelTransactionParameters,
+                anchor_tx: &Transaction,
+                input: usize,
+                secp_ctx: &Secp256k1<secp256k1::All>,
             ) -> Result<Signature, ()>;
 
             fn sign_holder_htlc_transaction(&self, htlc_tx: &Transaction, input: usize, htlc_descriptor: &HTLCDescriptor, secp_ctx: &Secp256k1<All>) -> Result<Signature, ()>;
 
-            fn sign_splicing_funding_input(
-                &self, tx: &Transaction, input_index: usize, input_value: u64,
+            fn sign_splice_shared_input(
+                &self,
+                channel_parameters: &ChannelTransactionParameters,
+                tx: &Transaction,
+                input_index: usize,
                 secp_ctx: &Secp256k1<secp256k1::All>,
-            ) -> Result<Signature, ()>;
+            ) -> Signature;
         }
     }
 }
@@ -153,14 +171,14 @@ impl ChannelSigner for DynSigner {
             fn validate_holder_commitment(
                 &self,
                 holder_tx: &HolderCommitmentTransaction,
-                preimages: Vec<PaymentPreimage>,
+                outbound_htlc_preimages: Vec<PaymentPreimage>,
             ) -> Result<(), ()>;
 
-            fn pubkeys(&self) -> &ChannelPublicKeys;
+            fn pubkeys(&self, secp_ctx: &Secp256k1<secp256k1::All>) -> ChannelPublicKeys;
+
+            fn new_funding_pubkey(&self, splice_parent_funding_txid: Txid, secp_ctx: &Secp256k1<secp256k1::All>) -> PublicKey;
 
             fn channel_keys_id(&self) -> [u8; 32];
-
-            fn provide_channel_parameters(&mut self, channel_parameters: &ChannelTransactionParameters);
         }
     }
 }
@@ -183,8 +201,12 @@ impl InnerSign for InMemorySigner {
         self
     }
 
-    fn vwrite(&self, writer: &mut Vec<u8>) -> Result<(), bitcoin::io::Error> {
-        self.write(writer)
+    fn vwrite(&self, _writer: &mut Vec<u8>) -> Result<(), bitcoin::io::Error> {
+        // LDK 0.2 dropped the `Writeable` impl on `InMemorySigner` and the
+        // matching `read_chan_signer` from `SignerProvider`, so this never
+        // round-trips. The `Writeable for DynSigner` impl is required for
+        // trait bounds only.
+        Ok(())
     }
 }
 
@@ -229,7 +251,13 @@ impl NodeSigner for DynKeysInterface {
                 &self, invoice: &lightning::offers::invoice::UnsignedBolt12Invoice
             ) -> Result<bitcoin::secp256k1::schnorr::Signature, ()>;
 
-            fn get_inbound_payment_key(&self) -> ExpandedKey;
+            fn get_expanded_key(&self) -> ExpandedKey;
+
+            fn get_peer_storage_key(&self) -> PeerStorageKey;
+
+            fn get_receive_auth_key(&self) -> ReceiveAuthKey;
+
+            fn sign_message(&self, msg: &[u8]) -> Result<String, ()>;
         }
     }
 }
@@ -243,11 +271,9 @@ impl SignerProvider for DynKeysInterface {
 
             fn get_shutdown_scriptpubkey(&self) -> Result<ShutdownScript, ()>;
 
-            fn generate_channel_keys_id(&self, _inbound: bool, _channel_value_satoshis: u64, _user_channel_id: u128) -> [u8; 32];
+            fn generate_channel_keys_id(&self, _inbound: bool, _user_channel_id: u128) -> [u8; 32];
 
-            fn derive_channel_signer(&self, _channel_value_satoshis: u64, _channel_keys_id: [u8; 32]) -> Self::EcdsaSigner;
-
-            fn read_chan_signer(&self, reader: &[u8]) -> Result<Self::EcdsaSigner, DecodeError>;
+            fn derive_channel_signer(&self, _channel_keys_id: [u8; 32]) -> Self::EcdsaSigner;
         }
     }
 }

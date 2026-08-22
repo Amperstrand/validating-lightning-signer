@@ -16,12 +16,15 @@ use bitcoin::secp256k1::{All, Message, PublicKey, Scalar, Secp256k1, SecretKey, 
 use bitcoin::Network;
 use bitcoin::WPubkeyHash;
 use bitcoin::{secp256k1, ScriptBuf, Transaction, TxOut, Witness};
-use lightning::ln::msgs::{DecodeError, UnsignedGossipMessage};
+use lightning::ln::msgs::UnsignedGossipMessage;
 use lightning::ln::script::ShutdownScript;
 use lightning::offers::invoice::UnsignedBolt12Invoice;
 use lightning::sign::{
-    EntropySource, InMemorySigner, NodeSigner, Recipient, SignerProvider, SpendableOutputDescriptor,
+    EntropySource, InMemorySigner, NodeSigner, PeerStorageKey, ReceiveAuthKey, Recipient,
+    SignerProvider, SpendableOutputDescriptor,
 };
+
+use super::vls_channel_signer::VlsChannelSigner;
 use lightning::util::ser::Writeable;
 
 use super::derive::{self, KeyDerivationStyle};
@@ -310,15 +313,15 @@ impl MyKeysManager {
     }
 
     // Re-derive existing channel keys
-    fn derive_channel_keys(&self, channel_value_sat: u64, keys_id: &[u8; 32]) -> InMemorySigner {
-        self.get_channel_keys_with_keys_id(keys_id.clone(), channel_value_sat)
+    fn derive_channel_keys(&self, channel_value_sat: u64, keys_id: &[u8; 32]) -> VlsChannelSigner {
+        self.get_channel_keys_with_keys_id(keys_id.clone(), channel_value_sat).0
     }
 
     pub(crate) fn get_channel_keys_with_id(
         &self,
         channel_id: ChannelId,
         channel_value_sat: u64,
-    ) -> InMemorySigner {
+    ) -> (VlsChannelSigner, SecretKey) {
         let key_derive = derive::key_derive(self.key_derivation_style, self.network);
         // aka channel_seed
         let keys_id = key_derive.keys_id(channel_id, &self.channel_seed_base);
@@ -329,8 +332,10 @@ impl MyKeysManager {
     pub(crate) fn get_channel_keys_with_keys_id(
         &self,
         keys_id: [u8; 32],
-        channel_value_sat: u64,
-    ) -> InMemorySigner {
+        // LDK 0.2 no longer needs the channel value at signer construction; kept for call-site
+        // compatibility.
+        _channel_value_sat: u64,
+    ) -> (VlsChannelSigner, SecretKey) {
         let key_derive = derive::key_derive(self.key_derivation_style, self.network);
         let secp_ctx = Secp256k1::new();
 
@@ -351,18 +356,28 @@ impl MyKeysManager {
             &secp_ctx,
         );
 
-        InMemorySigner::new(
-            &secp_ctx,
+        let signer = VlsChannelSigner::new(
             funding_key,
             revocation_base_key,
             payment_key,
             delayed_payment_base_key,
             htlc_base_key,
             commitment_seed,
-            channel_value_sat,
             keys_id,
-            self.get_secure_random_bytes(),
-        )
+            &secp_ctx,
+        );
+        (signer, payment_key)
+    }
+
+    /// Raw seed behind `get_expanded_key`'s `ExpandedKey`. Re-derived here (hardened index 5,
+    /// as at construction) so the signer can ship it to a remote client, which cannot derive it
+    /// itself. Keeps the client's inbound-payment key stable across restarts.
+    pub(crate) fn get_inbound_payment_key_bytes(&self) -> [u8; 32] {
+        self.master_key
+            .derive_priv(&self.secp_ctx, &[ChildNumber::from_hardened_idx(5).unwrap()])
+            .expect("Your RNG is busted")
+            .private_key
+            .secret_bytes()
     }
 
     pub(crate) fn get_channel_id(&self) -> ChannelId {
@@ -415,7 +430,7 @@ impl MyKeysManager {
         )
         .map_err(|_| ())?;
         // Signing the tx
-        let mut keys_cache: Map<[u8; 32], InMemorySigner> = Map::new();
+        let mut keys_cache: Map<[u8; 32], VlsChannelSigner> = Map::new();
         let mut input_idx = 0;
         for outp in descriptors {
             match outp {
@@ -435,6 +450,7 @@ impl MyKeysManager {
                                 &spend_tx,
                                 input_idx,
                                 &descriptor,
+                                self,
                                 &secp_ctx,
                             )
                             .expect("descriptor not accepted by sign_counterparty_payment_input")
@@ -452,7 +468,13 @@ impl MyKeysManager {
                     spend_tx.input[input_idx].witness = keys_cache
                         .get(&descriptor.channel_keys_id)
                         .unwrap()
-                        .sign_dynamic_p2wsh_input(&spend_tx, input_idx, &descriptor, &secp_ctx)
+                        .sign_dynamic_p2wsh_input(
+                            &spend_tx,
+                            input_idx,
+                            &descriptor,
+                            self,
+                            &secp_ctx,
+                        )
                         .expect("descriptor not accepted by sign_dynamic_p2wsh_input");
                 }
                 SpendableOutputDescriptor::StaticOutput { ref output, .. } => {
@@ -539,24 +561,11 @@ impl SignerProvider for MyKeysManager {
         Ok(ShutdownScript::new_p2wpkh(&WPubkeyHash::hash(&self.ldk_shutdown_pubkey.serialize())))
     }
 
-    fn generate_channel_keys_id(
-        &self,
-        _inbound: bool,
-        _channel_value_satoshis: u64,
-        _user_channel_id: u128,
-    ) -> [u8; 32] {
+    fn generate_channel_keys_id(&self, _inbound: bool, _user_channel_id: u128) -> [u8; 32] {
         unimplemented!()
     }
 
-    fn derive_channel_signer(
-        &self,
-        _channel_value_satoshis: u64,
-        _channel_keys_id: [u8; 32],
-    ) -> Self::EcdsaSigner {
-        unimplemented!()
-    }
-
-    fn read_chan_signer(&self, _reader: &[u8]) -> Result<Self::EcdsaSigner, DecodeError> {
+    fn derive_channel_signer(&self, _channel_keys_id: [u8; 32]) -> Self::EcdsaSigner {
         unimplemented!()
     }
 }
@@ -612,8 +621,31 @@ impl NodeSigner for MyKeysManager {
         ))
     }
 
-    fn get_inbound_payment_key(&self) -> ExpandedKey {
+    fn get_expanded_key(&self) -> ExpandedKey {
         self.inbound_payment_key
+    }
+
+    fn get_peer_storage_key(&self) -> PeerStorageKey {
+        // LDK's KeysManager derives this from the BIP32 master key at hardened index 6. Match
+        // that derivation so `KeyDerivationStyle::Ldk` stays bit-compatible with LDK: peer
+        // storage is encrypted with this key, so a mismatch would break state-loss recovery
+        // across an LDK <-> VLS migration.
+        let key = self
+            .master_key
+            .derive_priv(&self.secp_ctx, &[ChildNumber::from_hardened_idx(6).unwrap()])
+            .expect("Your RNG is busted")
+            .private_key;
+        PeerStorageKey { inner: key.secret_bytes() }
+    }
+
+    fn get_receive_auth_key(&self) -> ReceiveAuthKey {
+        // As above: LDK derives this at hardened index 7.
+        let key = self
+            .master_key
+            .derive_priv(&self.secp_ctx, &[ChildNumber::from_hardened_idx(7).unwrap()])
+            .expect("Your RNG is busted")
+            .private_key;
+        ReceiveAuthKey(key.secret_bytes())
     }
 
     fn sign_bolt12_invoice(
@@ -626,6 +658,12 @@ impl NodeSigner for MyKeysManager {
 
         let keys = Keypair::from_secret_key(&self.secp_ctx, &self.bolt12_secret);
         Ok(self.secp_ctx.sign_schnorr_no_aux_rand(invoice.tagged_hash().as_digest(), &keys))
+    }
+
+    fn sign_message(&self, msg: &[u8]) -> Result<String, ()> {
+        // lnd / core-lightning compatible message signing (zbase32 over
+        // sha256d("Lightning Signed Message:" || msg)), matching LDK's own KeysManager.
+        Ok(lightning::util::message_signing::sign(msg, &self.get_node_secret()))
     }
 }
 
@@ -674,7 +712,7 @@ mod tests {
     #[test]
     fn compare_ldk_keys_manager_test() {
         let seed = [0x11u8; 32];
-        let ldk = KeysManager::new(&seed, 1, 1);
+        let ldk = KeysManager::new(&seed, 1, 1, false);
         let my = MyKeysManager::new(
             KeyDerivationStyle::Ldk,
             &seed,
@@ -689,21 +727,46 @@ mod tests {
         let channel_id = ChannelId::new(&[33u8; 32]);
         // Get a somewhat random keys_id
         let keys_id = key_derive.keys_id(channel_id, &my.channel_seed_base);
-        let ldk_chan = ldk.derive_channel_keys(1000, &keys_id);
+        let ldk_chan = ldk.derive_channel_keys(&keys_id);
         let my_chan = my.derive_channel_keys(1000, &keys_id);
         let secp_ctx = Secp256k1::new();
-        assert_eq!(ldk_chan.funding_key, my_chan.funding_key);
+        assert_eq!(ldk_chan.funding_key(None), my_chan.funding_key(None));
         assert_eq!(ldk_chan.revocation_base_key, my_chan.revocation_base_key);
         assert_eq!(ldk_chan.htlc_base_key, my_chan.htlc_base_key);
-        assert_eq!(ldk_chan.payment_key, my_chan.payment_key);
+        assert_eq!(
+            ldk_chan.pubkeys(&secp_ctx).payment_point,
+            my_chan.pubkeys(&secp_ctx).payment_point
+        );
         assert_eq!(ldk_chan.delayed_payment_base_key, my_chan.delayed_payment_base_key);
-        assert_eq!(ldk_chan.funding_key, my_chan.funding_key);
+        assert_eq!(ldk_chan.funding_key(None), my_chan.funding_key(None));
         assert_eq!(
             ldk_chan.get_per_commitment_point(123, &secp_ctx),
             my_chan.get_per_commitment_point(123, &secp_ctx)
         );
         // a bit redundant, because we checked them all above
-        assert!(ldk_chan.pubkeys() == my_chan.pubkeys());
+        assert!(ldk_chan.pubkeys(&secp_ctx) == my_chan.pubkeys(&secp_ctx));
+
+        // Node-level keys that LDK derives from the BIP32 master key must match for the Ldk
+        // style. Peer storage encrypts state-loss-recovery backups and the expanded key derives
+        // payment secrets, so a mismatch silently breaks recovery / receiving.
+        assert_eq!(ldk.get_expanded_key(), my.get_expanded_key());
+        assert_eq!(ldk.get_peer_storage_key().inner, my.get_peer_storage_key().inner);
+        assert_eq!(ldk.get_receive_auth_key().0, my.get_receive_auth_key().0);
+        // The seed shipped to a remote client must reconstruct the signer's own expanded key.
+        assert_eq!(ExpandedKey::new(my.get_inbound_payment_key_bytes()), my.get_expanded_key());
+
+        // lnd/CLN-style message signing is derived from the node secret, so it must match LDK
+        // byte-for-byte (it is deterministic).
+        for msg in [&b""[..], b"test message"] {
+            assert_eq!(
+                NodeSigner::sign_message(&my, msg).unwrap(),
+                NodeSigner::sign_message(&ldk, msg).unwrap(),
+                "sign_message mismatch"
+            );
+        }
+
+        // Note: `sign_bolt12_invoice` deliberately does NOT match LDK — VLS signs BOLT12 with a
+        // separate bolt12 key (CLN-compatible), whereas LDK signs with the node key.
     }
 
     #[test]
@@ -718,9 +781,9 @@ mod tests {
             hex_encode(&manager.channel_seed_base),
             "ab7f29780659755f14afb82342dc19db7d817ace8c312e759a244648dfc25e53"
         );
-        let keys = make_test_keys(manager);
+        let (keys, payment_key) = make_test_keys(manager);
         assert_eq!(
-            hex_encode(&keys.funding_key[..]),
+            hex_encode(&keys.funding_key(None).secret_bytes()[..]),
             "bf36bee09cc5dd64c8f19e10b258efb1f606722e9ff6fe3267b63e2dbe33dcfc"
         );
         assert_eq!(
@@ -732,7 +795,7 @@ mod tests {
             "517c009452b4baa9df42d6c8cddc966e017d49606524ce7728681b593a5659c1"
         );
         assert_eq!(
-            hex_encode(&keys.payment_key[..]),
+            hex_encode(&payment_key[..]),
             "54ce3b75dcc2731604f3db55ecd1520d797a154cc757d6d98c3ffd1e90a9a25a"
         );
         assert_eq!(
@@ -741,7 +804,7 @@ mod tests {
         );
     }
 
-    fn make_test_keys(manager: MyKeysManager) -> InMemorySigner {
+    fn make_test_keys(manager: MyKeysManager) -> (VlsChannelSigner, SecretKey) {
         let channel_id = ChannelId::new(&hex_decode(TEST_CHANNEL_ID[0]).unwrap());
         manager.get_channel_keys_with_id(channel_id, 0)
     }
@@ -758,9 +821,9 @@ mod tests {
             hex_encode(&manager.channel_seed_base),
             "ab7f29780659755f14afb82342dc19db7d817ace8c312e759a244648dfc25e53"
         );
-        let keys = make_test_keys(manager);
+        let (keys, payment_key) = make_test_keys(manager);
         assert_eq!(
-            hex_encode(&keys.funding_key[..]),
+            hex_encode(&keys.funding_key(None).secret_bytes()[..]),
             "0b2f20d28e705daea86a93e6d5646e2f8989956d73c61752e7cf6c4421071e99"
         );
         assert_eq!(
@@ -772,7 +835,7 @@ mod tests {
             "60deb71963b8574f3c8bf5df2d7b851f9c31a866a1c14bd00dae1263a5f27c55"
         );
         assert_eq!(
-            hex_encode(&keys.payment_key[..]),
+            hex_encode(&payment_key[..]),
             "064e32a51f3ed0a41936bd788a80dc91b7521a85da00f02196eddbd32c3d5631"
         );
         assert_eq!(
@@ -789,7 +852,7 @@ mod tests {
             Network::Testnet,
             FixedStartingTimeFactory::new(0, 0).borrow(),
         );
-        let keys = make_test_keys(manager);
+        let (keys, _payment_key) = make_test_keys(manager);
         assert_eq!(
             hex_encode(&keys.commitment_seed),
             "9fc48da6bc75058283b860d5989ffb802b6395ca28c4c3bb9d1da02df6bb0cb3"

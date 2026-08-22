@@ -10,6 +10,7 @@ use bitcoin::sighash::{EcdsaSighashType, TapSighash};
 use bitcoin::taproot::TapTweakHash;
 use bitcoin::PrivateKey;
 use lightning::ln::channel_keys::{RevocationBasepoint, RevocationKey};
+use lightning::sign::EntropySource;
 
 fn hkdf_extract_expand(salt: &[u8], secret: &[u8], info: &[u8], output: &mut [u8]) {
     let mut hmac = HmacEngine::<BitcoinSha256>::new(salt);
@@ -119,6 +120,77 @@ pub(crate) fn ecdsa_sign(
     secp_ctx.sign_ecdsa(&message, &privkey.inner)
 }
 
+/// Deterministically sign `msg` with `sk`, grinding for a low-R signature.
+///
+/// This mirrors LDK's internal `crypto::utils::sign` under the `grind_signatures` feature
+/// (which vls-core enables on its `lightning` dependency), so signatures produced here match
+/// those from LDK's public signing helpers byte-for-byte.
+pub fn sign<C: secp256k1::Signing>(
+    secp_ctx: &Secp256k1<C>,
+    msg: &Message,
+    sk: &SecretKey,
+) -> Signature {
+    secp_ctx.sign_ecdsa_low_r(msg, sk)
+}
+
+/// Sign `msg` with `sk` using auxiliary randomness, grinding for a low-R signature.
+///
+/// Mirrors LDK's internal `crypto::utils::sign_with_aux_rand` under `grind_signatures`. The
+/// signature is non-deterministic (the nonce uses fresh entropy each call) but always low-R.
+pub fn sign_with_aux_rand<C: secp256k1::Signing, ES: EntropySource + ?Sized>(
+    secp_ctx: &Secp256k1<C>,
+    msg: &Message,
+    sk: &SecretKey,
+    entropy_source: &ES,
+) -> Signature {
+    loop {
+        let sig =
+            secp_ctx.sign_ecdsa_with_noncedata(msg, sk, &entropy_source.get_secure_random_bytes());
+        if sig.serialize_compact()[0] < 0x80 {
+            break sig;
+        }
+    }
+}
+
+/// zbase32 alphabet, as used by lnd / core-lightning message signing.
+const ZBASE_ALPHABET: &[u8] = b"ybndrfg8ejkmcpqxot1uwisza345h769";
+
+/// zbase32-encode bytes. Mirrors `lightning::util::base32`'s `ZBase32` encoder (which is not
+/// public outside the `fuzzing` cfg) so we produce output identical to LDK's message signing.
+fn zbase32_encode(data: &[u8]) -> String {
+    let output_length = (data.len() * 8 + 4) / 5;
+    let mut ret = Vec::with_capacity((data.len() + 4) / 5 * 8);
+    for chunk in data.chunks(5) {
+        let mut buf = [0u8; 5];
+        for (i, &b) in chunk.iter().enumerate() {
+            buf[i] = b;
+        }
+        ret.push(ZBASE_ALPHABET[((buf[0] & 0xF8) >> 3) as usize]);
+        ret.push(ZBASE_ALPHABET[(((buf[0] & 0x07) << 2) | ((buf[1] & 0xC0) >> 6)) as usize]);
+        ret.push(ZBASE_ALPHABET[((buf[1] & 0x3E) >> 1) as usize]);
+        ret.push(ZBASE_ALPHABET[(((buf[1] & 0x01) << 4) | ((buf[2] & 0xF0) >> 4)) as usize]);
+        ret.push(ZBASE_ALPHABET[(((buf[2] & 0x0F) << 1) | (buf[3] >> 7)) as usize]);
+        ret.push(ZBASE_ALPHABET[((buf[3] & 0x7C) >> 2) as usize]);
+        ret.push(ZBASE_ALPHABET[(((buf[3] & 0x03) << 3) | ((buf[4] & 0xE0) >> 5)) as usize]);
+        ret.push(ZBASE_ALPHABET[(buf[4] & 0x1F) as usize]);
+    }
+    ret.truncate(output_length);
+    String::from_utf8(ret).expect("zbase32 is valid UTF-8")
+}
+
+/// Encode a recoverable node-message signature into the lnd / core-lightning zbase32 string
+/// returned by LDK's `NodeSigner::sign_message`.
+///
+/// The input is the 65-byte form produced by the VLS signer (`Node::sign_message` /
+/// `SignMessageReply`): a 64-byte compact signature followed by the raw recovery id. LDK encodes
+/// `zbase32([31 + recovery_id] ++ signature)`.
+pub fn encode_signed_message(sig_and_recid: &[u8; 65]) -> String {
+    let mut sigrec = Vec::with_capacity(65);
+    sigrec.push(sig_and_recid[64] + 31);
+    sigrec.extend_from_slice(&sig_and_recid[..64]);
+    zbase32_encode(&sigrec)
+}
+
 pub(crate) fn taproot_sign(
     secp_ctx: &Secp256k1<secp256k1::All>,
     privkey: &PrivateKey,
@@ -159,6 +231,70 @@ pub(crate) fn derive_public_revocation_key<T: secp256k1::Verification>(
 mod tests {
     use super::*;
     use bitcoin::Network;
+
+    /// zbase32 is unpadded: `n` bytes encode to exactly `ceil(n * 8 / 5)` characters.
+    /// `encode_signed_message` only ever passes 65 bytes (a multiple of 5, so the final
+    /// truncation is a no-op), which would leave the length arithmetic untested.
+    #[test]
+    fn zbase32_encode_length_is_unpadded() {
+        for len in 0..=16usize {
+            let encoded = zbase32_encode(&vec![0xABu8; len]);
+            assert_eq!(encoded.len(), (len * 8 + 4) / 5, "zbase32 length for {} bytes", len);
+        }
+    }
+
+    /// Pin the alphabet and bit ordering against a known z-base-32 vector.
+    #[test]
+    fn zbase32_encode_known_vector() {
+        assert_eq!(zbase32_encode(b"hello"), "pb1sa5dx");
+    }
+
+    /// The grind loop must only emit low-R signatures (first byte of the compact
+    /// encoding below 0x80); low-R keeps signatures one byte shorter, which affects
+    /// transaction weight.
+    #[test]
+    fn sign_with_aux_rand_is_low_r() {
+        struct FixedEntropy(core::cell::Cell<u8>);
+        impl EntropySource for FixedEntropy {
+            fn get_secure_random_bytes(&self) -> [u8; 32] {
+                let n = self.0.get();
+                self.0.set(n.wrapping_add(1));
+                [n; 32]
+            }
+        }
+
+        let secp = Secp256k1::new();
+        let sk = SecretKey::from_slice(&[0x42u8; 32]).unwrap();
+        let entropy = FixedEntropy(core::cell::Cell::new(0));
+        for i in 0..16u8 {
+            let msg = Message::from_digest([i; 32]);
+            let sig = sign_with_aux_rand(&secp, &msg, &sk, &entropy);
+            assert!(sig.serialize_compact()[0] < 0x80, "expected a low-R signature");
+        }
+    }
+
+    #[test]
+    fn encode_signed_message_matches_ldk() {
+        // Our `encode_signed_message` must produce the exact zbase32 string LDK's
+        // `NodeSigner::sign_message` returns (LDK's `message_signing::sign`).
+        let sk = SecretKey::from_slice(&[0x42u8; 32]).unwrap();
+        for msg in [&b""[..], b"hello world", b"a slightly longer test message \x00\xff"] {
+            let expected = lightning::util::message_signing::sign(msg, &sk);
+
+            // Reproduce the VLS signer's 65-byte output: 64-byte sig followed by raw recovery id.
+            let secp = Secp256k1::signing_only();
+            let digest =
+                sha256d::Hash::hash(&[b"Lightning Signed Message:".as_ref(), msg].concat());
+            let rsig =
+                secp.sign_ecdsa_recoverable(&Message::from_digest(digest.to_byte_array()), &sk);
+            let (rid, sig) = rsig.serialize_compact();
+            let mut bytes = [0u8; 65];
+            bytes[..64].copy_from_slice(&sig);
+            bytes[64] = rid.to_i32() as u8;
+
+            assert_eq!(encode_signed_message(&bytes), expected, "mismatch for msg {:?}", msg);
+        }
+    }
 
     #[test]
     fn hkdf_tests() {

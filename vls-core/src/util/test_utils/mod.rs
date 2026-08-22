@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use core::cmp;
 
+use crate::signer::vls_channel_signer::VlsChannelSigner;
 use bitcoin::absolute::LockTime;
 use bitcoin::bech32::Fe32;
 use bitcoin::bip32::ChildNumber;
@@ -29,23 +30,22 @@ use bitcoin::{Address, Block, BlockHash, Sequence, Transaction, TxIn, TxOut, Wit
 use chain::chaininterface;
 use lightning::chain;
 use lightning::chain::channelmonitor::MonitorEvent;
-use lightning::chain::transaction::OutPoint;
 use lightning::chain::{chainmonitor, channelmonitor};
-use lightning::ln::chan_utils::get_to_countersignatory_with_anchors_redeemscript;
+use lightning::ln::chan_utils::get_to_countersigner_keyed_anchor_redeemscript;
 use lightning::ln::chan_utils::HolderCommitmentTransaction;
 use lightning::ln::chan_utils::{
-    build_htlc_transaction, derive_private_key, get_anchor_redeemscript, get_htlc_redeemscript,
-    get_revokeable_redeemscript, make_funding_redeemscript, ChannelPublicKeys,
-    ChannelTransactionParameters, CommitmentTransaction, CounterpartyChannelTransactionParameters,
+    build_htlc_transaction, derive_private_key, get_htlc_redeemscript,
+    get_keyed_anchor_redeemscript, get_revokeable_redeemscript, make_funding_redeemscript,
+    ChannelPublicKeys, ChannelTransactionParameters, CommitmentTransaction,
     DirectedChannelTransactionParameters, HTLCOutputInCommitment, TxCreationKeys,
 };
 use lightning::ln::channel_keys::{
     DelayedPaymentBasepoint, HtlcBasepoint, RevocationBasepoint, RevocationKey,
 };
 use lightning::ln::types::ChannelId as LnChannelId;
-use lightning::sign::{ChannelSigner, InMemorySigner};
-use lightning::types::features::ChannelTypeFeatures;
+use lightning::sign::InMemorySigner;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
+use lightning::util::persist::MonitorName;
 use lightning::util::test_utils;
 use lightning_invoice::{Currency, InvoiceBuilder, PaymentSecret};
 use push_decoder::Listener;
@@ -153,17 +153,17 @@ impl TestPersister {
 impl chainmonitor::Persist<LoopbackChannelSigner> for TestPersister {
     fn persist_new_channel(
         &self,
-        _funding_txo: OutPoint,
+        _monitor_name: MonitorName,
         _data: &channelmonitor::ChannelMonitor<LoopbackChannelSigner>,
     ) -> chain::ChannelMonitorUpdateStatus {
         self.update_ret.lock().unwrap().clone()
     }
 
-    fn archive_persisted_channel(&self, _channel_funding_outpoint: OutPoint) {}
+    fn archive_persisted_channel(&self, _monitor_name: MonitorName) {}
 
     fn update_persisted_channel(
         &self,
-        _channel_id: OutPoint,
+        _monitor_name: MonitorName,
         _update: Option<&channelmonitor::ChannelMonitorUpdate>,
         _data: &channelmonitor::ChannelMonitor<LoopbackChannelSigner>,
     ) -> chain::ChannelMonitorUpdateStatus {
@@ -172,8 +172,8 @@ impl chainmonitor::Persist<LoopbackChannelSigner> for TestPersister {
 }
 
 pub struct TestChainMonitor<'a> {
-    pub added_monitors: Mutex<Vec<(OutPoint, ())>>,
-    pub latest_monitor_update_id: Mutex<Map<[u8; 32], (OutPoint, u64)>>,
+    pub added_monitors: Mutex<Vec<(LnChannelId, ())>>,
+    pub latest_monitor_update_id: Mutex<Map<[u8; 32], (LnChannelId, u64)>>,
     pub chain_monitor: chainmonitor::ChainMonitor<
         LoopbackChannelSigner,
         &'a test_utils::TestChainSource,
@@ -181,6 +181,7 @@ pub struct TestChainMonitor<'a> {
         &'a test_utils::TestFeeEstimator,
         Arc<test_utils::TestLogger>,
         &'a dyn chainmonitor::Persist<LoopbackChannelSigner>,
+        Arc<lightning::sign::RandomBytes>,
     >,
     pub update_ret: Mutex<Option<chain::ChannelMonitorUpdateStatus>>,
     // If this is set to Some(), after the next return, we'll always return this until update_ret
@@ -204,6 +205,8 @@ impl<'a> TestChainMonitor<'a> {
                 logger,
                 fee_estimator,
                 persister,
+                Arc::new(lightning::sign::RandomBytes::new([0u8; 32])),
+                lightning::sign::PeerStorageKey { inner: [0u8; 32] },
             ),
             update_ret: Mutex::new(None),
             next_update_ret: Mutex::new(None),
@@ -213,15 +216,15 @@ impl<'a> TestChainMonitor<'a> {
 impl<'a> chain::Watch<LoopbackChannelSigner> for TestChainMonitor<'a> {
     fn watch_channel(
         &self,
-        funding_txo: OutPoint,
+        channel_id: LnChannelId,
         monitor: channelmonitor::ChannelMonitor<LoopbackChannelSigner>,
     ) -> Result<chain::ChannelMonitorUpdateStatus, ()> {
-        self.latest_monitor_update_id.lock().unwrap().insert(
-            LnChannelId::v1_from_funding_outpoint(funding_txo).0,
-            (funding_txo, monitor.get_latest_update_id()),
-        );
-        self.added_monitors.lock().unwrap().push((funding_txo, ()));
-        let watch_res = self.chain_monitor.watch_channel(funding_txo, monitor)?;
+        self.latest_monitor_update_id
+            .lock()
+            .unwrap()
+            .insert(channel_id.0, (channel_id, monitor.get_latest_update_id()));
+        self.added_monitors.lock().unwrap().push((channel_id, ()));
+        let watch_res = self.chain_monitor.watch_channel(channel_id, monitor)?;
 
         let ret = self.update_ret.lock().unwrap().clone();
         if let Some(next_ret) = self.next_update_ret.lock().unwrap().take() {
@@ -236,15 +239,15 @@ impl<'a> chain::Watch<LoopbackChannelSigner> for TestChainMonitor<'a> {
 
     fn update_channel(
         &self,
-        funding_txo: OutPoint,
+        channel_id: LnChannelId,
         update: &channelmonitor::ChannelMonitorUpdate,
     ) -> chain::ChannelMonitorUpdateStatus {
-        self.latest_monitor_update_id.lock().unwrap().insert(
-            LnChannelId::v1_from_funding_outpoint(funding_txo).0,
-            (funding_txo, update.update_id),
-        );
-        let update_res = self.chain_monitor.update_channel(funding_txo, update);
-        self.added_monitors.lock().unwrap().push((funding_txo, ()));
+        self.latest_monitor_update_id
+            .lock()
+            .unwrap()
+            .insert(channel_id.0, (channel_id, update.update_id));
+        let update_res = self.chain_monitor.update_channel(channel_id, update);
+        self.added_monitors.lock().unwrap().push((channel_id, ()));
 
         let ret = self.update_ret.lock().unwrap().clone();
         if let Some(next_ret) = self.next_update_ret.lock().unwrap().take() {
@@ -259,7 +262,8 @@ impl<'a> chain::Watch<LoopbackChannelSigner> for TestChainMonitor<'a> {
 
     fn release_pending_monitor_events(
         &self,
-    ) -> Vec<(OutPoint, LnChannelId, Vec<MonitorEvent>, Option<PublicKey>)> {
+    ) -> Vec<(lightning::chain::transaction::OutPoint, LnChannelId, Vec<MonitorEvent>, PublicKey)>
+    {
         self.chain_monitor.release_pending_monitor_events()
     }
 }
@@ -391,36 +395,18 @@ pub fn next_state(
     }
 }
 
-pub fn make_test_channel_keys() -> InMemorySigner {
-    let secp_ctx = Secp256k1::signing_only();
-    let channel_value_sat = 3_000_000;
-    let mut inmemkeys = InMemorySigner::new(
-        &secp_ctx,
+pub fn make_test_channel_keys() -> VlsChannelSigner {
+    let secp_ctx = Secp256k1::new();
+    VlsChannelSigner::new(
         make_test_privkey(1), // funding_key
         make_test_privkey(2), // revocation_base_key
-        make_test_privkey(3), // payment_key
+        make_test_privkey(3), // payment_key (v1)
         make_test_privkey(4), // delayed_payment_base_key
         make_test_privkey(5), // htlc_base_key
         [4u8; 32],            // commitment_seed
-        channel_value_sat,
-        [0u8; 32],
-        [0; 32],
-    );
-    // This needs to match make_test_channel_setup above.
-    let mut features = ChannelTypeFeatures::empty();
-    features.set_anchors_zero_fee_htlc_tx_optional();
-    inmemkeys.provide_channel_parameters(&ChannelTransactionParameters {
-        holder_pubkeys: inmemkeys.pubkeys().clone(),
-        holder_selected_contest_delay: 5,
-        is_outbound_from_holder: true,
-        counterparty_parameters: Some(CounterpartyChannelTransactionParameters {
-            pubkeys: make_test_counterparty_points(),
-            selected_contest_delay: 5,
-        }),
-        funding_outpoint: Some(OutPoint { txid: Txid::all_zeros(), index: 0 }),
-        channel_type_features: features,
-    });
-    inmemkeys
+        [0u8; 32],            // channel_keys_id
+        &secp_ctx,
+    )
 }
 
 pub fn make_test_invoice(x: u8, amt: u64) -> Invoice {
@@ -723,43 +709,27 @@ pub fn test_node_ctx(ndx: usize) -> TestNodeContext {
     TestNodeContext { node, secp_ctx }
 }
 
+// LDK 0.2 dropped the channel value from `InMemorySigner::new`, so no value is needed here.
 pub fn make_test_counterparty_keys(
     node_ctx: &TestNodeContext,
     channel_id: &ChannelId,
-    value_sat: u64,
 ) -> InMemorySigner {
     node_ctx
         .node
-        .with_channel_base(channel_id, |stub| {
+        .with_channel_base(channel_id, |_stub| {
             // These need to match make_test_counterparty_points() above ...
-            let mut cpkeys = InMemorySigner::new(
-                &node_ctx.secp_ctx,
+            let cpkeys = InMemorySigner::new(
                 make_test_privkey(104), // funding_key
                 make_test_privkey(100), // revocation_base_key
-                make_test_privkey(101), // payment_key
+                make_test_privkey(101), // payment_key v1
+                make_test_privkey(101), // payment_key v2
+                false,                  // v2_remote_key_derivation
                 make_test_privkey(102), // delayed_payment_base_key
                 make_test_privkey(103), // htlc_base_key
                 [3u8; 32],              // commitment_seed
-                value_sat,              // channel_value
                 [0u8; 32],              // Key derivation parameters
                 [0; 32],
             );
-
-            let mut features = ChannelTypeFeatures::empty();
-            features.set_anchors_zero_fee_htlc_tx_optional();
-
-            // This needs to match make_test_channel_setup above.
-            cpkeys.provide_channel_parameters(&ChannelTransactionParameters {
-                holder_pubkeys: cpkeys.pubkeys().clone(),
-                holder_selected_contest_delay: 7,
-                is_outbound_from_holder: false,
-                counterparty_parameters: Some(CounterpartyChannelTransactionParameters {
-                    pubkeys: stub.get_channel_basepoints(),
-                    selected_contest_delay: 6,
-                }),
-                funding_outpoint: Some(OutPoint { txid: Txid::all_zeros(), index: 0 }),
-                channel_type_features: features,
-            });
             Ok(cpkeys)
         })
         .unwrap()
@@ -800,7 +770,7 @@ pub fn test_chan_ctx_with_push_val(
     node_ctx.node.new_channel_with_id(channel_id.clone(), &node_ctx.node).expect("new_channel");
 
     // Make counterparty keys that match.
-    let counterparty_keys = make_test_counterparty_keys(&node_ctx, &channel_id, channel_value_sat);
+    let counterparty_keys = make_test_counterparty_keys(&node_ctx, &channel_id);
     TestChannelContext { channel_id, setup, counterparty_keys }
 }
 
@@ -1121,11 +1091,10 @@ pub fn channel_commitment(
         .node
         .with_channel(&chan_ctx.channel_id, |chan| {
             let per_commitment_point = chan.get_per_commitment_point(commit_num)?;
-            let txkeys = chan.make_holder_tx_keys(&per_commitment_point);
 
             let tx = chan.make_holder_commitment_tx(
                 commit_num,
-                &txkeys,
+                &per_commitment_point,
                 feerate_per_kw,
                 to_broadcaster,
                 to_countersignatory,
@@ -1170,8 +1139,7 @@ pub fn setup_funded_channel_with_setup(
 
     let secp_ctx = Secp256k1::signing_only();
     let node_ctx = TestNodeContext { node, secp_ctx };
-    let channel_value_sat = setup.channel_value_sat;
-    let counterparty_keys = make_test_counterparty_keys(&node_ctx, &channel_id, channel_value_sat);
+    let counterparty_keys = make_test_counterparty_keys(&node_ctx, &channel_id);
     let mut chan_ctx = TestChannelContext { channel_id, setup, counterparty_keys };
 
     // Pretend we funded the channel and ran for a while ...
@@ -1204,7 +1172,7 @@ pub fn counterparty_sign_holder_commitment(
         .node
         .with_channel(&chan_ctx.channel_id, |chan| {
             let funding_redeemscript = make_funding_redeemscript(
-                &chan.keys.pubkeys().funding_pubkey,
+                &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
                 &chan.counterparty_pubkeys().funding_pubkey,
             );
             let tx = commit_tx_ctx.tx.as_ref().unwrap();
@@ -1212,7 +1180,7 @@ pub fn counterparty_sign_holder_commitment(
             let keys = trusted_tx.keys();
             let built_tx = trusted_tx.built_transaction();
             let commitment_sig = built_tx.sign_counterparty_commitment(
-                &chan_ctx.counterparty_keys.funding_key,
+                &chan_ctx.counterparty_keys.funding_key(None),
                 &funding_redeemscript,
                 chan_ctx.setup.channel_value_sat,
                 &node_ctx.secp_ctx,
@@ -1230,10 +1198,10 @@ pub fn counterparty_sign_holder_commitment(
             );
 
             let build_feerate =
-                if chan_ctx.setup.is_zero_fee_htlc() { 0 } else { tx.feerate_per_kw() };
+                if chan_ctx.setup.is_zero_fee_htlc() { 0 } else { tx.negotiated_feerate_per_kw() };
 
-            let mut htlc_sigs = Vec::with_capacity(tx.htlcs().len());
-            for htlc in tx.htlcs() {
+            let mut htlc_sigs = Vec::with_capacity(tx.nondust_htlcs().len());
+            for htlc in tx.nondust_htlcs() {
                 let htlc_tx = build_htlc_transaction(
                     &commitment_txid,
                     build_feerate,
@@ -1301,7 +1269,7 @@ pub fn validate_holder_commitment(
             commit_tx_ctx.to_countersignatory,
             &htlcs,
             &parameters,
-            &chan.keys.pubkeys().funding_pubkey,
+            &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
             &chan.setup.counterparty_points.funding_pubkey,
         )
         .expect("scripts");
@@ -1348,7 +1316,10 @@ pub fn make_holder_commitment_tx(
     let (holder_funding_pubkey, counterparty_funding_pubkey) = node_ctx
         .node
         .with_channel(&chan_ctx.channel_id, |chan| {
-            Ok((chan.keys.pubkeys().funding_pubkey, chan.counterparty_pubkeys().funding_pubkey))
+            Ok((
+                chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
+                chan.counterparty_pubkeys().funding_pubkey,
+            ))
         })
         .expect("funding pubkeys");
 
@@ -1492,7 +1463,7 @@ pub fn build_tx_scripts(
 
     if to_countersignatory_value_sat > 0 {
         let (redeem_script, script_pubkey) = if is_anchors {
-            let script = get_to_countersignatory_with_anchors_redeemscript(
+            let script = get_to_countersigner_keyed_anchor_redeemscript(
                 &countersignatory_pubkeys.payment_point,
             );
             (script.clone(), script.to_p2wsh())
@@ -1522,7 +1493,7 @@ pub fn build_tx_scripts(
 
     if is_anchors {
         if to_broadcaster_value_sat > 0 || !htlcs.is_empty() {
-            let anchor_script = get_anchor_redeemscript(broadcaster_funding_key);
+            let anchor_script = get_keyed_anchor_redeemscript(broadcaster_funding_key);
             txouts.push((
                 TxOut {
                     script_pubkey: anchor_script.to_p2wsh(),
@@ -1533,7 +1504,7 @@ pub fn build_tx_scripts(
         }
 
         if to_countersignatory_value_sat > 0 || !htlcs.is_empty() {
-            let anchor_script = get_anchor_redeemscript(countersignatory_funding_key);
+            let anchor_script = get_keyed_anchor_redeemscript(countersignatory_funding_key);
             txouts.push((
                 TxOut {
                     script_pubkey: anchor_script.to_p2wsh(),
@@ -1584,7 +1555,7 @@ pub fn build_tx_scripts(
 
 pub fn get_channel_funding_pubkey(node: &Node, channel_id: &ChannelId) -> PublicKey {
     let res: Result<PublicKey, Status> =
-        node.with_channel(&channel_id, |chan| Ok(chan.keys.pubkeys().funding_pubkey));
+        node.with_channel(&channel_id, |chan| Ok(chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey));
     res.unwrap()
 }
 
@@ -1598,7 +1569,7 @@ pub fn get_channel_htlc_pubkey(
         let pubkey = derive_public_key(
             &secp_ctx,
             &remote_per_commitment_point,
-            &chan.keys.pubkeys().htlc_basepoint.0,
+            &chan.keys.pubkeys(&chan.secp_ctx).htlc_basepoint.0,
         )
         .unwrap();
         Ok(pubkey)
@@ -1616,7 +1587,7 @@ pub fn get_channel_delayed_payment_pubkey(
         let pubkey = derive_public_key(
             &secp_ctx,
             &remote_per_commitment_point,
-            &chan.keys.pubkeys().delayed_payment_basepoint.0,
+            &chan.keys.pubkeys(&chan.secp_ctx).delayed_payment_basepoint.0,
         )
         .unwrap();
         Ok(pubkey)
@@ -1634,7 +1605,7 @@ pub fn get_channel_revocation_pubkey(
         let pubkey = crypto_utils::derive_public_revocation_key(
             secp_ctx,
             revocation_point, // matches revocation_secret
-            &chan.keys.pubkeys().revocation_basepoint,
+            &chan.keys.pubkeys(&chan.secp_ctx).revocation_basepoint,
         )
         .map_err(|_| internal_error("failed to derive_public_revocation_key"))?;
         Ok(pubkey)
@@ -1802,7 +1773,7 @@ where
             commit_tx_ctx.to_countersignatory,
             &htlcs,
             &parameters,
-            &chan.keys.pubkeys().funding_pubkey,
+            &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
             &chan.setup.counterparty_points.funding_pubkey,
         )
         .expect("scripts");

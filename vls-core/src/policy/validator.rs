@@ -3,6 +3,7 @@ extern crate scopeguard;
 use core::cmp::{max, min};
 use core::fmt::{self, Debug, Formatter};
 
+use crate::signer::vls_channel_signer::VlsChannelSigner;
 use bitcoin::bip32::DerivationPath;
 
 use bitcoin::blockdata::block::Header as BlockHeader;
@@ -18,7 +19,6 @@ use core::time::Duration;
 use lightning::ln::chan_utils::{ClosingTransaction, HTLCOutputInCommitment, TxCreationKeys};
 use lightning::offers::invoice::UnsignedBolt12Invoice;
 
-use lightning::sign::InMemorySigner;
 use lightning::types::payment::PaymentHash;
 use log::{debug, error};
 use serde_derive::{Deserialize, Serialize};
@@ -84,7 +84,7 @@ pub trait Validator {
     /// Phase 1 CommitmentInfo
     fn decode_commitment_tx(
         &self,
-        keys: &InMemorySigner,
+        keys: &VlsChannelSigner,
         setup: &ChannelSetup,
         is_counterparty: bool,
         tx: &Transaction,

@@ -9,7 +9,7 @@ use bitcoin::blockdata::script::Builder;
 use bitcoin::hashes::sha256::Hash as Sha256Hash;
 use bitcoin::hashes::sha256::HashEngine as Sha256State;
 use bitcoin::hashes::sha256d::Hash as Sha256dHash;
-use bitcoin::hashes::{Hash, HashEngine};
+use bitcoin::hashes::{Hash, HashEngine, Hmac, HmacEngine};
 use bitcoin::secp256k1::ecdsa::RecoverableSignature;
 use bitcoin::secp256k1::ecdsa::Signature;
 use bitcoin::secp256k1::Message;
@@ -18,7 +18,6 @@ use bitcoin::sighash;
 use bitcoin::WPubkeyHash;
 use bitcoin::{secp256k1, Address, Witness};
 use bitcoin::{Network, ScriptBuf, Sequence, Transaction, TxIn, TxOut};
-use lightning::ln::msgs::DecodeError;
 use lightning::ln::msgs::UnsignedGossipMessage;
 use lightning::ln::script::ShutdownScript;
 use lightning::offers::invoice::UnsignedBolt12Invoice;
@@ -26,7 +25,7 @@ use lightning::sign::{
     DelayedPaymentOutputDescriptor, InMemorySigner, Recipient, SpendableOutputDescriptor,
 };
 use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
-use lightning::util::ser::{ReadableArgs, Writeable};
+use lightning::util::ser::Writeable;
 use lightning_signer::bitcoin::sighash::EcdsaSighashType;
 use lightning_signer::bitcoin::transaction::Version;
 use lightning_signer::bitcoin::Amount;
@@ -172,12 +171,8 @@ impl KeysManager {
     /// Key derivation parameters are accessible through a per-channel secrets
     /// Sign::channel_keys_id and is provided inside DynamicOuputP2WSH in case of
     /// onchain output detection for which a corresponding delayed_payment_key must be derived.
-    pub fn derive_channel_keys(
-        &self,
-        channel_value_satoshis: u64,
-        params: &[u8; 32],
-    ) -> InMemorySigner {
-        self.factory.derive_channel_keys(&self.channel_master_key, channel_value_satoshis, params)
+    pub fn derive_channel_keys(&self, params: &[u8; 32]) -> InMemorySigner {
+        self.factory.derive_channel_keys(&self.channel_master_key, params)
     }
 }
 
@@ -192,12 +187,7 @@ impl SignerProvider for KeysManager {
         Ok(ShutdownScript::new_p2wpkh(&WPubkeyHash::hash(&self.shutdown_pubkey.serialize())))
     }
 
-    fn generate_channel_keys_id(
-        &self,
-        _inbound: bool,
-        _channel_value_satoshis: u64,
-        _user_channel_id: u128,
-    ) -> [u8; 32] {
+    fn generate_channel_keys_id(&self, _inbound: bool, _user_channel_id: u128) -> [u8; 32] {
         let child_ix = self.channel_child_index.fetch_add(1, Ordering::AcqRel);
         assert!(child_ix <= std::u32::MAX as usize);
         let mut id = [0; 32];
@@ -207,19 +197,8 @@ impl SignerProvider for KeysManager {
         id
     }
 
-    fn derive_channel_signer(
-        &self,
-        channel_value_satoshis: u64,
-        channel_keys_id: [u8; 32],
-    ) -> Self::EcdsaSigner {
-        DynSigner::new(self.derive_channel_keys(channel_value_satoshis, &channel_keys_id))
-    }
-
-    fn read_chan_signer(&self, reader: &[u8]) -> Result<Self::EcdsaSigner, DecodeError> {
-        let mut cursor = std::io::Cursor::new(reader);
-        // TODO(devrandom) make this polymorphic
-        let signer = InMemorySigner::read(&mut cursor, self)?;
-        Ok(DynSigner { inner: Box::new(signer) })
+    fn derive_channel_signer(&self, channel_keys_id: [u8; 32]) -> Self::EcdsaSigner {
+        DynSigner::new(self.derive_channel_keys(&channel_keys_id))
     }
 }
 
@@ -244,8 +223,22 @@ impl EntropySource for KeysManager {
 }
 
 impl NodeSigner for KeysManager {
-    fn get_inbound_payment_key(&self) -> ExpandedKey {
+    fn get_expanded_key(&self) -> ExpandedKey {
         self.inbound_payment_key
+    }
+
+    fn get_peer_storage_key(&self) -> lightning::sign::PeerStorageKey {
+        let mut engine = HmacEngine::<Sha256Hash>::new(b"peer storage key");
+        engine.input(&self.seed);
+        let inner = Hmac::from_engine(engine).to_byte_array();
+        lightning::sign::PeerStorageKey { inner }
+    }
+
+    fn get_receive_auth_key(&self) -> lightning::sign::ReceiveAuthKey {
+        let mut engine = HmacEngine::<Sha256Hash>::new(b"receive auth key");
+        engine.input(&self.seed);
+        let inner = Hmac::from_engine(engine).to_byte_array();
+        lightning::sign::ReceiveAuthKey(inner)
     }
 
     fn get_node_id(&self, recipient: Recipient) -> std::result::Result<PublicKey, ()> {
@@ -303,6 +296,10 @@ impl NodeSigner for KeysManager {
         _invoice: &UnsignedBolt12Invoice,
     ) -> Result<secp256k1::schnorr::Signature, ()> {
         todo!()
+    }
+
+    fn sign_message(&self, msg: &[u8]) -> Result<String, ()> {
+        Ok(lightning::util::message_signing::sign(msg, &self.node_secret))
     }
 }
 
@@ -404,10 +401,7 @@ impl SpendableKeysInterface for KeysManager {
                         || keys_cache.as_ref().unwrap().1 != descriptor.channel_keys_id
                     {
                         keys_cache = Some((
-                            self.derive_channel_keys(
-                                descriptor.channel_value_satoshis,
-                                &descriptor.channel_keys_id,
-                            ),
+                            self.derive_channel_keys(&descriptor.channel_keys_id),
                             descriptor.channel_keys_id,
                         ));
                     }
@@ -428,10 +422,7 @@ impl SpendableKeysInterface for KeysManager {
                         || keys_cache.as_ref().unwrap().1 != descriptor.channel_keys_id
                     {
                         keys_cache = Some((
-                            self.derive_channel_keys(
-                                descriptor.channel_value_satoshis,
-                                &descriptor.channel_keys_id,
-                            ),
+                            self.derive_channel_keys(&descriptor.channel_keys_id),
                             descriptor.channel_keys_id,
                         ));
                     }

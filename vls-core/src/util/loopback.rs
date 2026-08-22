@@ -6,14 +6,14 @@ use bitcoin::io::Error as IOError;
 use bitcoin::secp256k1::ecdh::SharedSecret;
 use bitcoin::secp256k1::ecdsa::{RecoverableSignature, Signature};
 use bitcoin::secp256k1::{All, PublicKey, Scalar, Secp256k1, SecretKey};
-use bitcoin::{ScriptBuf, Transaction, TxOut, WPubkeyHash};
+use bitcoin::{ScriptBuf, Transaction, TxOut, Txid, WPubkeyHash};
 use lightning::ln::chan_utils;
 use lightning::ln::chan_utils::{
     ChannelPublicKeys, ChannelTransactionParameters, ClosingTransaction, CommitmentTransaction,
     HTLCOutputInCommitment, HolderCommitmentTransaction,
 };
 use lightning::ln::channel_keys::{DelayedPaymentKey, RevocationKey};
-use lightning::ln::msgs::{DecodeError, UnsignedChannelAnnouncement, UnsignedGossipMessage};
+use lightning::ln::msgs::{UnsignedChannelAnnouncement, UnsignedGossipMessage};
 use lightning::ln::script::ShutdownScript;
 use lightning::types::features::ChannelTypeFeatures;
 use lightning::types::payment::PaymentPreimage;
@@ -33,9 +33,10 @@ use lightning::ln::inbound_payment::ExpandedKey;
 use lightning::sign::ecdsa::EcdsaChannelSigner;
 use lightning::sign::HTLCDescriptor;
 use lightning::sign::{
-    ChannelSigner, EntropySource, NodeSigner, Recipient, SignerProvider, SpendableOutputDescriptor,
+    ChannelSigner, EntropySource, NodeSigner, PeerStorageKey, ReceiveAuthKey, Recipient,
+    SignerProvider, SpendableOutputDescriptor,
 };
-use lightning::util::ser::{Readable, Writeable, Writer};
+use lightning::util::ser::{Writeable, Writer};
 use lightning_invoice::RawBolt11Invoice;
 use log::{debug, error, info};
 use vls_common::to_derivation_path;
@@ -78,6 +79,16 @@ impl LoopbackSignerKeysInterface {
     }
 }
 
+/// Tracks lazy channel setup. LDK 0.2 removed `ChannelSigner::provide_channel_parameters`
+/// (which used to call `Node::setup_channel`), so we set the channel up lazily on the first
+/// signing op instead — mirroring `SignerClient` on the wire path. On the inbound side LDK
+/// calls `validate_holder_commitment` before any signing op, so we defer it and replay after
+/// setup completes.
+struct LoopbackSetupState {
+    done: bool,
+    deferred_validate: Option<(HolderCommitmentTransaction, Vec<PaymentPreimage>)>,
+}
+
 #[derive(Clone)]
 pub struct LoopbackChannelSigner {
     pub node_id: PublicKey,
@@ -85,6 +96,7 @@ pub struct LoopbackChannelSigner {
     pub signer: Arc<MultiSigner>,
     pub pubkeys: ChannelPublicKeys,
     pub channel_value_sat: u64,
+    setup_state: Arc<Mutex<LoopbackSetupState>>,
 }
 
 impl LoopbackChannelSigner {
@@ -108,7 +120,94 @@ impl LoopbackChannelSigner {
             signer: signer.clone(),
             pubkeys,
             channel_value_sat,
+            setup_state: Arc::new(Mutex::new(LoopbackSetupState {
+                done: false,
+                deferred_validate: None,
+            })),
         }
+    }
+
+    /// Set the channel up on the signer from LDK's channel parameters, lazily and once.
+    /// Replaces the removed `provide_channel_parameters` hook. Replays a deferred
+    /// `validate_holder_commitment` (inbound side) once setup completes.
+    fn ensure_setup(&self, parameters: &ChannelTransactionParameters) -> Result<(), ()> {
+        let mut state = self.setup_state.lock().unwrap();
+        if state.done {
+            return Ok(());
+        }
+
+        // Skip if already set up (e.g. by a test harness); `with_channel_base` works on a stub.
+        let already_setup = self
+            .signer
+            .with_channel_base(&self.node_id, &self.channel_id, |base| Ok(base.is_ready()))
+            .unwrap_or(false);
+        if !already_setup {
+            let funding_outpoint = parameters.funding_outpoint.ok_or(())?.into_bitcoin_outpoint();
+            let counterparty_parameters = parameters.counterparty_parameters.as_ref().ok_or(())?;
+            // Match the negotiated channel type, like `SignerClient::do_setup_channel`.
+            let features = &parameters.channel_type_features;
+            let commitment_type = if features.supports_anchors_zero_fee_htlc_tx() {
+                CommitmentType::AnchorsZeroFeeHtlc
+            } else if features.supports_anchors_nonzero_fee_htlc_tx() {
+                CommitmentType::Anchors
+            } else {
+                CommitmentType::StaticRemoteKey
+            };
+            let setup = ChannelSetup {
+                is_outbound: parameters.is_outbound_from_holder,
+                // LDK 0.2 dropped the channel value from `derive_channel_signer`, so take it
+                // from the parameters (like `SignerClient`).
+                channel_value_sat: parameters.channel_value_satoshis,
+                push_value_msat: 0, // TODO
+                funding_outpoint,
+                holder_selected_contest_delay: parameters.holder_selected_contest_delay,
+                holder_shutdown_script: None, // use the signer's shutdown script
+                counterparty_points: counterparty_parameters.pubkeys.clone(),
+                counterparty_selected_contest_delay: counterparty_parameters.selected_contest_delay,
+                counterparty_shutdown_script: None, // TODO
+                commitment_type,
+            };
+            let node = self.signer.get_node(&self.node_id).map_err(|_| ())?;
+            node.setup_channel(self.channel_id.clone(), None, setup, &DerivationPath::master())
+                .map_err(|s| self.bad_status(s))?;
+        }
+        // Clone rather than `take` so a failed replay leaves the message in place: `done` stays
+        // false and a later signing op retries it, instead of dropping it on the floor. Same
+        // ordering as `SignerClient::ensure_channel_setup`.
+        if let Some((holder_tx, preimages)) = state.deferred_validate.clone() {
+            self.do_validate_holder_commitment(&holder_tx, preimages)?;
+            state.deferred_validate = None;
+        }
+        state.done = true;
+        Ok(())
+    }
+
+    fn do_validate_holder_commitment(
+        &self,
+        holder_tx: &HolderCommitmentTransaction,
+        outbound_htlc_preimages: Vec<PaymentPreimage>,
+    ) -> Result<(), ()> {
+        let commitment_number = INITIAL_COMMITMENT_NUMBER - holder_tx.commitment_number();
+        self.signer
+            .with_channel(&self.node_id, &self.channel_id, |chan| {
+                chan.htlcs_fulfilled(outbound_htlc_preimages);
+                let (offered_htlcs, received_htlcs) =
+                    LoopbackChannelSigner::convert_to_htlc_info2(holder_tx.nondust_htlcs());
+                chan.validate_holder_commitment_tx_phase2(
+                    commitment_number,
+                    holder_tx.negotiated_feerate_per_kw(),
+                    holder_tx.to_broadcaster_value_sat(),
+                    holder_tx.to_countersignatory_value_sat(),
+                    offered_htlcs,
+                    received_htlcs,
+                    &holder_tx.counterparty_sig,
+                    &holder_tx.counterparty_htlc_sigs,
+                )?;
+                chan.revoke_previous_holder_commitment(commitment_number)?;
+                Ok(())
+            })
+            .map_err(|s| self.bad_status(s))?;
+        Ok(())
     }
 
     fn get_channel_setup(&self) -> Result<ChannelSetup, ()> {
@@ -198,65 +297,49 @@ impl ChannelSigner for LoopbackChannelSigner {
     fn validate_holder_commitment(
         &self,
         holder_tx: &HolderCommitmentTransaction,
-        preimages: Vec<PaymentPreimage>,
+        outbound_htlc_preimages: Vec<PaymentPreimage>,
     ) -> Result<(), ()> {
-        let commitment_number = INITIAL_COMMITMENT_NUMBER - holder_tx.commitment_number();
-
-        self.signer
-            .with_channel(&self.node_id, &self.channel_id, |chan| {
-                chan.htlcs_fulfilled(preimages);
-                let (offered_htlcs, received_htlcs) =
-                    LoopbackChannelSigner::convert_to_htlc_info2(holder_tx.htlcs());
-                chan.validate_holder_commitment_tx_phase2(
-                    commitment_number,
-                    holder_tx.feerate_per_kw(),
-                    holder_tx.to_broadcaster_value_sat(),
-                    holder_tx.to_countersignatory_value_sat(),
-                    offered_htlcs,
-                    received_htlcs,
-                    &holder_tx.counterparty_sig,
-                    &holder_tx.counterparty_htlc_sigs,
-                )?;
-                chan.revoke_previous_holder_commitment(commitment_number)?;
-                Ok(())
-            })
-            .map_err(|s| self.bad_status(s))?;
-
-        Ok(())
+        // On the inbound side this is called before the channel is set up (setup happens
+        // lazily on the first signing op); defer and replay after `ensure_setup` completes.
+        {
+            let mut state = self.setup_state.lock().unwrap();
+            if !state.done {
+                // Only one validation can be deferred: overwriting would silently drop a holder
+                // commitment the signer never saw. Unreachable in practice (the first signing op
+                // completes setup before a second `commitment_signed`), so fail the call rather
+                // than lose it — LDK closes the channel instead of proceeding unvalidated.
+                if state.deferred_validate.is_some() {
+                    debug_assert!(false, "validate_holder_commitment called twice before setup");
+                    error!("validate_holder_commitment called twice before setup");
+                    return Err(());
+                }
+                state.deferred_validate = Some((holder_tx.clone(), outbound_htlc_preimages));
+                return Ok(());
+            }
+        }
+        self.do_validate_holder_commitment(holder_tx, outbound_htlc_preimages)
     }
 
-    fn pubkeys(&self) -> &ChannelPublicKeys {
-        &self.pubkeys
+    fn pubkeys(&self, _secp_ctx: &Secp256k1<All>) -> ChannelPublicKeys {
+        self.pubkeys.clone()
+    }
+
+    fn new_funding_pubkey(
+        &self,
+        _splice_parent_funding_txid: Txid,
+        _secp_ctx: &Secp256k1<All>,
+    ) -> PublicKey {
+        todo!("new_funding_pubkey for splicing - #538")
     }
 
     fn channel_keys_id(&self) -> [u8; 32] {
+        // Called before the (lazy) setup, so use `with_channel_base`, which works on a stub. Must
+        // be the signer's derived keys id, which `spend_spendable_outputs` re-derives keys from.
         self.signer
-            .with_channel(&self.node_id, &self.channel_id, |chan| Ok(chan.keys.channel_keys_id()))
+            .with_channel_base(&self.node_id, &self.channel_id, |base| {
+                Ok(base.get_channel_keys_id())
+            })
             .expect("missing channel")
-    }
-
-    fn provide_channel_parameters(&mut self, parameters: &ChannelTransactionParameters) {
-        info!("set_remote_channel_pubkeys {:?} {:?}", self.node_id, self.channel_id);
-
-        // TODO cover local vs remote to_self_delay with a test
-        let funding_outpoint = parameters.funding_outpoint.unwrap().into_bitcoin_outpoint();
-        let counterparty_parameters = parameters.counterparty_parameters.as_ref().unwrap();
-        let setup = ChannelSetup {
-            is_outbound: parameters.is_outbound_from_holder,
-            channel_value_sat: self.channel_value_sat,
-            push_value_msat: 0, // TODO
-            funding_outpoint,
-            holder_selected_contest_delay: parameters.holder_selected_contest_delay,
-            holder_shutdown_script: None, // use the signer's shutdown script
-            counterparty_points: counterparty_parameters.pubkeys.clone(),
-            counterparty_selected_contest_delay: counterparty_parameters.selected_contest_delay,
-            counterparty_shutdown_script: None, // TODO
-            commitment_type: CommitmentType::StaticRemoteKey, // TODO
-        };
-        let node = self.signer.get_node(&self.node_id).expect("no such node");
-
-        node.setup_channel(self.channel_id.clone(), None, setup, &DerivationPath::master())
-            .expect("channel already ready or does not exist");
     }
 }
 
@@ -264,11 +347,13 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
     // TODO - Couldn't this return a declared error signature?
     fn sign_counterparty_commitment(
         &self,
+        channel_parameters: &ChannelTransactionParameters,
         commitment_tx: &CommitmentTransaction,
         inbound_htlc_preimages: Vec<PaymentPreimage>,
         outbound_htlc_preimages: Vec<PaymentPreimage>,
         _secp_ctx: &Secp256k1<All>,
     ) -> Result<(Signature, Vec<Signature>), ()> {
+        self.ensure_setup(channel_parameters)?;
         let trusted_tx = commitment_tx.trust();
         info!(
             "sign_counterparty_commitment {:?} {:?} txid {}",
@@ -278,7 +363,7 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
         );
 
         let (offered_htlcs, received_htlcs) =
-            LoopbackChannelSigner::convert_to_htlc_info2(commitment_tx.htlcs());
+            LoopbackChannelSigner::convert_to_htlc_info2(commitment_tx.nondust_htlcs());
 
         // This doesn't actually require trust
         let per_commitment_point = trusted_tx.keys().per_commitment_point;
@@ -286,7 +371,7 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
         let commitment_number = INITIAL_COMMITMENT_NUMBER - commitment_tx.commitment_number();
         let to_holder_value_sat = commitment_tx.to_countersignatory_value_sat();
         let to_counterparty_value_sat = commitment_tx.to_broadcaster_value_sat();
-        let feerate_per_kw = commitment_tx.feerate_per_kw();
+        let feerate_per_kw = commitment_tx.negotiated_feerate_per_kw();
 
         let (commitment_sig, htlc_sigs) = self
             .signer
@@ -309,9 +394,11 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
 
     fn sign_holder_commitment(
         &self,
+        channel_parameters: &ChannelTransactionParameters,
         hct: &HolderCommitmentTransaction,
         _secp_ctx: &Secp256k1<All>,
     ) -> Result<Signature, ()> {
+        self.ensure_setup(channel_parameters)?;
         let commitment_tx = hct.trust();
 
         debug!("loopback: sign local txid {}", commitment_tx.built_transaction().txid);
@@ -319,9 +406,9 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
         let commitment_number = INITIAL_COMMITMENT_NUMBER - hct.commitment_number();
         let to_holder_value_sat = hct.to_broadcaster_value_sat();
         let to_counterparty_value_sat = hct.to_countersignatory_value_sat();
-        let feerate_per_kw = hct.feerate_per_kw();
+        let feerate_per_kw = hct.negotiated_feerate_per_kw();
         let (offered_htlcs, received_htlcs) =
-            LoopbackChannelSigner::convert_to_htlc_info2(hct.htlcs());
+            LoopbackChannelSigner::convert_to_htlc_info2(hct.nondust_htlcs());
 
         let sig = self
             .signer
@@ -355,22 +442,31 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
 
     fn unsafe_sign_holder_commitment(
         &self,
-        hct: &HolderCommitmentTransaction,
+        channel_parameters: &ChannelTransactionParameters,
+        commitment_tx: &HolderCommitmentTransaction,
         secp_ctx: &Secp256k1<All>,
     ) -> Result<Signature, ()> {
-        let signature = self
-            .signer
+        // Intentionally bypass VLS policy enforcement — callers like
+        // force-close recovery need to be able to sign older commitments
+        // that the policy layer would otherwise reject.
+        let node = self.signer.get_node(&self.node_id).map_err(|_| ())?;
+        self.signer
             .with_channel(&self.node_id, &self.channel_id, |chan| {
                 chan.keys
-                    .unsafe_sign_holder_commitment(hct, secp_ctx)
+                    .unsafe_sign_holder_commitment(
+                        channel_parameters,
+                        commitment_tx,
+                        node.get_entropy_source(),
+                        secp_ctx,
+                    )
                     .map_err(|_| Status::internal("could not unsafe-sign"))
             })
-            .map_err(|_s| ())?;
-        Ok(signature)
+            .map_err(|_s| ())
     }
 
     fn sign_justice_revoked_output(
         &self,
+        _channel_parameters: &ChannelTransactionParameters,
         justice_tx: &Transaction,
         input: usize,
         amount: u64,
@@ -415,6 +511,7 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
 
     fn sign_justice_revoked_htlc(
         &self,
+        _channel_parameters: &ChannelTransactionParameters,
         justice_tx: &Transaction,
         input: usize,
         amount: u64,
@@ -481,6 +578,7 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
 
     fn sign_counterparty_htlc_transaction(
         &self,
+        _channel_parameters: &ChannelTransactionParameters,
         htlc_tx: &Transaction,
         input: usize,
         amount: u64,
@@ -514,9 +612,11 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
     // TODO - Couldn't this return a declared error signature?
     fn sign_closing_transaction(
         &self,
+        channel_parameters: &ChannelTransactionParameters,
         closing_tx: &ClosingTransaction,
         _secp_ctx: &Secp256k1<All>,
     ) -> Result<Signature, ()> {
+        self.ensure_setup(channel_parameters)?;
         info!("sign_closing_transaction {:?} {:?}", self.node_id, self.channel_id);
 
         // TODO error handling is awkward
@@ -536,21 +636,24 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
             .map_err(|_| ())
     }
 
-    fn sign_holder_anchor_input(
+    fn sign_holder_keyed_anchor_input(
         &self,
+        _channel_parameters: &ChannelTransactionParameters,
         _anchor_tx: &Transaction,
         _input: usize,
         _secp_ctx: &Secp256k1<All>,
     ) -> Result<Signature, ()> {
-        todo!()
+        todo!("LDK 0.2 - keyed anchor spending for EcdsaChannelSigner")
     }
 
     fn sign_channel_announcement_with_funding_key(
         &self,
+        channel_parameters: &ChannelTransactionParameters,
         msg: &UnsignedChannelAnnouncement,
         _secp_ctx: &Secp256k1<All>,
     ) -> Result<Signature, ()> {
-        info!("sign_counterparty_commitment {:?} {:?}", self.node_id, self.channel_id);
+        self.ensure_setup(channel_parameters)?;
+        info!("sign_channel_announcement {:?} {:?}", self.node_id, self.channel_id);
 
         self.signer
             .with_channel(&self.node_id, &self.channel_id, |chan| {
@@ -559,14 +662,14 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
             .map_err(|s| self.bad_status(s))
     }
 
-    fn sign_splicing_funding_input(
+    fn sign_splice_shared_input(
         &self,
+        _channel_parameters: &ChannelTransactionParameters,
         _tx: &Transaction,
         _input_index: usize,
-        _input_value: u64,
         _secp_ctx: &Secp256k1<All>,
-    ) -> Result<Signature, ()> {
-        todo!("sign_splicing_funding_input - #538")
+    ) -> Signature {
+        todo!("sign_splice_shared_input - #538")
     }
 }
 
@@ -585,40 +688,20 @@ impl SignerProvider for LoopbackSignerKeysInterface {
         Ok(self.get_node().get_ldk_shutdown_scriptpubkey())
     }
 
-    fn generate_channel_keys_id(
-        &self,
-        _inbound: bool,
-        _channel_value_satoshis: u64,
-        _user_channel_id: u128,
-    ) -> [u8; 32] {
+    fn generate_channel_keys_id(&self, _inbound: bool, _user_channel_id: u128) -> [u8; 32] {
         let node = self.signer.get_node(&self.node_id).unwrap();
         let (channel_id, _) = node.new_channel_with_random_id(&node).unwrap();
         channel_id.ldk_channel_keys_id()
     }
 
-    fn derive_channel_signer(
-        &self,
-        channel_value_satoshis: u64,
-        channel_keys_id: [u8; 32],
-    ) -> Self::EcdsaSigner {
+    fn derive_channel_signer(&self, channel_keys_id: [u8; 32]) -> Self::EcdsaSigner {
         let channel_id = ChannelId::new(&channel_keys_id);
         LoopbackChannelSigner::new(
             &self.node_id,
             &channel_id,
             Arc::clone(&self.signer),
-            channel_value_satoshis,
+            0, // channel_value_sat - unused
         )
-    }
-
-    fn read_chan_signer(&self, mut reader: &[u8]) -> Result<Self::EcdsaSigner, DecodeError> {
-        let channel_id = ChannelId::new(&Vec::read(&mut reader)?);
-        let channel_value_sat = Readable::read(&mut reader)?;
-        Ok(LoopbackChannelSigner::new(
-            &self.node_id,
-            &channel_id,
-            Arc::clone(&self.signer),
-            channel_value_sat,
-        ))
     }
 }
 
@@ -673,8 +756,20 @@ impl NodeSigner for LoopbackSignerKeysInterface {
         self.get_node().sign_bolt12_invoice(invoice).map_err(|_| ())
     }
 
-    fn get_inbound_payment_key(&self) -> ExpandedKey {
+    fn get_expanded_key(&self) -> ExpandedKey {
         self.get_node().get_inbound_payment_key_material()
+    }
+
+    fn get_peer_storage_key(&self) -> PeerStorageKey {
+        self.get_node().keys_manager.get_peer_storage_key()
+    }
+
+    fn get_receive_auth_key(&self) -> ReceiveAuthKey {
+        self.get_node().keys_manager.get_receive_auth_key()
+    }
+
+    fn sign_message(&self, msg: &[u8]) -> Result<String, ()> {
+        self.get_node().keys_manager.sign_message(msg)
     }
 }
 
@@ -700,6 +795,7 @@ mod tests {
     use std::sync::Arc;
 
     use bitcoin::{hex::FromHex, key::Secp256k1};
+    use lightning::ln::chan_utils::ChannelTransactionParameters;
     use lightning::sign::{ecdsa::EcdsaChannelSigner, SignerProvider};
 
     use crate::channel::{Channel, ChannelBase};
@@ -720,6 +816,7 @@ mod tests {
         TestNodeContext,
         TestChannelContext,
         crate::util::test_utils::TestCommitmentTxContext,
+        ChannelTransactionParameters,
     ) {
         let setup = make_test_channel_setup();
         let signer = Arc::new(MultiSigner::new(make_services()));
@@ -734,7 +831,6 @@ mod tests {
         let counterparty_keys = make_test_counterparty_keys(
             &TestNodeContext { node: node.clone(), secp_ctx: secp_ctx.clone() },
             &channel_id,
-            setup.channel_value_sat,
         );
 
         node.with_channel(&channel_id, |chan| {
@@ -757,34 +853,36 @@ mod tests {
                 .expect("validated commitment");
 
         let lsp = LoopbackSignerKeysInterface { node_id, signer };
-        let loopback_signer = lsp.derive_channel_signer(
-            chan_ctx.setup.channel_value_sat,
-            channel_id.ldk_channel_keys_id(),
-        );
+        let loopback_signer = lsp.derive_channel_signer(channel_id.ldk_channel_keys_id());
 
-        (loopback_signer, node_ctx, chan_ctx, commit_tx_ctx)
+        let channel_parameters = node
+            .with_channel(&channel_id, |chan| Ok(chan.make_channel_parameters()))
+            .expect("channel parameters");
+
+        (loopback_signer, node_ctx, chan_ctx, commit_tx_ctx, channel_parameters)
     }
 
     #[test]
     fn sign_holder_commitment_success() {
-        let (loopback_signer, node_ctx, chan_ctx, mut commit_tx_ctx) = setup_loopback_signer();
+        let (loopback_signer, node_ctx, chan_ctx, mut commit_tx_ctx, channel_parameters) =
+            setup_loopback_signer();
         let hct = make_holder_commitment_tx(&node_ctx, &chan_ctx, &mut commit_tx_ctx);
         let secp_ctx = Secp256k1::new();
 
-        let result = loopback_signer.sign_holder_commitment(&hct, &secp_ctx);
+        let result = loopback_signer.sign_holder_commitment(&channel_parameters, &hct, &secp_ctx);
         assert!(result.is_ok());
     }
 
     #[test]
     fn sign_holder_commitment_rejects_mismatch() {
-        let (loopback_signer, node_ctx, chan_ctx, mut commit_tx_ctx) = setup_loopback_signer();
+        let (loopback_signer, node_ctx, chan_ctx, mut commit_tx_ctx, channel_parameters) =
+            setup_loopback_signer();
 
         let mismatched_commitment_tx = node_ctx
             .node
             .with_channel(&chan_ctx.channel_id, |chan| {
                 let per_commitment_point =
                     chan.get_per_commitment_point(commit_tx_ctx.commit_num)?;
-                let txkeys = chan.make_holder_tx_keys(&per_commitment_point);
                 let htlcs = Channel::htlcs_info2_to_oic(
                     &commit_tx_ctx.offered_htlcs,
                     &commit_tx_ctx.received_htlcs,
@@ -792,7 +890,7 @@ mod tests {
 
                 Ok(chan.make_holder_commitment_tx(
                     commit_tx_ctx.commit_num,
-                    &txkeys,
+                    &per_commitment_point,
                     commit_tx_ctx.feerate_per_kw + 1,
                     commit_tx_ctx.to_broadcaster,
                     commit_tx_ctx.to_countersignatory,
@@ -805,7 +903,7 @@ mod tests {
         let hct = make_holder_commitment_tx(&node_ctx, &chan_ctx, &mut commit_tx_ctx);
         let secp_ctx = Secp256k1::new();
 
-        let result = loopback_signer.sign_holder_commitment(&hct, &secp_ctx);
+        let result = loopback_signer.sign_holder_commitment(&channel_parameters, &hct, &secp_ctx);
         assert!(result.is_err());
     }
 }

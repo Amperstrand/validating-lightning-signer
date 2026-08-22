@@ -21,10 +21,10 @@ pub struct InMemorySignerFactory {
 }
 
 impl InMemorySignerFactory {
+    // LDK 0.2 dropped the channel value from `InMemorySigner::new`, so it is no longer needed.
     pub fn derive_channel_keys(
         &self,
         channel_master_key: &Xpriv,
-        channel_value_satoshis: u64,
         params: &[u8; 32],
     ) -> InMemorySigner {
         let chan_id = byte_utils::slice_to_be64(&params[0..8]);
@@ -70,14 +70,14 @@ impl InMemorySignerFactory {
         let unique_start = key_step!(b"unique start", commitment_seed).secret_bytes();
 
         let signer = InMemorySigner::new(
-            &self.secp_ctx,
             funding_key,
             revocation_base_key,
             payment_key,
+            payment_key,
+            false,
             delayed_payment_base_key,
             htlc_base_key,
             commitment_seed,
-            channel_value_satoshis,
             params.clone(),
             unique_start,
         );

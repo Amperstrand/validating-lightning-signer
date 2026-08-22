@@ -276,7 +276,7 @@ async fn get_htlc_spend_status(
     commitment_tx: &CommitmentTransaction,
     lookup_spending_txs: bool,
 ) -> Result<HtlcSpendStatus, Status> {
-    let htlcs = commitment_tx.htlcs();
+    let htlcs = commitment_tx.nondust_htlcs();
     let htlc_count = htlcs.len();
 
     if htlc_count == 0 {
@@ -833,7 +833,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
                 );
             }
             HtlcSpendStatus {
-                spent_indices: vec![false; current_commitment_tx.htlcs().len()],
+                spent_indices: vec![false; current_commitment_tx.nondust_htlcs().len()],
                 spender_txs: Vec::new(),
             }
         } else {
@@ -863,7 +863,7 @@ pub(crate) async fn recover_close_inner<R: RecoveryKeys>(
         } else {
             htlc_txs
         };
-        let current_holder_commitment_htlcs = current_commitment_tx.htlcs().len();
+        let current_holder_commitment_htlcs = current_commitment_tx.nondust_htlcs().len();
         let htlc_txids: Vec<_> = htlc_txs.iter().map(|tx| tx.compute_txid()).collect();
         info!(
             "prepared {} HTLC recovery transaction(s) for channel {:?}; current_holder_commitment_htlcs={}; txids={:?}",
@@ -1075,12 +1075,12 @@ mod tests {
     use async_trait::async_trait;
     use bitcoind_client::Error;
     use lightning_signer::bitcoin::hashes::Hash;
+    use lightning_signer::bitcoin::secp256k1::Secp256k1;
     use lightning_signer::channel::Channel;
     use lightning_signer::lightning::ln::chan_utils::{
         ChannelTransactionParameters, CounterpartyChannelTransactionParameters,
-        HTLCOutputInCommitment, TxCreationKeys,
+        HTLCOutputInCommitment,
     };
-    use lightning_signer::lightning::ln::channel_keys::{DelayedPaymentKey, HtlcKey};
     use lightning_signer::lightning::types::payment::PaymentHash;
     use lightning_signer::node::SpendType;
     use lightning_signer::tx::tx::HTLCInfo2;
@@ -1413,27 +1413,23 @@ mod tests {
                 selected_contest_delay: setup.counterparty_selected_contest_delay,
             }),
             funding_outpoint: Some(funding_outpoint()),
+            splice_parent_funding_txid: None,
             channel_type_features: setup.features(),
-        };
-        let mut htlcs = htlcs.into_iter().map(|h| (h, ())).collect();
-        let keys = TxCreationKeys {
-            per_commitment_point: make_test_pubkey(10),
-            revocation_key: RevocationKey(make_test_pubkey(11)),
-            broadcaster_htlc_key: HtlcKey(make_test_pubkey(12)),
-            countersignatory_htlc_key: HtlcKey(make_test_pubkey(13)),
-            broadcaster_delayed_payment_key: DelayedPaymentKey(make_test_pubkey(14)),
+            channel_value_satoshis: setup.channel_value_sat,
         };
 
-        CommitmentTransaction::new_with_auxiliary_htlc_data(
+        // LDK 0.2 derives the `TxCreationKeys` from the per-commitment point and the channel
+        // parameters, so they are no longer passed in explicitly.
+        let secp_ctx = Secp256k1::new();
+        CommitmentTransaction::new(
             0,
+            &make_test_pubkey(10),
             20_000,
             0,
-            holder_pubkeys.funding_pubkey,
-            setup.counterparty_points.funding_pubkey,
-            keys,
             0,
-            &mut htlcs,
+            htlcs,
             &channel_parameters.as_holder_broadcastable(),
+            &secp_ctx,
         )
         .with_non_zero_fee_anchors()
     }
@@ -1577,7 +1573,7 @@ mod tests {
         let commitment_txid = commitment_tx.trust().built_transaction().transaction.compute_txid();
         let mock = MockExplorer::default();
 
-        for (idx, htlc) in commitment_tx.htlcs().iter().enumerate() {
+        for (idx, htlc) in commitment_tx.nondust_htlcs().iter().enumerate() {
             let outpoint = bitcoin::OutPoint {
                 txid: commitment_txid,
                 vout: htlc.transaction_output_index.unwrap(),
@@ -1600,7 +1596,7 @@ mod tests {
         let mock = MockExplorer::default();
         let spender_tx = make_htlc_tx(10_000);
 
-        for htlc in commitment_tx.htlcs() {
+        for htlc in commitment_tx.nondust_htlcs() {
             let outpoint = bitcoin::OutPoint {
                 txid: commitment_txid,
                 vout: htlc.transaction_output_index.unwrap(),
@@ -1803,7 +1799,7 @@ mod tests {
         let commitment_txid = commitment_tx.trust().built_transaction().transaction.compute_txid();
         let htlc_outpoint = bitcoin::OutPoint {
             txid: commitment_txid,
-            vout: commitment_tx.htlcs()[0].transaction_output_index.unwrap(),
+            vout: commitment_tx.nondust_htlcs()[0].transaction_output_index.unwrap(),
         };
         let mut htlc_spender_tx = make_htlc_tx(10_000);
         htlc_spender_tx.output[0].script_pubkey = ScriptBuf::new();
@@ -1847,7 +1843,7 @@ mod tests {
         let commitment_txid = commitment_tx.trust().built_transaction().transaction.compute_txid();
         let htlc_outpoint = bitcoin::OutPoint {
             txid: commitment_txid,
-            vout: commitment_tx.htlcs()[0].transaction_output_index.unwrap(),
+            vout: commitment_tx.nondust_htlcs()[0].transaction_output_index.unwrap(),
         };
         let mut new_htlc_tx = make_htlc_tx(10_000);
         new_htlc_tx.output[0].script_pubkey = ScriptBuf::new();

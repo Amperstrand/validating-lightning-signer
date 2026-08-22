@@ -193,13 +193,13 @@ pub struct FailedHtlc {
     pub id: u64,
 }
 
-#[derive(Debug, Encodable, Decodable)]
+#[derive(Debug, Clone, Encodable, Decodable)]
 pub struct BitcoinSignature {
     pub signature: Signature,
     pub sighash: u8,
 }
 
-#[derive(Debug, Encodable, Decodable)]
+#[derive(Debug, Clone, Encodable, Decodable)]
 pub struct Htlc {
     pub side: u8, // 0 = local, 1 = remote
     pub amount: u64,

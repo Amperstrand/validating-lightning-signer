@@ -4,7 +4,6 @@ mod tests {
 
     use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
     use lightning::ln::chan_utils;
-    use lightning::sign::ChannelSigner;
 
     use test_log::test;
 
@@ -92,7 +91,7 @@ mod tests {
                 to_broadcaster,
                 &htlcs,
                 &parameters,
-                &chan.keys.pubkeys().funding_pubkey,
+                &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
                 &chan.setup.counterparty_points.funding_pubkey,
             )
             .expect("scripts");
@@ -100,7 +99,7 @@ mod tests {
                 redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
 
             let commitment_tx = chan.make_counterparty_commitment_tx_with_keys(
-                keys,
+                &remote_percommit_point,
                 REV_COMMIT_NUM,
                 feerate_per_kw,
                 to_broadcaster,
@@ -313,7 +312,7 @@ mod tests {
                 to_broadcaster,
                 &htlcs,
                 &parameters,
-                &chan.keys.pubkeys().funding_pubkey,
+                &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
                 &chan.setup.counterparty_points.funding_pubkey,
             )
             .expect("scripts");
@@ -321,7 +320,7 @@ mod tests {
                 redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
 
             let commitment_tx = chan.make_counterparty_commitment_tx_with_keys(
-                keys,
+                &remote_percommit_point,
                 REV_COMMIT_NUM,
                 feerate_per_kw,
                 to_broadcaster,
@@ -390,7 +389,7 @@ mod tests {
                 to_broadcaster,
                 &htlcs,
                 &parameters,
-                &chan.keys.pubkeys().funding_pubkey,
+                &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
                 &chan.setup.counterparty_points.funding_pubkey,
             )
             .expect("scripts");
@@ -398,7 +397,7 @@ mod tests {
                 redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
 
             let commitment_tx = chan.make_counterparty_commitment_tx_with_keys(
-                keys,
+                &remote_percommit_point,
                 REV_COMMIT_NUM + 1,
                 feerate_per_kw,
                 to_broadcaster,

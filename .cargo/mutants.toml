@@ -1,4 +1,29 @@
 # Exclude files matching these glob patterns.
 exclude_globs = [
-    "vls-core/src/util/test_utils/**/*.rs"
+    "vls-core/src/util/test_utils/**/*.rs",
+    # Loopback signer: in-process test/integration harness (driven by lnrod integration
+    # tests, not vls-core unit tests). Already excluded from coverage in scripts/run-llvm-cov.
+    "vls-core/src/util/loopback.rs",
+]
+
+exclude_re = [
+    # --- Provably-equivalent mutants: identical behaviour, uncatchable by any test. ---
+    # `zbase32_encode` packs pairs of *disjoint* bit ranges into each 5-bit group
+    # (e.g. `(buf[0] & 0x07) << 2` occupies bits 2-4 and `(buf[1] & 0xC0) >> 6` bits 0-1).
+    # With no overlapping bits, `|` and `^` are mathematically identical.
+    'replace \| with \^ in zbase32_encode',
+    # The low-R grind loop breaks on `serialize_compact()[0] < 0x80`. Widening to `<=`
+    # only differs for a first byte of exactly 0x80, which no test can reliably produce.
+    'replace < with <= in sign_with_aux_rand',
+
+    # --- Test-support code (not shipped). ---
+    # `#[cfg(feature = "test_utils")]` helper used only by the external vls-core-test crate.
+    'replace Channel::advance_holder_commitment',
+
+    # --- Debug-only formatting helpers: no behavioural contract beyond producing a
+    # human-readable string, and pinning exact output is brittle. (The one Debug impl with a
+    # real property -- VlsChannelSigner redacting secrets -- is covered by a test instead.) ---
+    'replace <impl fmt::Debug for ChannelStub>::fmt',
+    "replace <impl core::fmt::Debug for DebugInMemorySigner<'a>>::fmt",
+    "replace <impl core::fmt::Debug for DebugCommitmentTransaction<'a>>::fmt",
 ]
