@@ -47,31 +47,31 @@ triggered = "0.1"
 ctrlc = { version = "<3.5", features = ["termination"] }
 
 [dependencies.lightning-net-tokio]
-version = "0.1.0"
+version = "0.2.0"
 #git = "https://github.com/lightningdevkit/rust-lightning"
 #rev = "af7c2920e1e5ae4ba3f522730e5cce99bedacc8c"
 #path = "../rust-lightning/lightning-net-tokio"
 
 [dependencies.lightning-rapid-gossip-sync]
-version = "0.1.0"
+version = "0.2.0"
 #git = "https://github.com/lightningdevkit/rust-lightning"
 #rev = "af7c2920e1e5ae4ba3f522730e5cce99bedacc8c"
 #path = "../rust-lightning/lightning-rapid-gossip-sync"
 
 [dependencies.lightning-background-processor]
-version = "0.1.0"
+version = "0.2.0"
 #git = "https://github.com/lightningdevkit/rust-lightning"
 #rev = "af7c2920e1e5ae4ba3f522730e5cce99bedacc8c"
 #path = "../rust-lightning/lightning-background-processor"
 
 [dependencies.lightning-persister]
-version = "0.1.0"
+version = "0.2.0"
 #git = "https://github.com/lightningdevkit/rust-lightning"
 #rev = "af7c2920e1e5ae4ba3f522730e5cce99bedacc8c"
 #path = "../rust-lightning/lightning-persister"
 
 [dependencies.lightning-block-sync]
-version = "0.1.0"
+version = "0.2.0"
 #git = "https://github.com/lightningdevkit/rust-lightning"
 #rev = "af7c2920e1e5ae4ba3f522730e5cce99bedacc8c"
 #path = "../rust-lightning/lightning-block-sync"

@@ -186,7 +186,7 @@ mod tests {
 
             assert_eq!(chan.enforcement_state.channel_closed, true);
 
-            let spent = vec![false; trusted_tx.htlcs().len()];
+            let spent = vec![false; trusted_tx.nondust_htlcs().len()];
             let (tx_r, _htlc_txs_r, _revocable_script_r, _uck_r, _revocation_pubkey_r) =
                 chan.sign_holder_commitment_tx_for_recovery(&spent, None)?;
             assert_eq!(tx_r.compute_txid(), tx.compute_txid());
@@ -220,7 +220,7 @@ mod tests {
 
         node_ctx.node.with_channel(&chan_ctx.channel_id, |chan| {
             let trusted_tx = next_commit_tx_ctx.tx.as_ref().unwrap().trust();
-            let spent = vec![false; trusted_tx.htlcs().len()];
+            let spent = vec![false; trusted_tx.nondust_htlcs().len()];
             let (tx_r, _htlc_txs_r, _revocable_script_r, _uck_r, _revocation_pubkey_r) =
                 chan.sign_holder_commitment_tx_for_recovery(&spent, None)?;
             assert_eq!(
@@ -254,7 +254,7 @@ mod tests {
 
             let commitment_tx = chan.make_holder_commitment_tx(
                 commit_tx_ctx.commit_num,
-                &txkeys,
+                &per_commitment_point,
                 commit_tx_ctx.feerate_per_kw,
                 commit_tx_ctx.to_broadcaster,
                 commit_tx_ctx.to_countersignatory,
@@ -282,7 +282,7 @@ mod tests {
                 if chan_ctx.setup.is_zero_fee_htlc() { 0 } else { commit_tx_ctx.feerate_per_kw };
 
             let _htlc_txs = trusted_tx
-                .htlcs()
+                .nondust_htlcs()
                 .iter()
                 .map(|htlc| {
                     build_htlc_transaction(
@@ -304,7 +304,7 @@ mod tests {
 
             assert_eq!(chan.enforcement_state.channel_closed, true);
 
-            let spent = vec![false; trusted_tx.htlcs().len()];
+            let spent = vec![false; trusted_tx.nondust_htlcs().len()];
             let (tx_r, _htlc_txs_r, _revocable_script_r, _uck_r, _revocation_pubkey_r) =
                 chan.sign_holder_commitment_tx_for_recovery(&spent, None)?;
             assert_eq!(tx_r.compute_txid(), tx.transaction.compute_txid());

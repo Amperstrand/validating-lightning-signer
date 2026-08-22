@@ -5,6 +5,8 @@ pub mod my_keys_manager;
 pub mod multi_signer;
 /// Derivation styles
 pub mod derive;
+/// A VLS-owned channel signer (replaces LDK's `InMemorySigner` internally)
+pub mod vls_channel_signer;
 
 #[cfg(feature = "std")]
 use alloc::sync::Arc;

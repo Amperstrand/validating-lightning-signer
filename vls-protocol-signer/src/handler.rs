@@ -644,6 +644,8 @@ impl InitHandler {
                 let bip32 = self.node.get_account_extended_pubkey().encode();
                 let node_id = self.node.get_id().serialize();
                 let bolt12_pubkey = self.node.get_bolt12_pubkey().serialize();
+                let peer_storage_key = self.node.get_peer_storage_key_bytes();
+                let inbound_payment_key = self.node.get_inbound_payment_key_bytes();
                 #[cfg(feature = "developer")]
                 {
                     let allowlist: Vec<_> = m
@@ -665,6 +667,8 @@ impl InitHandler {
                         node_id: PubKey(node_id),
                         bip32: ExtKey(bip32),
                         bolt12: PubKey(bolt12_pubkey),
+                        peer_storage_key: Secret(peer_storage_key),
+                        inbound_payment_key: Secret(inbound_payment_key),
                     })),
                 ))
             }
@@ -1040,9 +1044,10 @@ impl Handler for RootHandler {
 
                 let channel_id = Self::channel_id(&m.peer_id, m.dbid);
                 self.sign_withdrawal(&mut streamed, utxos)?;
-                let anchor_redeemscript = self
-                    .node
-                    .with_channel(&channel_id, |channel| Ok(channel.get_anchor_redeemscript()))?;
+                let anchor_redeemscript: ScriptBuf =
+                    self.node.with_channel(&channel_id, |channel| {
+                        Ok(channel.get_keyed_anchor_redeemscript())
+                    })?;
                 let anchor_scriptpubkey = anchor_redeemscript.to_p2wsh();
 
                 let mut psbt = streamed.psbt().clone();

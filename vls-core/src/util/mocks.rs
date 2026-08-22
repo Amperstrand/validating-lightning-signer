@@ -8,6 +8,7 @@ use crate::policy::validator::{
 };
 use crate::policy::Policy;
 use crate::prelude::{Arc, Mutex};
+use crate::signer::vls_channel_signer::VlsChannelSigner;
 use crate::tx::tx::{CommitmentInfo, CommitmentInfo2};
 use crate::wallet::Wallet;
 use bitcoin::bip32::DerivationPath;
@@ -17,7 +18,6 @@ use bitcoin::secp256k1::{PublicKey, SecretKey};
 use bitcoin::sighash::{EcdsaSighashType, SegwitV0Sighash};
 use bitcoin::{BlockHash, Network, OutPoint, ScriptBuf, Transaction};
 use lightning::ln::chan_utils::{ClosingTransaction, HTLCOutputInCommitment, TxCreationKeys};
-use lightning::sign::InMemorySigner;
 use txoo::proof::TxoProof;
 
 #[derive(Clone)]
@@ -93,7 +93,7 @@ impl Validator for MockValidator {
 
     fn decode_commitment_tx(
         &self,
-        keys: &InMemorySigner,
+        keys: &VlsChannelSigner,
         setup: &ChannelSetup,
         is_counterparty: bool,
         tx: &Transaction,

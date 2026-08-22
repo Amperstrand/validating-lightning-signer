@@ -346,7 +346,10 @@ def run(disaster_recovery_block_explorer, existing_bitcoin_rpc):
         print(f'Alice initial balance {alice.ChannelList(Void()).channels[0].outbound_msat}')
         print(PAYMENT_MSAT * CHANNEL_BALANCE_SYNC_INTERVAL)
 
-        time.sleep(5)
+        # Mine an additional block and wait for gossip propagation
+        # so Alice's network graph has the Bob->Charlie channel
+        btc.mine(1)
+        time.sleep(10)
         print("at height", btc.getblockchaininfo()['blocks'])
 
         for i in range(1, NUM_PAYMENTS + 1):

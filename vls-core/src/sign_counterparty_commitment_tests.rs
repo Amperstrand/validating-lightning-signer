@@ -8,13 +8,12 @@ mod tests {
     use bitcoin::transaction::Version;
     use bitcoin::{CompressedPublicKey, Network, Sequence};
     use lightning::ln::chan_utils::{
-        get_to_countersignatory_with_anchors_redeemscript, make_funding_redeemscript,
+        get_to_countersigner_keyed_anchor_redeemscript, make_funding_redeemscript,
         BuiltCommitmentTransaction, DirectedChannelTransactionParameters, TxCreationKeys,
     };
     use lightning::ln::channel_keys::DelayedPaymentKey;
     use lightning::ln::channel_keys::HtlcKey;
     use lightning::ln::channel_keys::RevocationKey;
-    use lightning::sign::ChannelSigner;
     use lightning::types::payment::PaymentHash;
     use std::sync::Arc;
     use test_log::test;
@@ -87,7 +86,7 @@ mod tests {
                     to_broadcaster,
                     &mut htlcs,
                     &parameters,
-                    &chan.keys.pubkeys().funding_pubkey,
+                    &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
                     &chan.setup.counterparty_points.funding_pubkey,
                 )
                 .expect("scripts");
@@ -174,7 +173,7 @@ mod tests {
                     to_countersignatory_value_sat,
                     &mut htlcs,
                     &parameters,
-                    &chan.keys.pubkeys().funding_pubkey,
+                    &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
                     &chan.setup.counterparty_points.funding_pubkey,
                 )
                 .expect("scripts");
@@ -377,15 +376,15 @@ mod tests {
                 to_countersignatory,
                 &htlcs,
                 &parameters,
-                &chan.keys.pubkeys().funding_pubkey,
+                &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
                 &chan.setup.counterparty_points.funding_pubkey,
             )
             .expect("scripts");
-            let mut output_witscripts =
+            let mut output_witscripts: Vec<Vec<u8>> =
                 redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
 
             let commitment_tx = chan.make_counterparty_commitment_tx_with_keys(
-                keys,
+                &remote_percommitment_point,
                 commit_num,
                 feerate_per_kw,
                 to_countersignatory,
@@ -396,6 +395,20 @@ mod tests {
             // rebuild to get the scripts
             let trusted_tx = commitment_tx.trust();
             let mut tx = trusted_tx.built_transaction().clone();
+
+            // LDK 0.2's CommitmentTransaction::new derives keys internally from
+            // remote_percommitment_point, so any mutation done by `keysmut` only
+            // affects `output_witscripts` here. Propagate those mutations to the
+            // p2wsh output script_pubkeys so the tx and witscripts stay
+            // consistent (decode_commitment_tx requires this), making mutated
+            // keys reach the recompose check at the policy layer rather than
+            // being rejected at decode.
+            for (idx, out) in tx.transaction.output.iter_mut().enumerate() {
+                if out.script_pubkey.is_p2wsh() && !output_witscripts[idx].is_empty() {
+                    let witscript = bitcoin::ScriptBuf::from_bytes(output_witscripts[idx].clone());
+                    out.script_pubkey = witscript.to_p2wsh();
+                }
+            }
 
             let mut cstate = make_test_chain_state();
 
@@ -760,7 +773,7 @@ mod tests {
         |tms| {
             if tms.opt_anchors {
                 let redeem_script =
-                    get_to_countersignatory_with_anchors_redeemscript(&make_test_pubkey(42));
+                    get_to_countersigner_keyed_anchor_redeemscript(&make_test_pubkey(42));
                 tms.tx.transaction.output[5].script_pubkey = redeem_script.to_p2wsh();
                 tms.witscripts[5] = redeem_script.as_bytes().to_vec();
             } else {
@@ -868,6 +881,7 @@ mod tests {
                 to_countersignatory,
                 &parameters,
                 keys.clone(),
+                &remote_percommitment_point,
             );
 
             let mut cstate = make_test_chain_state();
@@ -924,6 +938,7 @@ mod tests {
                 to_countersignatory,
                 &parameters,
                 keys,
+                &remote_percommitment_point,
             );
 
             // Sign it again (retry).
@@ -964,6 +979,7 @@ mod tests {
         to_countersignatory: u64,
         parameters: &DirectedChannelTransactionParameters,
         keys: TxCreationKeys,
+        per_commitment_point: &PublicKey,
     ) -> (Vec<Vec<u8>>, BuiltCommitmentTransaction) {
         let htlcs = Channel::htlcs_info2_to_oic(&offered_htlcs, &received_htlcs);
         let redeem_scripts = build_tx_scripts(
@@ -972,14 +988,14 @@ mod tests {
             to_broadcaster,
             &htlcs,
             &parameters,
-            &chan.keys.pubkeys().funding_pubkey,
+            &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
             &chan.setup.counterparty_points.funding_pubkey,
         )
         .expect("scripts");
         let output_witscripts = redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
 
         let commitment_tx = chan.make_counterparty_commitment_tx_with_keys(
-            keys,
+            per_commitment_point,
             commit_num,
             feerate_per_kw,
             to_broadcaster,

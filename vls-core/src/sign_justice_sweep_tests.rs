@@ -63,8 +63,7 @@ mod tests {
             sign_commitment_tx_with_mutators_setup(CommitmentType::StaticRemoteKey);
 
         let node_ctx = TestNodeContext { node, secp_ctx: Secp256k1::signing_only() };
-        let counterparty_keys =
-            make_test_counterparty_keys(&node_ctx, &channel_id, setup.channel_value_sat);
+        let counterparty_keys = make_test_counterparty_keys(&node_ctx, &channel_id);
         let chan_ctx = TestChannelContext { channel_id, setup: setup.clone(), counterparty_keys };
 
         let (sig, tx, revocation_secret, input, redeemscript, amount_sat) =
@@ -80,10 +79,9 @@ mod tests {
                 chan.set_next_holder_commit_num_for_testing(commit_num + 2);
 
                 let remote_per_commitment_point = make_test_pubkey(10);
-                let keys = chan.make_counterparty_tx_keys(&remote_per_commitment_point);
                 let htlcs = Channel::htlcs_info2_to_oic(&offered_htlcs, &received_htlcs);
                 let commitment_tx = chan.make_counterparty_commitment_tx_with_keys(
-                    keys.clone(),
+                    &remote_per_commitment_point,
                     commit_num,
                     feerate_per_kw,
                     to_countersignatory,

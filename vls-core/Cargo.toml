@@ -108,21 +108,21 @@ shuttle = "0.7.1"
 [dependencies.lightning]
 #git = "https://github.com/lightning-signer/rust-lightning"
 #rev = ""
-version = "0.1.1"
+version = "0.2.4"
 default-features = false
 features = ["grind_signatures", "unsafe_revoked_tx_signing"]
 
 [dev-dependencies.lightning]
 #git = "https://github.com/lightning-signer/rust-lightning"
 #rev = ""
-version = "0.1.1"
+version = "0.2.4"
 default-features = false
 features = ["grind_signatures", "_test_utils", "unsafe_revoked_tx_signing"]
 
 [dependencies.lightning-invoice]
 #git = "https://github.com/lightning-signer/rust-lightning"
 #rev = ""
-version = "0.33.1"
+version = "0.34.1"
 default-features = false
 
 [dependencies.bitcoin]

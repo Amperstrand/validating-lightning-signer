@@ -52,6 +52,9 @@ impl Into<UserConfig> for ConfigCoinChannel {
             manually_accept_inbound_channels: false,
             accept_intercept_htlcs: false,
             manually_handle_bolt12_invoices: false,
+            enable_htlc_hold: false,
+            hold_outbound_htlcs_at_next_hop: false,
+            reject_inbound_splices: true,
         }
     }
 }
@@ -78,6 +81,7 @@ impl Into<ChannelHandshakeConfig> for ConfigProposeCoinChannel {
             their_channel_reserve_proportional_millionths: 0,
             negotiate_anchors_zero_fee_htlc_tx: true,
             our_max_accepted_htlcs: 100,
+            negotiate_anchor_zero_fee_commitments: false,
         }
     }
 }

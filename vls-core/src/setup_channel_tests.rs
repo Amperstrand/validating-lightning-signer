@@ -45,7 +45,7 @@ mod tests {
         let (node, channel_id) =
             init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
         node.with_channel(&channel_id, |c| {
-            let params = c.keys.get_channel_parameters().unwrap();
+            let params = c.make_channel_parameters();
             assert!(params.is_outbound_from_holder);
             assert_eq!(params.holder_selected_contest_delay, 6);
             Ok(())
@@ -146,10 +146,17 @@ mod tests {
             let result = base.get_per_commitment_point(1);
             assert!(result.is_ok());
 
-            // get_per_commitment_point should not work beyond the second
+            // get_per_commitment_point for the third commitment should also work — LDK 0.2
+            // eagerly fetches commitment point N+1 during funding_created/funding_signed
+            // handling (see HolderCommitmentPoint::advance), which fires while we're still
+            // in stub state.
+            let result = base.get_per_commitment_point(2);
+            assert!(result.is_ok());
+
+            // get_per_commitment_point should not work beyond the third
             assert_failed_precondition_err!(
-                base.get_per_commitment_point(2),
-                "policy failure: channel stub can only return point for commitment number zero or one"
+                base.get_per_commitment_point(3),
+                "policy failure: channel stub can only return point for commitment number zero, one, or two"
             );
 
             // get_per_commitment_secret never works for a stub.

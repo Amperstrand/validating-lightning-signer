@@ -26,15 +26,15 @@ use lightning::chain::BestBlock;
 use lightning::chain::ChannelMonitorUpdateStatus;
 use lightning::chain::Watch;
 use lightning::events::{Event, EventHandler};
-use lightning::ln::bolt11_payment;
 use lightning::ln::channelmanager::{ChainParameters, ChannelManagerReadArgs};
 use lightning::ln::channelmanager::{PaymentId, RecipientOnionFields, Retry};
 use lightning::ln::peer_handler::MessageHandler;
 use lightning::routing::gossip::P2PGossipSync;
 use lightning::routing::router::DefaultRouter;
-use lightning::routing::router::{PaymentParameters, RouteParameters};
+use lightning::routing::router::{PaymentParameters, RouteParameters, RouteParametersConfig};
 use lightning::routing::scoring::ProbabilisticScoringFeeParameters;
 use lightning::routing::scoring::{ProbabilisticScorer, ProbabilisticScoringDecayParameters};
+use lightning::sign::NodeSigner;
 use lightning::types::payment::{PaymentHash, PaymentPreimage};
 use lightning::util::ser::ReadableArgs;
 use lightning_background_processor::{BackgroundProcessor, GossipSync as LdkGossipSync};
@@ -239,6 +239,8 @@ async fn build_with_signer(
     // Step 4: Initialize Persist
     let persister = Arc::new(FilesystemStore::new(ldk_data_dir.clone().into()));
 
+    let entropy_source = Arc::new(MyEntropySource::new());
+
     // Step 5: Initialize the ChainMonitor
     let chain_monitor: Arc<ArcChainMonitor> = Arc::new(ChainMonitor::new(
         None,
@@ -246,9 +248,9 @@ async fn build_with_signer(
         logadapter.clone(),
         fee_estimator.clone(),
         persister.clone(),
+        entropy_source.clone(),
+        keys_manager.get_peer_storage_key(),
     ));
-
-    let entropy_source = Arc::new(MyEntropySource::new());
 
     // Step 7: Read ChannelMonitor state from disk
     let monitors_path = format!("{}/monitors", ldk_data_dir.clone());
@@ -381,8 +383,8 @@ async fn build_with_signer(
     // Step 11: Give ChannelMonitors to ChainMonitor
     for item in chain_listener_channel_monitors.drain(..) {
         let channel_monitor = item.1 .0;
-        let funding_outpoint = item.2;
-        let status = chain_monitor.watch_channel(funding_outpoint, channel_monitor);
+        let channel_id = channel_monitor.channel_id();
+        let status = chain_monitor.watch_channel(channel_id, channel_monitor);
         match status {
             Ok(status) => assert_ne!(status, ChannelMonitorUpdateStatus::UnrecoverableError),
             Err(e) => error!("Error watching channel: {:?}", e),
@@ -403,6 +405,7 @@ async fn build_with_signer(
         route_handler: network_gossip.clone(),
         onion_message_handler: Arc::new(IgnoringMessageHandler {}),
         custom_message_handler: IgnoringMessageHandler {},
+        send_only_message_handler: chain_monitor.clone(),
     };
     let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as u32;
     let peer_manager: Arc<PeerManager> = Arc::new(PeerManager::new(
@@ -497,6 +500,20 @@ async fn build_with_signer(
         no_om,
         GossipSync::P2P(network_gossip.clone()),
         peer_manager.clone(),
+        lightning_background_processor::NO_LIQUIDITY_MANAGER_SYNC,
+        None::<
+            Arc<
+                lightning::util::sweep::OutputSweeperSync<
+                    Arc<BitcoindClient>,
+                    Arc<dyn lightning::sign::ChangeDestinationSourceSync + Send + Sync>,
+                    Arc<BitcoindClient>,
+                    Arc<dyn crate::SyncFilter>,
+                    Arc<FilesystemStore>,
+                    Arc<LoggerAdapter>,
+                    Arc<dyn lightning::sign::OutputSpender + Send + Sync>,
+                >,
+            >,
+        >,
         logadapter.clone(),
         Some(scorer),
     );
@@ -622,17 +639,16 @@ impl Node {
     }
 
     pub fn send_payment(&self, invoice: Bolt11Invoice) -> Result<(), String> {
-        let (payment_hash, recipient_onion, route_params) =
-            bolt11_payment::payment_parameters_from_invoice(&invoice)
-                .expect("invoice should be valid");
-        let status = match self.channel_manager.send_payment(
-            payment_hash,
-            recipient_onion,
-            PaymentId(payment_hash.clone().0),
-            route_params,
+        let payment_hash = PaymentHash(invoice.payment_hash().to_byte_array());
+        let payment_id = PaymentId(payment_hash.0);
+        let status = match self.channel_manager.pay_for_bolt11_invoice(
+            &invoice,
+            payment_id,
+            None,
+            RouteParametersConfig::default(),
             Retry::Timeout(Duration::from_secs(1)),
         ) {
-            Ok(_payment_id) => {
+            Ok(()) => {
                 let payee_pubkey = invoice.recover_payee_pub_key();
                 let amt_msat = invoice.amount_milli_satoshis().unwrap();
                 info!("EVENT: initiated sending {} msats to {}", amt_msat, payee_pubkey);
@@ -643,7 +659,6 @@ impl Node {
                 HTLCStatus::Failed
             }
         };
-        let payment_hash = PaymentHash(invoice.payment_hash().to_byte_array());
         let mut payments = self.outbound_payments.lock().unwrap();
         let payment = PaymentInfo {
             preimage: None,

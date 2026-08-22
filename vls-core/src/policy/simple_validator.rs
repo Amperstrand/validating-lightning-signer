@@ -1,3 +1,4 @@
+use crate::signer::vls_channel_signer::VlsChannelSigner;
 use bitcoin::absolute::{Height, Time};
 use bitcoin::bip32::DerivationPath;
 use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
@@ -8,7 +9,6 @@ use lightning::ln::chan_utils::{
     build_htlc_transaction, htlc_success_tx_weight, htlc_timeout_tx_weight,
     make_funding_redeemscript, ClosingTransaction, HTLCOutputInCommitment, TxCreationKeys,
 };
-use lightning::sign::{ChannelSigner, InMemorySigner};
 use lightning::types::payment::PaymentHash;
 use log::*;
 use serde::Deserialize;
@@ -33,8 +33,7 @@ use crate::tx::tx::{
     CommitmentInfo, CommitmentInfo2,
 };
 use crate::util::debug_utils::{
-    script_debug, DebugHTLCOutputInCommitment, DebugInMemorySigner, DebugTxCreationKeys,
-    DebugVecVecU8,
+    script_debug, DebugHTLCOutputInCommitment, DebugTxCreationKeys, DebugVecVecU8,
 };
 use crate::util::transaction_utils::{
     estimate_feerate_per_kw, estimated_sweep_tx_weight, expected_commitment_tx_weight,
@@ -600,7 +599,7 @@ impl Validator for SimpleValidator {
                         }
 
                         let funding_redeemscript = make_funding_redeemscript(
-                            &chan.keys.pubkeys().funding_pubkey,
+                            &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
                             &chan.counterparty_pubkeys().funding_pubkey,
                         );
                         let address = Address::p2wsh(&funding_redeemscript, wallet.network());
@@ -689,14 +688,14 @@ impl Validator for SimpleValidator {
     /// panics if `keys` doesn't have counterparty keys populated
     fn decode_commitment_tx(
         &self,
-        keys: &InMemorySigner,
+        keys: &VlsChannelSigner,
         setup: &ChannelSetup,
         is_counterparty: bool,
         tx: &bitcoin::Transaction,
         output_witscripts: &[Vec<u8>],
     ) -> Result<CommitmentInfo, ValidationError> {
         let mut debug_on_return = scoped_debug_return!(
-            DebugInMemorySigner(keys),
+            keys,
             setup,
             is_counterparty,
             tx,

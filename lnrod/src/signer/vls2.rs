@@ -8,7 +8,6 @@ use bitcoin::secp256k1::{
     ecdh::SharedSecret, ecdsa::RecoverableSignature, All, PublicKey, Scalar, Secp256k1,
 };
 use bitcoin::{Address, Network, Transaction, TxOut};
-use lightning::ln::msgs::DecodeError;
 use lightning::ln::msgs::UnsignedGossipMessage;
 use lightning::ln::script::ShutdownScript;
 use lightning::sign::{EntropySource, NodeSigner, SignerProvider};
@@ -150,27 +149,13 @@ struct KeysManager {
 impl SignerProvider for KeysManager {
     type EcdsaSigner = DynSigner;
 
-    fn generate_channel_keys_id(
-        &self,
-        inbound: bool,
-        channel_value_satoshis: u64,
-        user_channel_id: u128,
-    ) -> [u8; 32] {
-        self.client.generate_channel_keys_id(inbound, channel_value_satoshis, user_channel_id)
+    fn generate_channel_keys_id(&self, inbound: bool, user_channel_id: u128) -> [u8; 32] {
+        self.client.generate_channel_keys_id(inbound, user_channel_id)
     }
 
-    fn derive_channel_signer(
-        &self,
-        channel_value_satoshis: u64,
-        channel_keys_id: [u8; 32],
-    ) -> Self::EcdsaSigner {
-        let client = self.client.derive_channel_signer(channel_value_satoshis, channel_keys_id);
+    fn derive_channel_signer(&self, channel_keys_id: [u8; 32]) -> Self::EcdsaSigner {
+        let client = self.client.derive_channel_signer(channel_keys_id);
         DynSigner::new(client)
-    }
-
-    fn read_chan_signer(&self, reader: &[u8]) -> Result<Self::EcdsaSigner, DecodeError> {
-        let signer = self.client.read_chan_signer(reader)?;
-        Ok(DynSigner::new(signer))
     }
 
     fn get_destination_script(&self, channel_keys_id: [u8; 32]) -> Result<bitcoin::ScriptBuf, ()> {
@@ -189,8 +174,16 @@ impl EntropySource for KeysManager {
 }
 
 impl NodeSigner for KeysManager {
-    fn get_inbound_payment_key(&self) -> ExpandedKey {
-        self.client.get_inbound_payment_key()
+    fn get_expanded_key(&self) -> ExpandedKey {
+        self.client.get_expanded_key()
+    }
+
+    fn get_peer_storage_key(&self) -> lightning::sign::PeerStorageKey {
+        self.client.get_peer_storage_key()
+    }
+
+    fn get_receive_auth_key(&self) -> lightning::sign::ReceiveAuthKey {
+        self.client.get_receive_auth_key()
     }
 
     fn get_node_id(&self, recipient: Recipient) -> Result<PublicKey, ()> {
@@ -224,6 +217,10 @@ impl NodeSigner for KeysManager {
     ) -> Result<bitcoin::secp256k1::schnorr::Signature, ()> {
         self.client.sign_bolt12_invoice(invoice)
     }
+
+    fn sign_message(&self, msg: &[u8]) -> Result<String, ()> {
+        self.client.sign_message(msg)
+    }
 }
 
 impl SpendableKeysInterface for KeysManager {
@@ -255,6 +252,38 @@ impl SpendableKeysInterface for KeysManager {
     }
 }
 
+/// Load the LDK 0.2 `ReceiveAuthKey` from `{ldk_data_dir}/receive_auth_key`,
+/// or generate a fresh one and persist it on first run.
+///
+/// VLS does not provide this key over the wire. LDK only requires it to be
+/// "consistent across invocations" (used as MAC associated data on incoming
+/// blinded paths), so any local persistence is sufficient. Compromise lets an
+/// attacker forge `MessageContext` on incoming blinded paths but does not
+/// unlock funds; loss invalidates previously-advertised blinded paths.
+fn load_or_generate_receive_auth_key(ldk_data_dir: &str) -> lightning::sign::ReceiveAuthKey {
+    use bitcoin::secp256k1::rand::{rngs::OsRng, RngCore};
+    let path = format!("{}/receive_auth_key", ldk_data_dir);
+    let bytes: [u8; 32] = match fs::read_to_string(&path) {
+        Ok(hex_str) => hex::decode(hex_str.trim())
+            .expect("hex-decode receive_auth_key")
+            .try_into()
+            .expect("receive_auth_key must be 32 bytes"),
+        // Only generate on first run. Treating other errors (permissions, I/O) as "missing"
+        // would overwrite an existing key and invalidate advertised blinded paths.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let mut bytes = [0u8; 32];
+            OsRng.fill_bytes(&mut bytes);
+            // Write to a temp file and rename so an interrupted write can't leave a corrupt key.
+            let tmp = format!("{}.tmp", path);
+            fs::write(&tmp, hex::encode(bytes)).expect("write receive_auth_key");
+            fs::rename(&tmp, &path).expect("persist receive_auth_key");
+            bytes
+        }
+        Err(e) => panic!("read receive_auth_key at {}: {}", path, e),
+    };
+    lightning::sign::ReceiveAuthKey(bytes)
+}
+
 pub(crate) async fn make_null_signer(
     shutter: Shutter,
     network: Network,
@@ -267,6 +296,7 @@ pub(crate) async fn make_null_signer(
     if let Ok(_node_id_hex) = fs::read_to_string(node_id_path.clone()) {
         unimplemented!("read from disk {}", node_id_path);
     } else {
+        let receive_auth_key = load_or_generate_receive_auth_key(&ldk_data_dir);
         let transport = Arc::new(NullTransport::new(sweep_address.clone()));
 
         let signer_port = Arc::new(TransportSignerPort { transport: transport.clone() });
@@ -280,7 +310,8 @@ pub(crate) async fn make_null_signer(
         frontend.start();
 
         let node_id = transport.handler.node().get_id();
-        let client = KeysManagerClient::new(transport, network.to_string(), None, None);
+        let client =
+            KeysManagerClient::new(transport, network.to_string(), None, None, receive_auth_key);
         let keys_manager = KeysManager { client, sweep_address };
         fs::write(node_id_path, node_id.to_string()).expect("write node_id");
         Box::new(keys_manager)
@@ -371,6 +402,7 @@ pub(crate) async fn make_grpc_signer(
             .expect("gRPC transport init"),
     );
 
+    let receive_auth_key = load_or_generate_receive_auth_key(&ldk_data_dir);
     let source_factory = Arc::new(DummySourceFactory::new(ldk_data_dir, network));
     let signer_port = Arc::new(TransportSignerPort { transport: transport.clone() });
     let frontend = Frontend::new(
@@ -386,6 +418,7 @@ pub(crate) async fn make_grpc_signer(
         network.to_string(),
         Some(KeyDerivationStyle::Ldk),
         Some(dev_allowlist),
+        receive_auth_key,
     );
     // NOTE: for now the frontend must be started after the client is created
     // as the TranportSignerPort is always set to ready

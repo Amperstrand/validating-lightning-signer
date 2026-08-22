@@ -98,16 +98,19 @@ impl Admin for AdminHandler {
         info!("ENTER channel_list");
         let mut channels = Vec::new();
         for details in self.node.channel_manager.list_channels() {
-            let monitor_balance: Option<u64> = if let Some(funding_txo) = details.funding_txo {
-                let monitor_opt = self.node.chain_monitor.get_monitor(funding_txo);
+            let monitor_balance: Option<u64> = if details.funding_txo.is_some() {
+                let monitor_opt = self.node.chain_monitor.get_monitor(details.channel_id);
                 if let Ok(monitor) = monitor_opt {
                     let balances = monitor.get_claimable_balances();
                     Some(
                         balances
                             .into_iter()
                             .map(|b| match b {
-                                Balance::ClaimableOnChannelClose { amount_satoshis, .. } =>
-                                    amount_satoshis,
+                                Balance::ClaimableOnChannelClose { balance_candidates, .. } =>
+                                    balance_candidates
+                                        .iter()
+                                        .map(|c| c.amount_satoshis)
+                                        .sum::<u64>(),
                                 Balance::ClaimableAwaitingConfirmations {
                                     amount_satoshis, ..
                                 } => amount_satoshis,

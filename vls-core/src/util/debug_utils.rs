@@ -138,9 +138,8 @@ pub struct DebugInMemorySigner<'a>(pub &'a InMemorySigner);
 impl<'a> core::fmt::Debug for DebugInMemorySigner<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> Result<(), core::fmt::Error> {
         f.debug_struct("InMemorySigner")
-            .field("funding_key", &self.0.funding_key)
+            .field("funding_key", &self.0.funding_key(None))
             .field("revocation_base_key", &self.0.revocation_base_key)
-            .field("payment_key", &self.0.payment_key)
             .field("delayed_payment_base_key", &self.0.delayed_payment_base_key)
             .field("htlc_base_key", &self.0.htlc_base_key)
             .field("commitment_seed", &DebugBytes(&self.0.commitment_seed))
@@ -167,8 +166,8 @@ impl<'a> core::fmt::Debug for DebugCommitmentTransaction<'a> {
             .field("commitment_number", &self.0.commitment_number())
             .field("to_broadcaster_value_sat", &self.0.to_broadcaster_value_sat())
             .field("to_countersignatory_value_sat", &self.0.to_countersignatory_value_sat())
-            .field("feerate_per_kw", &self.0.feerate_per_kw())
-            .field("htlcs", &DebugVecHTLCOutputInCommitment(&self.0.htlcs()))
+            .field("feerate_per_kw", &self.0.negotiated_feerate_per_kw())
+            .field("htlcs", &DebugVecHTLCOutputInCommitment(&self.0.nondust_htlcs()))
             .field("keys", &DebugTxCreationKeys(&self.0.trust().keys()))
             .field("built", &DebugBuiltCommitmentTransaction(&self.0.trust().built_transaction()))
             .finish()

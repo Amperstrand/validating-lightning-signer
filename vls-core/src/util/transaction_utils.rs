@@ -11,7 +11,7 @@ use bitcoin::{Amount, CompressedPublicKey, ScriptBuf, Sequence, TxIn, Witness, W
 use bitcoin::{Transaction, TxOut, VarInt};
 use lightning::ln::chan_utils::{
     get_commitment_transaction_number_obscure_factor, get_revokeable_redeemscript,
-    get_to_countersignatory_with_anchors_redeemscript, make_funding_redeemscript,
+    get_to_countersigner_keyed_anchor_redeemscript, make_funding_redeemscript,
     ChannelTransactionParameters, TxCreationKeys,
 };
 use lightning::sign::{
@@ -182,7 +182,7 @@ pub fn decode_commitment_tx(
     let cp_pubkeys = &cp_params.pubkeys;
 
     let holder_non_delayed_script = if opt_anchors {
-        get_to_countersignatory_with_anchors_redeemscript(&holder_pubkeys.payment_point).to_p2wsh()
+        get_to_countersigner_keyed_anchor_redeemscript(&holder_pubkeys.payment_point).to_p2wsh()
     } else {
         let bitcoin_key =
             CompressedPublicKey::from_slice(&holder_pubkeys.payment_point.serialize()).unwrap();
@@ -409,14 +409,11 @@ mod tests {
 
         let (holder_commitment, per_commitment_point) = node
             .with_channel(&channel_id, |channel| {
-                let per_commitment_point =
-                    channel.get_per_commitment_point(commitment_number).unwrap();
-                let keys = channel.make_holder_tx_keys(&per_commitment_point);
                 let per_commitment_point = channel.get_per_commitment_point(commitment_number)?;
                 Ok((
                     channel.make_holder_commitment_tx(
                         commitment_number,
-                        &keys,
+                        &per_commitment_point,
                         123,
                         1000,
                         100,
