@@ -20,6 +20,7 @@ use lightning_signer::bitcoin::blockdata::constants::ChainHash;
 use lightning_signer::bitcoin::Network;
 use lightning_signer::{bitcoin, lightning};
 use serde_json::{json, Value};
+use tokio::runtime::Handle;
 use tokio::sync::Mutex;
 
 use crate::convert::{BlockchainInfo, FundedTx, RawTx, SignedTx};
@@ -37,6 +38,11 @@ pub struct BitcoindClient {
     fees: Arc<HashMap<ConfirmationTarget, AtomicU32>>,
     queued_transactions: Arc<Mutex<Vec<Transaction>>>,
     latest_tip: Arc<Mutex<BlockHash>>,
+    // Runtime to spawn broadcasts on. BroadcasterInterface is sync and LDK calls
+    // it from whatever thread drives the event - including the background
+    // processor, which is a plain std::thread with no ambient runtime - so a
+    // bare tokio::spawn there panics with "there is no reactor running".
+    handle: Handle,
 }
 
 #[derive(Debug)]
@@ -97,6 +103,8 @@ impl BitcoindClient {
             fees: Arc::new(fees),
             queued_transactions: Arc::new(Mutex::new(Vec::new())),
             latest_tip: Arc::new(Mutex::new(BlockHash::all_zeros())),
+            // new() is async, so we are inside the runtime here
+            handle: Handle::current(),
         };
         // Fast fail if any connectivity issue
         client.get_blockchain_info().await;
@@ -196,7 +204,7 @@ impl BroadcasterInterface for BitcoindClient {
             let rpc = Arc::clone(&self.rpc);
             let queue = Arc::clone(&self.queued_transactions);
             let ser = hex::encode(serialize(&tx));
-            tokio::spawn(async move {
+            self.handle.spawn(async move {
                 let result: Result<String, _> = {
                     let rpc = rpc.lock().await;
                     let raw_args = [serde_json::value::to_raw_value(&json![ser]).unwrap()];

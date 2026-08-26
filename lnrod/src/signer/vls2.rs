@@ -330,17 +330,17 @@ impl GrpcTransport {
         Ok(Self { sender, handle })
     }
 
+    /// Make a synchronous call to the async gRPC transport.
+    ///
+    /// Uses block_in_place to allow tokio to spawn additional worker threads
+    /// when blocking occurs, enabling concurrent signer requests.
     fn do_call(
         handle: &Handle,
         sender: Sender<ChannelRequest>,
         message: Vec<u8>,
         client_id: Option<ClientId>,
     ) -> ClientResult<Vec<u8>> {
-        let join = handle.spawn_blocking(move || {
-            Handle::current().block_on(Self::do_call_async(sender, message, client_id)).unwrap()
-        });
-        let result = task::block_in_place(|| handle.block_on(join)).expect("join");
-        Ok(result)
+        task::block_in_place(|| handle.block_on(Self::do_call_async(sender, message, client_id)))
     }
 
     async fn do_call_async(

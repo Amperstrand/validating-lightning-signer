@@ -363,25 +363,19 @@ pub fn start(rpc_port: u16, args: NodeBuildArgs) -> Result<(), Box<dyn std::erro
     .join()
     .expect("runtime join")
     .expect("runtime");
-    // The Lightning p2p protocol runs on this
+    // The Lightning p2p protocol runs on this.
+    // More threads to enable concurrent peer handling and signing requests.
     let p2p_runtime = std::thread::spawn(|| {
-        Builder::new_multi_thread()
-            .enable_all()
-            .thread_name("p2p")
-            .worker_threads(2) // for debugging
-            .build()
+        Builder::new_multi_thread().enable_all().thread_name("p2p").worker_threads(4).build()
     })
     .join()
     .expect("runtime join")
     .expect("runtime");
     let p2p_handle = p2p_runtime.handle().clone();
 
+    // More threads for signer runtime to enable concurrent signing requests.
     let signer_runtime = std::thread::spawn(|| {
-        Builder::new_multi_thread()
-            .enable_all()
-            .thread_name("signer")
-            .worker_threads(2) // for debugging
-            .build()
+        Builder::new_multi_thread().enable_all().thread_name("signer").worker_threads(8).build()
     })
     .join()
     .expect("runtime join")
