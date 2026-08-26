@@ -79,11 +79,11 @@ pub mod prelude {
     pub use alloc::borrow::ToOwned;
     pub use alloc::string::ToString;
 
-    #[cfg(not(all(test, feature = "shuttle")))]
+    #[cfg(not(feature = "shuttle"))]
     pub use alloc::sync::{Arc, Weak};
-    #[cfg(all(test, feature = "shuttle"))]
+    #[cfg(feature = "shuttle")]
     pub use shuttle::sync::{Arc, Mutex, MutexGuard, Weak};
-    #[cfg(all(feature = "std", not(all(test, feature = "shuttle"))))]
+    #[cfg(all(feature = "std", not(feature = "shuttle")))]
     pub use std::sync::{Mutex, MutexGuard};
 
     #[cfg(not(feature = "std"))]

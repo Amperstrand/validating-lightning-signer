@@ -74,6 +74,38 @@ use crate::util::velocity::VelocityControl;
 use crate::wallet::Wallet;
 use vls_common::HexEncode;
 
+// =============================================================================
+// LOCK ORDERING
+// =============================================================================
+//
+// Node has 4 mutex-protected fields. When acquiring multiple locks,
+// always acquire in this order to prevent deadlocks:
+//
+//   1. tracker (ChainTracker)    - chain tip, block monitoring
+//   2. channels (channel map)    - map of channel IDs to slots
+//   3. channel_slot (per-channel) - individual channel data
+//   4. state (NodeState)         - node-wide state, allowlist, payments
+//
+// Only *nested* acquisitions are constrained. Taking a lock, extracting what
+// you need, and releasing it before acquiring the next one is always fine, and
+// is preferred when possible.
+//
+// Methods that acquire multiple locks should reference this comment.
+//
+// State comes last because the signing path demands it: LDK calls into
+// Node::with_channel, which locks a channel_slot and then calls channel
+// methods that take node state (Channel::balance, htlcs_fulfilled, and many
+// more in channel.rs). That slot -> state order is pervasive and cannot be
+// reversed without restructuring most of channel.rs, so everything else
+// conforms to it instead.
+//
+// The corollary is that methods running off the signing path must not hold
+// state while reaching for a channel: channel_balance (admin RPC, heartbeat)
+// and forget_channel both take state only after the slot guard is released.
+// Holding state across a slot lock deadlocks against any concurrent signing
+// operation - see test_channel_balance_vs_signing_ready.
+// =============================================================================
+
 /// Prune invoices expired more than this long ago
 const INVOICE_PRUNE_TIME: Duration = Duration::from_secs(60 * 60 * 24);
 /// Prune keysends expired more than this long ago
@@ -1531,8 +1563,15 @@ impl Node {
     /// but may be useful if switching to a new persister.
     pub fn persist_all(&self) {
         let persister = &self.persister;
-        let state = self.get_state();
-        persister.new_node(&self.get_id(), &self.node_config, &*state).unwrap();
+        // Lock order: state is taken and released on its own, before the channels
+        // and tracker locks, so it is never held across a channel_slot (see LOCK
+        // ORDERING). Both state-derived writes are read from one critical section
+        // so they stay consistent with each other.
+        let wlvec: Vec<String> = {
+            let state = self.get_state();
+            persister.new_node(&self.get_id(), &self.node_config, &*state).unwrap();
+            state.allowlist.iter().map(|a| a.to_string(self.network())).collect()
+        };
         for channel in self.get_channels().values() {
             let channel = channel.lock().unwrap();
             match &*channel {
@@ -1543,7 +1582,6 @@ impl Node {
             }
         }
         persister.update_tracker(&self.get_id(), &self.get_tracker()).unwrap();
-        let wlvec = state.allowlist.iter().map(|a| a.to_string(self.network())).collect();
         self.persister.update_node_allowlist(&self.get_id(), wlvec).unwrap();
     }
 
@@ -1698,6 +1736,8 @@ impl Node {
         channel_id: ChannelId,
         arc_self: &Arc<Node>,
     ) -> Result<(ChannelId, Option<ChannelSlot>), Status> {
+        // Lock order: tracker -> channels (see LOCK ORDERING)
+        let blockheight = arc_self.get_tracker().height();
         let mut channels = self.get_channels();
         let policy = self.policy();
         if channels.len() >= policy.max_channels() {
@@ -1720,7 +1760,6 @@ impl Node {
         let (keys, payment_key) =
             self.keys_manager.get_channel_keys_with_id(channel_id.clone(), channel_value_sat);
 
-        let blockheight = arc_self.get_tracker().height();
         let stub = ChannelStub {
             node: Arc::downgrade(arc_self),
             secp_ctx: Secp256k1::new(),
@@ -1798,14 +1837,19 @@ impl Node {
         if self.persister.on_initial_restore() {
             // write everything to persister, to ensure that any composite
             // persister has all sub-persisters in sync
-            let state = self.get_state();
-            // do a new_node here, because update_node doesn't store the entry,
-            // only the state
-            self.persister
-                .new_node(&self.get_id(), &self.node_config, &*state)
-                .map_err(|_| internal_error("sync persist failed"))?;
+            //
+            // Lock order: state is released before the tracker and channels locks,
+            // so it is never held across a channel_slot (see LOCK ORDERING).
+            let wlvec: Vec<String> = {
+                let state = self.get_state();
+                // do a new_node here, because update_node doesn't store the entry,
+                // only the state
+                self.persister
+                    .new_node(&self.get_id(), &self.node_config, &*state)
+                    .map_err(|_| internal_error("sync persist failed"))?;
 
-            let wlvec = state.allowlist.iter().map(|a| a.to_string(self.network())).collect();
+                state.allowlist.iter().map(|a| a.to_string(self.network())).collect()
+            };
             self.persister
                 .update_node_allowlist(&self.get_id(), wlvec)
                 .map_err(|_| internal_error("sync persist failed"))?;
@@ -1876,6 +1920,7 @@ impl Node {
         setup: ChannelSetup,
         holder_shutdown_key_path: &DerivationPath,
     ) -> Result<Channel, Status> {
+        // Lock order: tracker -> channels -> channel_slot (see LOCK ORDERING)
         let mut tracker = self.get_tracker();
         let validator = self.validator_factory().make_validator(
             self.network(),
@@ -1984,9 +2029,12 @@ impl Node {
         Ok(chan)
     }
 
-    /// Get a signed heartbeat message
+    /// Get a signed heartbeat message.
     /// The heartbeat is signed with the account master key.
     pub fn get_heartbeat(&self) -> SignedHeartbeat {
+        // Lock order: state (released), then channels -> slot -> state via
+        // channel_balance, then tracker -> channels (see LOCK ORDERING). Nothing
+        // is nested across those steps, so no state/slot cycle can form here.
         // we get asked for a heartbeat on a regular basis, so use this
         // opportunity to prune invoices
         let mut state = self.get_state();
@@ -2002,12 +2050,14 @@ impl Node {
         }
         drop(state); // minimize lock time
 
+        // channel_balance() takes channels -> slot -> state; call it before
+        // acquiring the tracker so the tracker is not held across it.
+        info!("current channel balance: {:?}", self.channel_balance());
+
         let mut tracker = self.get_tracker();
 
         // pruned channels are persisted inside
         self.prune_channels(&mut tracker);
-
-        info!("current channel balance: {:?}", self.channel_balance());
 
         let tip = tracker.tip();
         let current_timestamp = self.clock.now().as_secs() as u32;
@@ -2061,20 +2111,23 @@ impl Node {
         prev_outs: &[TxOut],
         uniclosekeys: Vec<Option<(SecretKey, Vec<Vec<u8>>)>>,
     ) -> Result<Vec<Vec<Vec<u8>>>, Status> {
-        let channels_lock = self.get_channels();
-
         // Funding transactions cannot be associated with just a single channel;
         // a single transaction may fund multiple channels
 
         let txid = tx.compute_txid();
         debug!("{}: txid: {}", short_function!(), txid);
 
-        let channels: Vec<Option<Arc<Mutex<ChannelSlot>>>> = (0..tx.output.len())
-            .map(|ndx| {
-                let outpoint = OutPoint { txid, vout: ndx as u32 };
-                find_channel_with_funding_outpoint(&channels_lock, &outpoint)
-            })
-            .collect();
+        // Lock order: channels (released) -> tracker (see LOCK ORDERING)
+        // Collect channel Arc refs, then release channels lock before acquiring tracker
+        let channels: Vec<Option<Arc<Mutex<ChannelSlot>>>> = {
+            let channels_lock = self.get_channels();
+            (0..tx.output.len())
+                .map(|ndx| {
+                    let outpoint = OutPoint { txid, vout: ndx as u32 };
+                    find_channel_with_funding_outpoint(&channels_lock, &outpoint)
+                })
+                .collect()
+        }; // channels_lock released here
 
         let mut witvec: Vec<Vec<Vec<u8>>> = Vec::new();
         for (idx, uck) in uniclosekeys.into_iter().enumerate() {
@@ -2237,13 +2290,13 @@ impl Node {
             }
         }
 
-        // The tracker may be updated for multiple channels
+        // The tracker may be updated for multiple channels.
         let mut tracker = self.get_tracker();
 
-        // This locks channels in a random order, so we have to keep a global
-        // lock to ensure no deadlock.  We grab the self.channels mutex above
-        // for this purpose.
+        // Re-acquire channels lock to serialize access to the slot-locking loop,
+        // preventing deadlock when multiple threads lock overlapping channel slots.
         // TODO(511) consider sorting instead
+        let _channels_lock = self.get_channels();
         for (vout, slot_opt) in channels.iter().enumerate() {
             if let Some(slot_mutex) = slot_opt {
                 let slot = slot_mutex.lock().unwrap();
@@ -2900,30 +2953,34 @@ impl Node {
         VelocityControl::new(velocity_control_spec)
     }
 
-    /// The node tells us that it is forgetting a channel
+    /// The node tells us that it is forgetting a channel.
     pub fn forget_channel(&self, channel_id: &ChannelId) -> Result<(), Status> {
+        // Lock order: channels -> channel_slot -> state (see LOCK ORDERING)
         let mut stub_found = false;
-        // As per devrandom the lock order should be node_state -> channels -> channel
-        let mut node_state: MutexGuard<'_, NodeState> = self.get_state();
         let mut channels = self.get_channels();
         let found = channels.get(channel_id);
         if let Some(slot) = found {
-            // Acquire a lock on the node state to potentially update the high water mark.
-            // This is the only place the high water mark could be updated so any changes
-            // to the node state since acquiring the channels lock are irrelevant.
-            let channel = slot.lock().unwrap();
-            match &*channel {
-                ChannelSlot::Stub(_) => {
-                    info!("forget_channel stub {}", channel_id);
-                    // We can't update the channels map here as it's immutably borrowed
-                    // so we set a flag to remove it after the borrow is released.
-                    stub_found = true;
-                }
-                ChannelSlot::Ready(chan) => {
-                    info!("forget_channel {}", channel_id);
-                    chan.forget()?;
-                }
-            };
+            {
+                let channel = slot.lock().unwrap();
+                match &*channel {
+                    ChannelSlot::Stub(_) => {
+                        info!("forget_channel stub {}", channel_id);
+                        // We can't update the channels map here as it's immutably borrowed
+                        // so we set a flag to remove it after the borrow is released.
+                        stub_found = true;
+                    }
+                    ChannelSlot::Ready(chan) => {
+                        info!("forget_channel {}", channel_id);
+                        chan.forget()?;
+                    }
+                };
+            } // release the slot before taking node state
+
+            // Potentially update the high water mark. This is the only place the high
+            // water mark could be updated, so any changes to the node state since
+            // acquiring the channels lock are irrelevant, and taking state after the
+            // slot guard is dropped loses nothing.
+            let mut node_state: MutexGuard<'_, NodeState> = self.get_state();
             if channel_id.oid() > node_state.dbid_high_water_mark {
                 node_state.dbid_high_water_mark = channel_id.oid();
                 self.persister
@@ -2942,6 +2999,7 @@ impl Node {
         return Ok(());
     }
 
+    // Lock order: caller holds tracker, this acquires channels (see LOCK ORDERING)
     fn prune_channels(&self, tracker: &mut ChainTracker<ChainMonitor>) {
         // Prune stubs/channels which are no longer needed in memory.
         let mut channels = self.get_channels();
@@ -3027,8 +3085,14 @@ pub trait NodeMonitor {
 impl NodeMonitor for Node {
     fn channel_balance(&self) -> ChannelBalance {
         let mut sum = ChannelBalance::zero();
-        let channels_lock = self.get_channels();
-        for (_, slot_arc) in channels_lock.iter() {
+        // Lock order: channels (released) -> channel_slot -> state (see LOCK
+        // ORDERING). chan.balance() takes state under the slot, so state must
+        // not be held here. Snapshot the slots so the channels lock is not held
+        // while locking them either; this runs off the signing path (admin RPC,
+        // heartbeat) and must not block it.
+        let slot_arcs: Vec<Arc<Mutex<ChannelSlot>>> =
+            self.get_channels().values().cloned().collect();
+        for slot_arc in slot_arcs {
             let slot = slot_arc.lock().unwrap();
             let balance = match &*slot {
                 ChannelSlot::Ready(chan) => chan.balance(),
@@ -3147,7 +3211,7 @@ mod tests {
     use crate::policy::simple_validator::{
         make_default_simple_policy, SimpleValidatorFactory, TestSimpleValidatorBuilder,
     };
-    use crate::util::clock::ManualClock;
+    use crate::util::clock::{ManualClock, StandardClock};
     use crate::util::test_utils::htlc::{
         make_commit_info_with_htlcs, make_counterparty_commit_info_with_htlcs, make_htlc,
     };
@@ -3163,6 +3227,9 @@ mod tests {
     use crate::util::test_utils::*;
     use crate::util::velocity::{VelocityControlIntervalType, VelocityControlSpec};
     use crate::CommitmentPointProvider;
+
+    use core::sync::atomic::AtomicUsize;
+    use core::sync::atomic::Ordering::Relaxed;
 
     use super::*;
 
@@ -5091,5 +5158,232 @@ mod tests {
         );
 
         assert!(result.is_ok());
+    }
+
+    /// A Persist that counts the writes we care about, so a test can assert that
+    /// a bulk-persist method actually wrote something. Everything else mirrors
+    /// DummyPersister.
+    struct RecordingPersister {
+        initial_restore: bool,
+        new_node: AtomicUsize,
+        update_channel: AtomicUsize,
+        update_tracker: AtomicUsize,
+        update_node_allowlist: AtomicUsize,
+    }
+
+    impl RecordingPersister {
+        fn new(initial_restore: bool) -> Self {
+            Self {
+                initial_restore,
+                new_node: AtomicUsize::new(0),
+                update_channel: AtomicUsize::new(0),
+                update_tracker: AtomicUsize::new(0),
+                update_node_allowlist: AtomicUsize::new(0),
+            }
+        }
+
+        /// Forget writes made while building the node under test.
+        fn reset(&self) {
+            self.new_node.store(0, Relaxed);
+            self.update_channel.store(0, Relaxed);
+            self.update_tracker.store(0, Relaxed);
+            self.update_node_allowlist.store(0, Relaxed);
+        }
+
+        fn counts(&self) -> (usize, usize, usize, usize) {
+            (
+                self.new_node.load(Relaxed),
+                self.update_channel.load(Relaxed),
+                self.update_tracker.load(Relaxed),
+                self.update_node_allowlist.load(Relaxed),
+            )
+        }
+    }
+
+    impl SendSync for RecordingPersister {}
+
+    #[allow(unused_variables)]
+    impl Persist for RecordingPersister {
+        fn new_node(
+            &self,
+            node_id: &PublicKey,
+            config: &NodeConfig,
+            state: &NodeState,
+        ) -> Result<(), crate::persist::Error> {
+            self.new_node.fetch_add(1, Relaxed);
+            Ok(())
+        }
+
+        fn update_node(
+            &self,
+            node_id: &PublicKey,
+            state: &NodeState,
+        ) -> Result<(), crate::persist::Error> {
+            Ok(())
+        }
+
+        fn delete_node(&self, node_id: &PublicKey) -> Result<(), crate::persist::Error> {
+            Ok(())
+        }
+
+        fn new_channel(
+            &self,
+            node_id: &PublicKey,
+            stub: &ChannelStub,
+        ) -> Result<(), crate::persist::Error> {
+            Ok(())
+        }
+
+        fn delete_channel(
+            &self,
+            node_id: &PublicKey,
+            channel_id: &ChannelId,
+        ) -> Result<(), crate::persist::Error> {
+            Ok(())
+        }
+
+        fn new_tracker(
+            &self,
+            node_id: &PublicKey,
+            tracker: &ChainTracker<ChainMonitor>,
+        ) -> Result<(), crate::persist::Error> {
+            Ok(())
+        }
+
+        fn update_tracker(
+            &self,
+            node_id: &PublicKey,
+            tracker: &ChainTracker<ChainMonitor>,
+        ) -> Result<(), crate::persist::Error> {
+            self.update_tracker.fetch_add(1, Relaxed);
+            Ok(())
+        }
+
+        fn get_tracker(
+            &self,
+            node_id: PublicKey,
+            validator_factory: Arc<dyn ValidatorFactory>,
+        ) -> Result<
+            (ChainTracker<ChainMonitor>, Vec<crate::persist::ChainTrackerListenerEntry>),
+            crate::persist::Error,
+        > {
+            Err(crate::persist::Error::Internal("get_tracker unimplemented".to_string()))
+        }
+
+        fn update_channel(
+            &self,
+            node_id: &PublicKey,
+            channel: &Channel,
+        ) -> Result<(), crate::persist::Error> {
+            self.update_channel.fetch_add(1, Relaxed);
+            Ok(())
+        }
+
+        fn get_channel(
+            &self,
+            node_id: &PublicKey,
+            channel_id: &ChannelId,
+        ) -> Result<crate::persist::model::ChannelEntry, crate::persist::Error> {
+            Err(crate::persist::Error::Internal("get_channel unimplemented".to_string()))
+        }
+
+        fn get_node_channels(
+            &self,
+            node_id: &PublicKey,
+        ) -> Result<Vec<(ChannelId, crate::persist::model::ChannelEntry)>, crate::persist::Error>
+        {
+            Ok(Vec::new())
+        }
+
+        fn update_node_allowlist(
+            &self,
+            node_id: &PublicKey,
+            allowlist: Vec<String>,
+        ) -> Result<(), crate::persist::Error> {
+            self.update_node_allowlist.fetch_add(1, Relaxed);
+            Ok(())
+        }
+
+        fn get_node_allowlist(
+            &self,
+            node_id: &PublicKey,
+        ) -> Result<Vec<String>, crate::persist::Error> {
+            Ok(Vec::new())
+        }
+
+        fn get_nodes(
+            &self,
+        ) -> Result<Vec<(PublicKey, crate::persist::model::NodeEntry)>, crate::persist::Error>
+        {
+            Ok(Vec::new())
+        }
+
+        fn clear_database(&self) -> Result<(), crate::persist::Error> {
+            Ok(())
+        }
+
+        fn on_initial_restore(&self) -> bool {
+            self.initial_restore
+        }
+
+        fn signer_id(&self) -> [u8; 16] {
+            [0; 16]
+        }
+    }
+
+    fn make_node_with_persister(persister: Arc<RecordingPersister>) -> Arc<Node> {
+        let services = NodeServices {
+            validator_factory: Arc::new(SimpleValidatorFactory::new()),
+            starting_time_factory: make_genesis_starting_time_factory(TEST_NODE_CONFIG.network),
+            persister,
+            clock: Arc::new(StandardClock()),
+            trusted_oracle_pubkeys: vec![],
+        };
+        init_node_with_services(TEST_NODE_CONFIG, TEST_SEED[1], services)
+    }
+
+    #[test]
+    fn test_persist_all_writes_node_channels_tracker_and_allowlist() {
+        let persister = Arc::new(RecordingPersister::new(false));
+        let node = make_node_with_persister(persister.clone());
+        // a Ready channel, so persist_all reaches update_channel; stubs are skipped
+        init_channel(make_test_channel_setup(), node.clone());
+
+        persister.reset();
+        node.persist_all();
+
+        let (new_node, update_channel, update_tracker, allowlist) = persister.counts();
+        assert!(new_node > 0, "persist_all did not write the node entry");
+        assert!(update_channel > 0, "persist_all did not write the ready channel");
+        assert!(update_tracker > 0, "persist_all did not write the tracker");
+        assert!(allowlist > 0, "persist_all did not write the allowlist");
+    }
+
+    #[test]
+    fn test_maybe_sync_persister_writes_when_restoring() {
+        let persister = Arc::new(RecordingPersister::new(true));
+        let node = make_node_with_persister(persister.clone());
+        init_channel(make_test_channel_setup(), node.clone());
+
+        persister.reset();
+        node.maybe_sync_persister().expect("sync persist");
+
+        let (new_node, update_channel, update_tracker, allowlist) = persister.counts();
+        assert!(new_node > 0, "maybe_sync_persister did not write the node entry");
+        assert!(update_channel > 0, "maybe_sync_persister did not write the ready channel");
+        assert!(update_tracker > 0, "maybe_sync_persister did not write the tracker");
+        assert!(allowlist > 0, "maybe_sync_persister did not write the allowlist");
+    }
+
+    #[test]
+    fn test_maybe_sync_persister_is_a_noop_when_not_restoring() {
+        let persister = Arc::new(RecordingPersister::new(false));
+        let node = make_node_with_persister(persister.clone());
+        init_channel(make_test_channel_setup(), node.clone());
+
+        persister.reset();
+        node.maybe_sync_persister().expect("sync persist");
+
+        assert_eq!(persister.counts(), (0, 0, 0, 0));
     }
 }

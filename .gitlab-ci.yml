@@ -106,6 +106,7 @@ random-scheduler:
   tags: [ $RUNNER_TAG ]
   rules: *skip_on_renovate
   stage: test
+  needs: [ "rust-latest" ]
   image: rust:latest
   timeout: 5m
   cache:
@@ -115,7 +116,7 @@ random-scheduler:
   script:
     - apt-get update
     - apt-get install -y protobuf-compiler
-    - cargo test --features shuttle test_node_with_random_operations
+    - cargo test --features shuttle shuttle_tests
 
 rust-latest:
   tags: [ $RUNNER_TAG ]

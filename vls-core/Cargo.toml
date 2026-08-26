@@ -42,7 +42,7 @@ timeless_workaround = []
 txoo-source = ["txoo/source"]
 
 # For stress-testing
-shuttle = []
+shuttle = ["dep:shuttle"]
 
 [lib]
 name = "lightning_signer"
@@ -73,6 +73,9 @@ env_logger = { workspace = true, optional = true }
 backtrace = { version = "0.3", optional = true }
 tonic = { workspace = true, optional = true }
 
+# For stress-testing - optional dependency activated by shuttle feature
+shuttle = { version = "0.7.1", optional = true }
+
 # match hashbrown dependency version via lightning
 hashbrown = "0.13.2"
 ahash = { version = "0.8.7", default-features = false }
@@ -102,8 +105,6 @@ test-log = { workspace = true }
 tempfile = { workspace = true }
 # For stress-tests
 rand = "0.8.0"
-# For stress-tests
-shuttle = "0.7.1"
 
 [dependencies.lightning]
 #git = "https://github.com/lightning-signer/rust-lightning"

@@ -448,7 +448,12 @@ impl Debug for InitHandleLoop {
     }
 }
 
-// Handle a request stream
+// Handle a request stream.
+//
+// Requests are processed sequentially (one at a time). This preserves the
+// node's message ordering, which the per-channel enforcement state machine
+// assumes (e.g. a commitment advance must be applied before the revocation
+// that follows it).
 struct HandleLoop {
     handler: RootHandler,
     pub external_persist: Option<ExternalPersistWithHelper>,
