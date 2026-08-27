@@ -16,6 +16,7 @@ use lightning_signer::lightning::ln::inbound_payment::ExpandedKey;
 use lightning_signer::lightning_invoice::RawBolt11Invoice;
 use lightning_signer::node::NodeServices;
 use lightning_signer::persist::DummyPersister;
+use lightning_signer::policy::filter::{FilterRule, PolicyFilter};
 use lightning_signer::policy::simple_validator::{
     make_simple_policy, OptionizedSimplePolicy, SimpleValidatorFactory,
 };
@@ -57,6 +58,11 @@ use crate::{DynSigner, SpendableKeysInterface};
 // No persistence.
 struct NullTransport {
     handler: RootHandler,
+    // Cached init responses — KeysManagerClient re-sends init messages through the
+    // transport, but the handler has already transitioned to RootHandler and can't
+    // handle them again.  Return the cached responses instead.
+    preinit_reply: Vec<u8>,
+    init_reply: Vec<u8>,
 }
 
 impl NullTransport {
@@ -65,7 +71,15 @@ impl NullTransport {
         let allowlist = vec![address.to_string()];
         info!("allowlist {:?}", allowlist);
         let network = Network::Regtest; // TODO - get from config, env or args
-        let policy = make_simple_policy(network, OptionizedSimplePolicy::new());
+        let mut policy = make_simple_policy(network, OptionizedSimplePolicy::new());
+        // Apply the same policy filters as vlsd uses in integration tests
+        let lenient_filter = PolicyFilter {
+            rules: vec![
+                FilterRule::new_warn("policy-commitment-htlc-routing-balance"),
+                FilterRule::new_warn("policy-routing-cltv-delta"),
+            ],
+        };
+        policy.filter.merge(lenient_filter);
         let validator_factory = Arc::new(SimpleValidatorFactory::new_with_policy(policy));
         let starting_time_factory = ClockStartingTimeFactory::new();
         let clock = Arc::new(StandardClock());
@@ -94,10 +108,15 @@ impl NullTransport {
             dev_allowlist: Array(vec![WireString(address.to_string().into_bytes())]),
         };
 
-        init_handler.handle(msgs::Message::HsmdDevPreinit(preinit)).expect("HSMD preinit failed");
-        init_handler.handle(msgs::Message::HsmdInit2(init)).expect("HSMD init failed");
+        let (_, preinit_resp) = init_handler
+            .handle(msgs::Message::HsmdDevPreinit(preinit))
+            .expect("HSMD preinit failed");
+        let preinit_reply = preinit_resp.expect("preinit reply").as_vec();
+        let (_, init_resp) =
+            init_handler.handle(msgs::Message::HsmdInit2(init)).expect("HSMD init failed");
+        let init_reply = init_resp.expect("init reply").as_vec();
         let root_handler = init_handler.into();
-        NullTransport { handler: root_handler }
+        NullTransport { handler: root_handler, preinit_reply, init_reply }
     }
 }
 
@@ -105,6 +124,13 @@ impl Transport for NullTransport {
     fn node_call(&self, message_ser: Vec<u8>) -> ClientResult<Vec<u8>> {
         let message = msgs::from_vec(message_ser)?;
         debug!("ENTER node_call {:?}", message);
+        // Return cached responses for init messages — the handler is already a
+        // RootHandler and cannot process these again.
+        match &message {
+            msgs::Message::HsmdDevPreinit(_) => return Ok(self.preinit_reply.clone()),
+            msgs::Message::HsmdInit2(_) => return Ok(self.init_reply.clone()),
+            _ => {}
+        }
         let result = self.handler.handle(message).map_err(|e| {
             error!("error in handle: {:?}", e);
             Error::Transport

@@ -464,6 +464,26 @@ cargo-mutants:
       - mutants.out/
     expire_in: 1 week
 
+integration-lnrod-null:
+  stage: test
+  rules: *skip_on_renovate
+  tags: [ $RUNNER_TAG ]
+  needs: [ "rust-latest", "get-bitcoin" ]
+  script:
+    - export PATH="$PATH:`pwd`/bin"
+    - apt-get update
+    - apt-get install -y protobuf-compiler
+    - cd lnrod
+    - python3 -m venv .venv
+    - source .venv/bin/activate
+    - pip3 install -r requirements.txt
+    - ./scripts/compile-proto
+    - SIGNER=vls-null ./tests/integration-test.py
+  artifacts:
+    when: always
+    paths:
+      - lnrod/test-output
+
 integration-lnrod-local:
   stage: test
   rules: *skip_on_renovate

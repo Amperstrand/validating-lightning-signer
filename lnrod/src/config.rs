@@ -76,7 +76,7 @@ impl Into<ChannelHandshakeConfig> for ConfigProposeCoinChannel {
             our_htlc_minimum_msat: self.our_htlc_minimum_msat.unwrap_or(1),
             max_inbound_htlc_value_in_flight_percent_of_channel: 100,
             negotiate_scid_privacy: false,
-            announce_for_forwarding: self.announced_channel.unwrap_or(false),
+            announce_for_forwarding: self.announced_channel.unwrap_or(true),
             commit_upfront_shutdown_pubkey: self.commit_upfront_shutdown_pubkey.unwrap_or(true),
             their_channel_reserve_proportional_millionths: 0,
             negotiate_anchors_zero_fee_htlc_tx: true,
