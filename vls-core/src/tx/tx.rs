@@ -199,21 +199,21 @@ impl CommitmentInfo2 {
     /// - the output to us
     /// - HTLCs offered to us for which the preimage is known
     /// - HTLCs we offer for which the preimage is unknown
+    /// None = the commitment's totals do not fit the funding value or
+    /// the arithmetic overflowed — a mismatch to REJECT, not a panic
+    /// (the RBF two-swap case made the stock expect fire and kill the
+    /// signer thread; decoded from the test_splice_rbf stall).
     pub fn claimable_balance<T: PreimageMap>(
         &self,
         preimage_map: &T,
         is_outbound: bool,
         channel_value: u64,
-    ) -> u64 {
+    ) -> Option<u64> {
         let mut balance = self.value_to_parties().0;
         if is_outbound {
             let total_value = self.total_value();
-            let fee = channel_value
-                .checked_sub(total_value)
-                .expect("channel_value should be >= total_value");
-            balance = balance
-                .checked_add(fee)
-                .expect("claimable balance should not overflow after adding fee");
+            let fee = channel_value.checked_sub(total_value)?;
+            balance = balance.checked_add(fee)?;
         }
         let (offered, received) = if self.is_counterparty_broadcaster {
             (&self.received_htlcs, &self.offered_htlcs)
@@ -222,15 +222,15 @@ impl CommitmentInfo2 {
         };
         for o in offered {
             if !preimage_map.has_preimage(&o.payment_hash) {
-                balance = balance.checked_add(o.value_sat).expect("overflow");
+                balance = balance.checked_add(o.value_sat)?;
             }
         }
         for r in received {
             if preimage_map.has_preimage(&r.payment_hash) {
-                balance = balance.checked_add(r.value_sat).expect("overflow");
+                balance = balance.checked_add(r.value_sat)?;
             }
         }
-        balance
+        Some(balance)
     }
 
     /// Return the total received and offered htlc balances

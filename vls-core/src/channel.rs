@@ -797,7 +797,7 @@ impl Channel {
         let node = self.get_node();
         let mut state = node.get_state();
         let delta =
-            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup);
+            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup)?;
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(None, Some(&info2));
 
@@ -1172,7 +1172,7 @@ impl Channel {
         let node = self.get_node();
         let state = node.get_state();
         let delta =
-            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup);
+            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup)?;
 
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(Some(&info2), None);
@@ -1220,6 +1220,7 @@ impl Channel {
             htlcs,
         );
 
+        info!("#hang-probe: delta+payments validated");
         #[cfg(not(fuzzing))]
         self.check_holder_tx_signatures(
             &per_commitment_point,
@@ -1229,6 +1230,7 @@ impl Channel {
             counterparty_htlc_sigs,
             recomposed_tx,
         )?;
+        info!("#hang-probe: sigs checked");
 
         #[cfg(fuzzing)]
         let _ = recomposed_tx;
@@ -1315,7 +1317,7 @@ impl Channel {
         let mut state = node.get_state();
 
         let delta =
-            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup);
+            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup)?;
 
         let (next_holder_commitment_point, maybe_old_secret) = self
             .advance_holder_commitment_state(
@@ -2621,7 +2623,7 @@ impl Channel {
         let node = self.get_node();
         let mut state = node.get_state();
         let delta =
-            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup_for_tx(tx)?);
+            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup_for_tx(tx)?)?;
 
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(None, Some(&info2));
@@ -2914,8 +2916,10 @@ impl Channel {
         counterparty_htlc_sigs: &[Signature],
     ) -> Result<(), Status> {
         let validator = self.validator();
+        info!("#hang-probe: validate enter num={}", commitment_number);
         let per_commitment_point = self.get_per_commitment_point(commitment_number)?;
         let txkeys = self.make_holder_tx_keys(&per_commitment_point);
+        info!("#hang-probe: keys derived");
 
         // policy-onchain-format-standard
         let (recomposed_tx, info2, incoming_payment_summary) = self
@@ -2929,14 +2933,18 @@ impl Channel {
                 received_htlcs,
             )?;
 
+        info!("#hang-probe: recomposed");
         let node = self.get_node();
         let state = node.get_state();
+        info!("#hang-probe: state locked");
         // R10: compute against the funding this commitment's tx actually
         // spends — an old-funding commitment arriving post-swap must not
         // be valued against the new (possibly reduced) channel_value
         let view = self.setup_for_tx(tx)?;
+        info!("#hang-probe: view matched");
         let delta =
-            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &view);
+            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &view)?;
+        info!("#hang-probe: claimable done");
 
         #[cfg(not(fuzzing))]
         self.check_holder_tx_signatures(
@@ -2959,6 +2967,7 @@ impl Channel {
             &delta,
             validator.clone(),
         )?;
+        info!("#hang-probe: payments validated");
 
         if commitment_number == self.enforcement_state.next_holder_commit_num
             || self.enforcement_state.holder_commitment_funding
@@ -2974,7 +2983,9 @@ impl Channel {
         }
 
         trace_enforcement_state!(self);
+        info!("#hang-probe: storing done, persisting");
         self.persist()?;
+        info!("#hang-probe: persisted");
 
         Ok(())
     }

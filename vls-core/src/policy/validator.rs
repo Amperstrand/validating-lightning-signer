@@ -4,6 +4,7 @@ use core::cmp::{max, min};
 use core::fmt::{self, Debug, Formatter};
 
 use crate::signer::vls_channel_signer::VlsChannelSigner;
+use crate::util::status::Status;
 use bitcoin::bip32::DerivationPath;
 
 use bitcoin::blockdata::block::Header as BlockHeader;
@@ -20,7 +21,7 @@ use lightning::ln::chan_utils::{ClosingTransaction, HTLCOutputInCommitment, TxCr
 use lightning::offers::invoice::UnsignedBolt12Invoice;
 
 use lightning::types::payment::PaymentHash;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, Bytes, IfIsHumanReadable};
 use txoo::proof::{TxoProof, VerifyError};
@@ -1134,7 +1135,15 @@ impl EnforcementState {
         new_holder_tx: Option<&CommitmentInfo2>,
         new_counterparty_tx: Option<&CommitmentInfo2>,
         channel_setup: &ChannelSetup,
-    ) -> BalanceDelta {
+    ) -> Result<BalanceDelta, Status> {
+        fn flatten_or_err(o: Option<Option<u64>>) -> Result<Option<u64>, Status> {
+            match o {
+                Some(None) => Err(Status::invalid_argument(
+                    "commitment totals exceed the funding value",
+                )),
+                other => Ok(other.flatten()),
+            }
+        }
         assert!(
             new_holder_tx.is_some() || new_counterparty_tx.is_some(),
             "must have at least one new tx"
@@ -1144,40 +1153,41 @@ impl EnforcementState {
             "must have at most one new tx"
         );
         // Our balance in the holder commitment tx
-        let cur_holder_bal = self.current_holder_commit_info.as_ref().map(|tx| {
+        let cur_holder_bal = flatten_or_err(self.current_holder_commit_info.as_ref().map(|tx| {
             tx.claimable_balance(
                 preimage_map,
                 channel_setup.is_outbound,
                 channel_setup.channel_value_sat,
             )
-        });
+        }))?;
         // Our balance in the counterparty commitment tx
-        let cur_cp_bal = self.current_counterparty_commit_info.as_ref().map(|tx| {
+        let cur_cp_bal = flatten_or_err(self.current_counterparty_commit_info.as_ref().map(|tx| {
             tx.claimable_balance(
                 preimage_map,
                 channel_setup.is_outbound,
                 channel_setup.channel_value_sat,
             )
-        });
+        }))?;
         // Our overall balance is the lower of the two
         let cur_bal_opt = min_opt(cur_holder_bal, cur_cp_bal);
 
         // Perform balance calculations given the new transaction
-        let new_holder_bal = new_holder_tx.or(self.current_holder_commit_info.as_ref()).map(|tx| {
+        let new_holder_bal = flatten_or_err(new_holder_tx.or(self.current_holder_commit_info.as_ref()).map(|tx| {
             tx.claimable_balance(
                 preimage_map,
                 channel_setup.is_outbound,
                 channel_setup.channel_value_sat,
             )
-        });
-        let new_cp_bal =
+        }))?;
+        let new_cp_bal = flatten_or_err(
             new_counterparty_tx.or(self.current_counterparty_commit_info.as_ref()).map(|tx| {
                 tx.claimable_balance(
                     preimage_map,
                     channel_setup.is_outbound,
                     channel_setup.channel_value_sat,
                 )
-            });
+            }),
+        )?;
         let new_bal =
             min_opt(new_holder_bal, new_cp_bal).expect("already checked that we have a new tx");
 
@@ -1195,7 +1205,7 @@ impl EnforcementState {
             new_counterparty_tx.is_some()
         );
 
-        BalanceDelta(cur_bal, new_bal)
+        Ok(BalanceDelta(cur_bal, new_bal))
     }
 
     /// Return channel balances
@@ -1220,18 +1230,30 @@ impl EnforcementState {
         let holder_info = self.current_holder_commit_info.as_ref().unwrap();
         let counterparty_info = self.current_counterparty_commit_info.as_ref().unwrap();
 
-        // Our balance in the holder commitment tx
-        let cur_holder_bal = holder_info.claimable_balance(
-            preimage_map,
-            channel_setup.is_outbound,
-            channel_setup.channel_value_sat,
-        );
+        // Our balance in the holder commitment tx. The informational
+        // path reports 0 on a totals/funding mismatch rather than
+        // failing (the validating path rejects via claimable_balances).
+        let cur_holder_bal = holder_info
+            .claimable_balance(
+                preimage_map,
+                channel_setup.is_outbound,
+                channel_setup.channel_value_sat,
+            )
+            .unwrap_or_else(|| {
+                warn!("claimable underflow in balance() (holder) — reporting 0");
+                0
+            });
         // Our balance in the counterparty commitment tx
-        let cur_cp_bal = counterparty_info.claimable_balance(
-            preimage_map,
-            channel_setup.is_outbound,
-            channel_setup.channel_value_sat,
-        );
+        let cur_cp_bal = counterparty_info
+            .claimable_balance(
+                preimage_map,
+                channel_setup.is_outbound,
+                channel_setup.channel_value_sat,
+            )
+            .unwrap_or_else(|| {
+                warn!("claimable underflow in balance() (counterparty) — reporting 0");
+                0
+            });
         // Our overall balance is the lower of the two.  Use the htlc values from the same.
         // TODO(514) - might be more correct to check the HTLC value for each payment hash, and do
         // Math.min on each one, then sum that.  If an htlc exists in one commitment but not the
