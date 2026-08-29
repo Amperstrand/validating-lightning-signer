@@ -429,6 +429,89 @@ mod tests {
     }
 
     #[test]
+    fn divergent_views_never_panic() {
+        // R17.2 sketch 4: interleaved divergent access to both funding
+        // views after the swap — view routing for both outpoints plus
+        // the fallback shapes, the same-number re-sign mid-interleave,
+        // then routing again — invariant: no panic, the numbering never
+        // changes, the snapshot stays intact.
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+        let dummy_sigs =
+            CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
+
+        node.with_channel(&channel_id, |chan| {
+            chan.enforcement_state.current_holder_commit_info =
+                Some(make_test_commitment_info());
+            chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
+            chan.enforcement_state.current_counterparty_commit_info =
+                Some(make_test_commitment_info());
+            chan.enforcement_state.set_next_holder_commit_num_for_testing(1);
+            Ok(())
+        })
+        .expect("seed");
+
+        let mut setup2 = make_test_channel_setup();
+        setup2.channel_value_sat += 1;
+        setup2.funding_outpoint.vout += 1;
+        node.setup_channel(channel_id.clone(), None, setup2, &DerivationPath::master())
+            .expect("swap");
+
+        node.with_channel(&channel_id, |chan| {
+            let prev_outpoint = chan
+                .enforcement_state
+                .prev_funding_commitment
+                .as_ref()
+                .expect("snapshot")
+                .outpoint;
+            let cur_outpoint = chan.setup.funding_outpoint;
+            assert_ne!(prev_outpoint, cur_outpoint);
+
+            let build = |outpoint: OutPoint| Transaction {
+                version: Version(2),
+                lock_time: LockTime::ZERO,
+                input: vec![TxIn {
+                    previous_output: outpoint,
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence::MAX,
+                    witness: Witness::default(),
+                }],
+                output: vec![],
+            };
+
+            let v = chan.setup_for_tx(&build(cur_outpoint)).expect("current view");
+            assert_eq!(v.funding_outpoint, cur_outpoint);
+            let v = chan.setup_for_tx(&build(prev_outpoint)).expect("prev view");
+            assert_eq!(v.funding_outpoint, prev_outpoint);
+            let v = chan.setup_for_tx(&build(OutPoint::null())).expect("fallback view");
+            assert_eq!(v.funding_outpoint, cur_outpoint);
+
+            chan.enforcement_state.next_holder_commit_info =
+                Some((make_test_commitment_info(), dummy_sigs.clone()));
+            chan.activate_initial_commitment().expect("same-number re-sign");
+            assert_eq!(
+                chan.enforcement_state.next_holder_commit_num, 1,
+                "numbering never advances on the interleave"
+            );
+
+            let snap = chan
+                .enforcement_state
+                .prev_funding_commitment
+                .as_ref()
+                .expect("snapshot survives");
+            assert!(snap.current_holder_info.is_some());
+            assert!(snap.current_counterparty_info.is_some());
+
+            let v = chan
+                .setup_for_tx(&build(prev_outpoint))
+                .expect("prev view still routed post-re-sign");
+            assert_eq!(v.funding_outpoint, prev_outpoint);
+            Ok(())
+        })
+        .expect("no panic, invariants held");
+    }
+
+    #[test]
     fn both_fundings_views_signable_post_swap() {
         // R17.2 sketch 3 (composite): after the splice swap, BOTH
         // funding views remain usable — the OLD funding's snapshot
