@@ -298,8 +298,14 @@ async fn connect(datadir: &str, uri: Uri, args: &SignerArgs, shutdown_signal: tr
             init_handler.log_chaninfo();
 
             let mut client = do_connect(&uri).await;
-            let mut request_stream =
-                client.signer_stream(response_stream).await.unwrap().into_inner();
+            let mut request_stream = match client.signer_stream(response_stream).await {
+                Ok(s) => s.into_inner(),
+                Err(e) => {
+                    warn!("signer_stream failed (proxy not ready; will retry): {}", e);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    return;
+                }
+            };
 
             let handle_loop = InitHandleLoop::new(init_handler.clone(), external_persist.clone());
 
