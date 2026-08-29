@@ -2070,6 +2070,9 @@ impl Channel {
         }
         info!("funding_locked: locking funding outpoint {}", outpoint);
         self.funding_locked = Some(*outpoint);
+        // R21 F2: the lock retires the previous funding — clear the
+        // splice-window view so late commitments cannot match it
+        self.prev_setup = None;
         self.persist()?;
         Ok(())
     }

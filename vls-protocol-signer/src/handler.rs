@@ -1671,7 +1671,12 @@ impl Handler for ChannelHandler {
             }
             Message::SignSpliceTx(m) => {
                 let remote_funding_key =
-                    PublicKey::from_slice(&m.remote_funding_key.0).expect("pubkey");
+                    match PublicKey::from_slice(&m.remote_funding_key.0) {
+                    Ok(k) => k,
+                    Err(_) => {
+                        return Err(Status::invalid_argument("malformed remote funding key"))
+                    }
+                };
                 // the funding input carries no witness_utxo on the
                 // accepter's psbt — channel value stands in (the outpoint
                 // check in sign_splice_tx proves which input it is)
