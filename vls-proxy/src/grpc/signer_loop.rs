@@ -403,7 +403,13 @@ impl<C: 'static + Client> SignerLoop<C> {
                 // Wait for the signer reply
                 // Can fail if the adapter shut down
                 let reply = reply_rx.blocking_recv().map_err(|_| Error::Transport)?;
-                if reply.is_temporary_failure {
+                if reply.is_temporary_failure
+                    // An empty signer reply is a broken vlsd round-trip, not a
+                    // protocol answer — forwarded raw it parses as nothing
+                    // ("Bad setup_channel_reply") and kills the node (the crash5
+                    // flake: a 54s hang then an empty message). Retry it instead.
+                    || reply.reply.len() < 2
+                {
                     // Retry with backoff
                     info!("read loop {}: temporary error, retrying", self.log_prefix);
                     return Err(Error::TransportTransient);
