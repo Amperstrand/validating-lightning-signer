@@ -798,7 +798,6 @@ impl Channel {
         let mut state = node.get_state();
         let delta =
             self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup);
-
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(None, Some(&info2));
 
@@ -2616,7 +2615,7 @@ impl Channel {
         let node = self.get_node();
         let mut state = node.get_state();
         let delta =
-            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup);
+            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup_for_tx(tx)?);
 
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(None, Some(&info2));

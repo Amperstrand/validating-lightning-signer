@@ -293,6 +293,60 @@ mod tests {
     }
 
     #[test]
+    fn out_splice_value_arithmetic_test() {
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+        let base_value = node
+            .with_channel(&channel_id, |chan| Ok(chan.setup.channel_value_sat))
+            .expect("value");
+
+        // R19.3 out-splice rail: the new funding may carry a REDUCED
+        // channel_value (funds leave via the splice tx)
+        let mut setup2 = make_test_channel_setup();
+        setup2.channel_value_sat = base_value - 100_000;
+        setup2.funding_outpoint.vout += 1;
+        let chan = node
+            .setup_channel(channel_id.clone(), None, setup2.clone(), &DerivationPath::master())
+            .expect("out-splice accepted");
+        assert_eq!(chan.setup.channel_value_sat, base_value - 100_000);
+
+        // refusal rail: push_value exceeding the reduced value underflows
+        // the balance split and is rejected by the setup validation
+        let mut bad = make_test_channel_setup();
+        bad.channel_value_sat = base_value - 100_000;
+        bad.funding_outpoint.vout += 2;
+        bad.push_value_msat = bad.channel_value_sat * 1000 + 1;
+        assert!(
+            node.setup_channel(channel_id, None, bad, &DerivationPath::master()).is_err(),
+            "underflowing push rejected"
+        );
+    }
+
+    #[test]
+    fn funding_locked_idempotency_test() {
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+        let mut setup2 = make_test_channel_setup();
+        setup2.channel_value_sat += 1;
+        setup2.funding_outpoint.vout += 1;
+        let chan = node
+            .setup_channel(channel_id.clone(), None, setup2.clone(), &DerivationPath::master())
+            .expect("splice swap");
+
+        // R19.3 supersession rail: the lock is idempotent for the
+        // confirmed funding and rejects a mismatched outpoint
+        node.with_channel(&channel_id, |c| {
+            c.confirm_funding_locked(&chan.setup.funding_outpoint).expect("lock");
+            c.confirm_funding_locked(&chan.setup.funding_outpoint).expect("lock idempotent");
+            let mut foreign = chan.setup.funding_outpoint;
+            foreign.vout += 7;
+            assert!(c.confirm_funding_locked(&foreign).is_err(), "foreign outpoint rejected");
+            Ok(())
+        })
+        .expect("lock rails");
+    }
+
+    #[test]
     fn setup_channel_incompatible_splice_test() {
         let (node, channel_id) =
             init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());

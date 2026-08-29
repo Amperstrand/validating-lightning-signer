@@ -1972,6 +1972,16 @@ impl Node {
                         channel_id0
                     )));
                 }
+                // balance-split rail (the stub path's underflow check,
+                // which the splice transition must not skip): the push
+                // cannot exceed the new funding value
+                if setup.push_value_msat > setup.channel_value_sat * 1000 {
+                    return Err(Status::invalid_argument(format!(
+                        "beneficial channel value underflow: {} - {}",
+                        setup.channel_value_sat * 1000,
+                        setup.push_value_msat
+                    )));
+                }
                 let mut spliced = c.clone();
                 spliced.prev_setup = Some(c.setup.clone());
                 spliced.setup = setup.clone();
