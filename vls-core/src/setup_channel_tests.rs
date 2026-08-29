@@ -310,6 +310,17 @@ mod tests {
             .expect("out-splice accepted");
         assert_eq!(chan.setup.channel_value_sat, base_value - 100_000);
 
+        // wrapped-convention rail: CLN's splice re-setup encodes the
+        // fundee-relative balance, negative on splice-outs, as a wrapped
+        // near-u64::MAX push (observed live: 2^64-105801) — accepted;
+        // the commitment validation checks the real balance split
+        let mut wrapped = make_test_channel_setup();
+        wrapped.channel_value_sat = base_value - 100_000;
+        wrapped.funding_outpoint.vout += 3;
+        wrapped.push_value_msat = u64::MAX - 105_801;
+        node.setup_channel(channel_id.clone(), None, wrapped, &DerivationPath::master())
+            .expect("wrapped (negative-relative) push accepted");
+
         // refusal rail: push_value exceeding the reduced value underflows
         // the balance split and is rejected by the setup validation
         let mut bad = make_test_channel_setup();

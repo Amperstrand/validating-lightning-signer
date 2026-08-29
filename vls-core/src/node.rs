@@ -1974,8 +1974,15 @@ impl Node {
                 }
                 // balance-split rail (the stub path's underflow check,
                 // which the splice transition must not skip): the push
-                // cannot exceed the new funding value
-                if setup.push_value_msat > setup.channel_value_sat * 1000 {
+                // cannot exceed the new funding value. CLN's splice
+                // re-setup carries the FUNDEE-RELATIVE balance as
+                // push_value (channeld.c relative_splice_balance_fundee),
+                // which goes negative on splice-outs and arrives as a
+                // wrapped near-u64::MAX u64 — stock hsmd ignores it, so
+                // the convention survives. Wrapped values skip this
+                // rail; the commitment validation checks the real split.
+                let push_is_plain_msat = setup.push_value_msat <= i64::MAX as u64;
+                if push_is_plain_msat && setup.push_value_msat > setup.channel_value_sat * 1000 {
                     return Err(Status::invalid_argument(format!(
                         "beneficial channel value underflow: {} - {}",
                         setup.channel_value_sat * 1000,
