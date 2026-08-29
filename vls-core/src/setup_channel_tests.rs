@@ -240,7 +240,9 @@ mod tests {
 
         // R10 both rails: a tx spending the CURRENT funding matches the
         // current setup; after a splice, a tx spending the PREVIOUS
-        // funding matches the previous setup; anything else is rejected.
+        // funding matches the previous setup; anything else falls back
+        // to the current view — the recomposition check downstream is
+        // the guard (upstream parity for mutated-input probes).
         node.with_channel(&channel_id, |chan| {
             let empty_tx = Transaction {
                 version: Version(2),
@@ -248,10 +250,10 @@ mod tests {
                 input: vec![],
                 output: vec![],
             };
-            assert!(
-                chan.setup_for_tx(&empty_tx).is_err(),
-                "no funding input -> no match"
-            );
+            let v = chan
+                .setup_for_tx(&empty_tx)
+                .expect("no-input tx falls back to the current view");
+            assert_eq!(v.funding_outpoint, chan.setup.funding_outpoint);
             Ok(())
         })
         .expect("no-input case");
@@ -283,10 +285,13 @@ mod tests {
             assert_eq!(v.funding_outpoint, chan.setup.funding_outpoint);
             let v = chan.setup_for_tx(&build(prev_outpoint)).expect("prev view");
             assert_eq!(v.funding_outpoint, prev_outpoint);
-            assert!(
-                chan.setup_for_tx(&build(OutPoint::null())).is_err(),
-                "unknown funding"
-            );
+            // unknown funding input falls back to the current view — the
+            // recomposition check downstream is the guard (upstream's
+            // FailedPrecondition on mismatched recomposed txs)
+            let v = chan
+                .setup_for_tx(&build(OutPoint::null()))
+                .expect("fallback to current view");
+            assert_eq!(v.funding_outpoint, chan.setup.funding_outpoint);
             Ok(())
         })
         .expect("views");
@@ -556,8 +561,21 @@ mod tests {
                 Some((make_test_commitment_info(), dummy_sigs.clone()));
             chan.activate_initial_commitment().expect("num-0 re-activation");
             assert!(chan.activate_initial_commitment().is_err(), "replay rejected");
-            // same-number splice re-activation with a fresh pending: the
-            // current info is replaced in place, the number does not advance
+            Ok(())
+        })
+        .expect("with_channel");
+
+        // the splice swap creates the same-number window (the snapshot)
+        let mut setup2 = make_test_channel_setup();
+        setup2.channel_value_sat += 1;
+        setup2.funding_outpoint.vout += 1;
+        node.setup_channel(channel_id.clone(), None, setup2, &DerivationPath::master())
+            .expect("splice swap");
+
+        node.with_channel(&channel_id, |chan| {
+            // same-number splice re-activation with a fresh pending (the
+            // window is open): the current info is replaced in place, the
+            // number does not advance
             chan.enforcement_state.next_holder_commit_info =
                 Some((make_test_commitment_info(), dummy_sigs.clone()));
             chan.activate_initial_commitment().expect("splice re-activation");

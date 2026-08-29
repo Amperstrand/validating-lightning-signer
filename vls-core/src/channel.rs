@@ -1245,8 +1245,10 @@ impl Channel {
         )?;
 
         if commitment_number == self.enforcement_state.next_holder_commit_num
-            || self.enforcement_state.holder_commitment_funding
-                != Some(self.setup.funding_outpoint)
+            || (self.enforcement_state.prev_funding_commitment.is_some()
+                && commitment_number + 1 == self.enforcement_state.next_holder_commit_num
+                && self.enforcement_state.holder_commitment_funding
+                    != Some(self.setup.funding_outpoint))
         {
             let counterparty_signatures = CommitmentSignatures(
                 counterparty_commit_sig.clone(),
@@ -2032,9 +2034,11 @@ impl Channel {
                 }
             }
         }
-        Err(Status::invalid_argument(
-            "commitment does not spend a known funding outpoint",
-        ))
+        // Unknown funding input: fall back to the current view so the
+        // recomposition check downstream produces the canonical mismatch
+        // error (upstream's FailedPrecondition) — a strict rejection here
+        // reclassified mutated-input probes as InvalidArgument.
+        Ok(self.setup.clone())
     }
 
     /// Splice compatibility (the funding7 `is_compatible` shape): only
@@ -2970,8 +2974,10 @@ impl Channel {
         info!("#hang-probe: payments validated");
 
         if commitment_number == self.enforcement_state.next_holder_commit_num
-            || self.enforcement_state.holder_commitment_funding
-                != Some(self.setup.funding_outpoint)
+            || (self.enforcement_state.prev_funding_commitment.is_some()
+                && commitment_number + 1 == self.enforcement_state.next_holder_commit_num
+                && self.enforcement_state.holder_commitment_funding
+                    != Some(self.setup.funding_outpoint))
         {
             let counterparty_signatures = CommitmentSignatures(
                 counterparty_commit_sig.clone(),
@@ -3000,7 +3006,10 @@ impl Channel {
     pub fn activate_initial_commitment(&mut self) -> Result<PublicKey, Status> {
         debug!("activate_initial_commitment");
 
-        if self.enforcement_state.next_holder_commit_num > 1 {
+        if self.enforcement_state.next_holder_commit_num > 1
+            || (self.enforcement_state.next_holder_commit_num == 1
+                && self.enforcement_state.prev_funding_commitment.is_none())
+        {
             return Err(invalid_argument(format!(
                 "activate_initial_commitment called with next_holder_commit_num {}",
                 self.enforcement_state.next_holder_commit_num
