@@ -586,10 +586,18 @@ async fn do_connect(uri: &Uri) -> HsmdClient<Channel> {
         match client {
             Ok(mut client) => {
                 let result =
-                    client.ping(PingRequest { message: "hello".to_string() }).await.expect("ping");
-                let reply = result.into_inner();
-                info!("ping result {}", reply.message);
-                return client;
+                    client.ping(PingRequest { message: "hello".to_string() }).await;
+                match result {
+                    Ok(result) => {
+                        let reply = result.into_inner();
+                        info!("ping result {}", reply.message);
+                        return client;
+                    }
+                    Err(e) => {
+                        warn!("ping failed on fresh connection, retrying: {}", e);
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                }
             }
             Err(e) => {
                 // unfortunately the error kind is not otherwise exposed

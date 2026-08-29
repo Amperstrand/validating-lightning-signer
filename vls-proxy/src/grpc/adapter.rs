@@ -148,9 +148,16 @@ impl ProtocolAdapter {
                                 debug!("got signer response {}", resp.request_id);
                                 // temporary failures are not fatal and are handled below
                                 if !resp.error.is_empty() && !resp.is_temporary_failure {
-                                    error!("signer error: {}; triggering shutdown", resp.error);
-                                    shutdown_trigger.trigger();
-                                    break;
+                                    if cfg!(feature = "developer") {
+                                        // dev builds keep the node alive for
+                                        // diagnosis; the failed request's reply
+                                        // is dropped (lightningd times it out)
+                                        error!("signer error: {} (dev mode: continuing)", resp.error);
+                                    } else {
+                                        error!("signer error: {}; triggering shutdown", resp.error);
+                                        shutdown_trigger.trigger();
+                                        break;
+                                    }
                                 }
 
                                 if resp.is_temporary_failure {
