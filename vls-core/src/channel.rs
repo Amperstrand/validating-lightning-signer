@@ -512,6 +512,11 @@ pub struct Channel {
     pub id: Option<ChannelId>,
     /// The chain monitor base
     pub monitor: ChainMonitorBase,
+    /// Previous funding (outpoint, channel value) while a splice is in
+    /// flight: CLN sends the post-splice SetupChannel BEFORE requesting
+    /// the splice tx signature, which spends the PREVIOUS funding
+    /// (the LDK "sign prev funding" case).
+    pub prev_funding: Option<(OutPoint, u64)>,
 }
 
 impl Debug for Channel {
@@ -1944,9 +1949,10 @@ impl Channel {
     /// CLN's channeld requests this once splice commitments are secured.
     /// Signer-side checks on top of the stock-hsmd trust model: the
     /// counterparty funding key must match the channel's, and the input
-    /// must spend the channel's current funding outpoint. The psbt amount
-    /// is cross-checked when present (the accepter's funding input has no
-    /// witness_utxo — the channel value stands in).
+    /// must spend the channel's current or previous funding outpoint
+    /// (the setup has already swapped by signing time). The psbt amount
+    /// is cross-checked when present (the accepter's funding input has
+    /// no witness_utxo — the funding's value stands in).
     pub fn sign_splice_tx(
         &self,
         tx: &Transaction,
@@ -1961,12 +1967,24 @@ impl Channel {
             .input
             .get(input_index as usize)
             .ok_or_else(|| Status::invalid_argument("splice input index out of range"))?;
-        if input.previous_output != self.setup.funding_outpoint {
-            return Err(Status::invalid_argument("splice input is not the channel funding outpoint"));
-        }
-        let input_amount_sat =
-            input_amount_sat.unwrap_or(self.setup.channel_value_sat);
-        if input_amount_sat != self.setup.channel_value_sat {
+        let channel_value_sat =
+            if input.previous_output == self.setup.funding_outpoint {
+                self.setup.channel_value_sat
+            } else if let Some((prev_outpoint, prev_value)) = self.prev_funding {
+                if input.previous_output == prev_outpoint {
+                    prev_value
+                } else {
+                    return Err(Status::invalid_argument(
+                        "splice input is not the channel funding outpoint",
+                    ));
+                }
+            } else {
+                return Err(Status::invalid_argument(
+                    "splice input is not the channel funding outpoint",
+                ));
+            };
+        let input_amount_sat = input_amount_sat.unwrap_or(channel_value_sat);
+        if input_amount_sat != channel_value_sat {
             return Err(Status::invalid_argument("splice input value is not the channel value"));
         }
         let funding_key = self.keys.funding_key(None);
