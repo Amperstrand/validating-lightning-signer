@@ -85,6 +85,110 @@ mod tests {
             .expect("valid holder commitment");
     }
 
+    // THE SLOTS LEG 2 EXECUTABLE SPEC (documented-RED): the interleave —
+    // a new-funding commitment pending, then an old-funding straggler —
+    // currently fails at the RECOMPOSITION: the builder reads the live
+    // self.setup, so an old-funding tx cannot recompose-match post-splice
+    // ("recomposed tx mismatch"). This is precisely the gap the per-funding
+    // records close: the old funding's commitments must validate against
+    // their OWN record. Un-ignore when slots land.
+    #[test]
+    #[ignore = "slots leg 2 driver: the straggler recomposition needs the per-funding view"]
+    fn splice_window_straggler_retains_new_funding_pending() {
+        // The interleave: during the splice window, a new-funding commitment
+        // is stored, then an old-funding straggler arrives — BOTH pendings
+        // must be retained (the channel slot holds the new; the record holds
+        // the straggler). The current OR-branch clobbers the channel slot.
+        let node_ctx = test_node_ctx(1);
+        let mut chan_ctx = fund_test_channel(&node_ctx, 3_000_000);
+
+        let old_setup = chan_ctx.setup.clone();
+        let old_keys = chan_ctx.counterparty_keys.clone();
+        let channel_id = chan_ctx.channel_id.clone();
+
+        // THE STRAGGLER'S MESSAGE built BEFORE the splice (channel_commitment
+        // uses the LIVE channel state, so it must be built while the old
+        // funding is current — it then spends the old outpoint; it gets
+        // VALIDATED after the new-funding commitment, the interleave)
+        let mut straggler_ctx = channel_commitment(
+            &node_ctx, &chan_ctx, 0, 0, 2_999_000, 0, vec![], vec![],
+        );
+        let (scsig, shsigs) =
+            counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut straggler_ctx);
+
+        // THE SPLICE: a new funding tx whose input spends the old channel
+        // outpoint (the setup path derives only the txid — no sigs needed)
+        let mut tx_ctx = TestFundingTxContext::new();
+        tx_ctx.inputs.push(bitcoin::TxIn {
+            previous_output: old_setup.funding_outpoint,
+            script_sig: bitcoin::ScriptBuf::new(),
+            sequence: bitcoin::Sequence::MAX,
+            witness: bitcoin::Witness::default(),
+        });
+        chan_ctx.setup.channel_value_sat -= 100_000;
+        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let splice_tx = tx_ctx.to_tx();
+        assert!(
+            funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
+            "splice accepted"
+        );
+
+        // THE NEW-FUNDING COMMITMENT (num=1, the same-number re-sign)
+        let mut new_ctx = channel_commitment(
+            &node_ctx, &chan_ctx, 1, 1100, 1_500_000, 1_399_000, vec![], vec![],
+        );
+        let (csig, hsigs) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut new_ctx);
+        validate_holder_commitment(&node_ctx, &chan_ctx, &new_ctx, &csig, &hsigs)
+            .expect("new-funding commitment");
+        // the helper auto-advances (revoke) after validating — roll the
+        // numbering back so the new-funding commitment is PENDING again,
+        // the state the interleave scenario needs (the straggler arrives
+        // while the new funding's commitment is stored-but-unrevoked)
+        node_ctx.node.with_channel(&channel_id, |chan| {
+            chan.enforcement_state.set_next_holder_commit_num_for_testing(1);
+            Ok(())
+        })
+        .expect("rollback");
+
+        node_ctx.node.with_channel(&channel_id, |chan| {
+            assert!(
+                chan.prev_setup.is_some(),
+                "DIAGNOSTIC: prev_setup is None — the new-channel path ran, not the splice"
+            );
+            let prev_out = chan.prev_setup.as_ref().unwrap().funding_outpoint;
+            let spends_old = straggler_ctx
+                .tx
+                .as_ref()
+                .map(|t| t.trust().built_transaction().transaction.input.iter().any(|i| i.previous_output == prev_out))
+                .unwrap_or(false);
+            assert!(spends_old, "DIAGNOSTIC: the straggler tx does not spend the prev outpoint");
+            Ok(())
+        })
+        .expect("diagnostics");
+        validate_holder_commitment(&node_ctx, &chan_ctx, &straggler_ctx, &scsig, &shsigs)
+            .expect("straggler accepted");
+
+        node_ctx.node.with_channel(&channel_id, |chan| {
+            let prev = chan
+                .enforcement_state
+                .prev_funding_commitment
+                .as_ref()
+                .expect("window open");
+            assert!(prev.next_holder_info.is_some(), "straggler retained in the record");
+            let slot = chan
+                .enforcement_state
+                .next_holder_commit_info
+                .as_ref()
+                .expect("channel slot non-empty");
+            assert_eq!(
+                slot.0.to_countersigner_value_sat, 1_399_000,
+                "channel slot still holds the NEW-funding pending (not clobbered)"
+            );
+            Ok(())
+        })
+        .expect("asserts");
+    }
+
     #[test]
     fn activate_initial_commitment_test() {
         let channel_amount = 3_000_000;

@@ -2783,6 +2783,9 @@ impl Channel {
         offered_htlcs: Vec<HTLCInfo2>,
         received_htlcs: Vec<HTLCInfo2>,
     ) -> Result<(CommitmentTransaction, CommitmentInfo2, Map<PaymentHash, u64>), Status> {
+        // R10: validate against the funding this tx actually spends — an old-funding
+        // straggler must not be valued against the new channel_value (the underflow)
+        let view = self.setup_for_tx(tx)?;
         if tx.output.len() != output_witscripts.len() {
             return Err(invalid_argument(format!(
                 "len(tx.output):{} != len(witscripts):{}",
@@ -2794,13 +2797,13 @@ impl Channel {
         let validator = self.validator();
 
         // Since we didn't have the value at the real open, validate it now.
-        validator.validate_channel_value(&self.setup)?;
+        validator.validate_channel_value(&view)?;
 
         // Derive a CommitmentInfo first, convert to CommitmentInfo2 below ...
         let is_counterparty = false;
         let info = validator.decode_commitment_tx(
             &self.keys,
-            &self.setup,
+            &view,
             is_counterparty,
             tx,
             output_witscripts,
@@ -2822,7 +2825,7 @@ impl Channel {
                 &self.enforcement_state,
                 commitment_number,
                 &per_commitment_point,
-                &self.setup,
+                &view,
                 &self.get_chain_state(),
                 &info2,
             )
@@ -2832,7 +2835,7 @@ impl Channel {
                     "VALIDATION FAILED: {} tx={:?} setup={:?} state={:?} info={:?}",
                     ve,
                     &tx,
-                    &self.setup,
+                    &view,
                     &self.get_chain_state(),
                     &info2,
                 );
@@ -2841,7 +2844,7 @@ impl Channel {
                     "VALIDATION FAILED: {}\ntx={:#?}\nsetup={:#?}\nstate={:#?}\ninfo={:#?}",
                     ve,
                     &tx,
-                    &self.setup,
+                    &view,
                     &self.get_chain_state(),
                     &info2,
                 );
@@ -2861,7 +2864,7 @@ impl Channel {
 
         if recomposed_tx.trust().built_transaction().transaction != *tx {
             dbgvals!(
-                &self.setup,
+                &view,
                 &self.enforcement_state,
                 tx,
                 DebugVecVecU8(output_witscripts),
