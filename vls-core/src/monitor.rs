@@ -1177,6 +1177,71 @@ mod tests {
     }
 
     #[test]
+    fn test_splice_reorg_depth_reset() {
+        // R17.2: a splice swap (replace_funding_outpoint) resets the
+        // funding depth — the new funding starts unconfirmed; a reorg
+        // during the window keeps it 0 (no panic, no corruption); the
+        // new funding's confirmation rebuilds the depth.
+        let tx1 = make_tx(vec![make_txin(1)]);
+        let old_outpoint = OutPoint::new(tx1.compute_txid(), 0);
+        let mut base =
+            ChainMonitorBase::new(old_outpoint, 0, &ChannelId::new(&[33u8; 32]));
+        let cpp = Box::new(DummyCommitmentPointProvider {});
+        let monitor = base.as_monitor(cpp);
+        let block_hash = BlockHash::all_zeros();
+        monitor.add_funding(&tx1, 0);
+        monitor.on_add_block(&[], &block_hash);
+        monitor.on_add_block(&[tx1.clone()], &block_hash);
+        assert_eq!(monitor.funding_depth(), 1);
+        monitor.on_add_block(&[], &block_hash);
+        assert_eq!(monitor.funding_depth(), 2);
+
+        // the splice swap: the new funding replaces the tracked one,
+        // the depth resets (funding_height cleared)
+        let tx2 = make_tx(vec![make_txin(9)]);
+        let new_outpoint = OutPoint::new(tx2.compute_txid(), 0);
+        base.replace_funding_outpoint(&new_outpoint);
+        assert_eq!(monitor.funding_depth(), 0, "splice swap resets depth");
+
+        // a reorg during the unconfirmed window: still 0, no panic
+        monitor.on_remove_block(&[], &block_hash);
+        assert_eq!(monitor.funding_depth(), 0);
+
+        // the new funding confirms; the depth rebuilds
+        monitor.on_add_block(&[tx2], &block_hash);
+        assert_eq!(monitor.funding_depth(), 1);
+        monitor.on_add_block(&[], &block_hash);
+        assert_eq!(monitor.funding_depth(), 2);
+    }
+
+    #[test]
+    fn test_buried_flips_on_reorg() {
+        // R17.2: the funding confirms (depth > 0, CheckOutpoint would
+        // answer true); a reorg un-confirming the funding block flips
+        // the depth to 0 (the poll waits again); re-confirming on the
+        // new fork restores it.
+        let tx = make_tx(vec![make_txin(1), make_txin(2)]);
+        let outpoint = OutPoint::new(tx.compute_txid(), 0);
+        let cpp = Box::new(DummyCommitmentPointProvider {});
+        let monitor =
+            ChainMonitorBase::new(outpoint, 0, &ChannelId::new(&[33u8; 32])).as_monitor(cpp);
+        let block_hash = BlockHash::all_zeros();
+        monitor.add_funding(&tx, 0);
+        monitor.on_add_block(&[], &block_hash);
+        monitor.on_add_block(&[tx.clone()], &block_hash);
+        let buried_depth = monitor.funding_depth();
+        assert!(buried_depth > 0, "confirmed funding has depth");
+
+        // the reorg un-confirms the funding's block
+        monitor.on_remove_block(&[tx.clone()], &block_hash);
+        assert_eq!(monitor.funding_depth(), 0, "reorg un-confirms");
+
+        // re-confirm on the new fork: the depth returns
+        monitor.on_add_block(&[tx], &block_hash);
+        assert_eq!(monitor.funding_depth(), buried_depth);
+    }
+
+    #[test]
     fn test_funding_double_spent() {
         let tx = make_tx(vec![make_txin(1), make_txin(2)]);
         let tx2 = make_tx(vec![make_txin(2)]);
