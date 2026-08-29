@@ -358,6 +358,60 @@ mod tests {
     }
 
     #[test]
+    fn prev_funding_snapshot_lifecycle_test() {
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+
+        // R10.4/F1: the splice swap snapshots the retiring funding's
+        // commitment state (the justice window) BEFORE the new funding's
+        // flow rebuilds the channel-scoped fields
+        let dummy_sigs =
+            CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
+        node.with_channel(&channel_id, |chan| {
+            chan.enforcement_state.current_holder_commit_info =
+                Some(make_test_commitment_info());
+            chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
+            Ok(chan.setup.funding_outpoint)
+        })
+        .expect("seed state");
+        let old_outpoint = node
+            .with_channel(&channel_id, |chan| Ok(chan.setup.funding_outpoint))
+            .expect("old outpoint");
+
+        let mut setup2 = make_test_channel_setup();
+        setup2.channel_value_sat += 1;
+        setup2.funding_outpoint.vout += 1;
+        let chan = node
+            .setup_channel(channel_id.clone(), None, setup2, &DerivationPath::master())
+            .expect("splice swap");
+
+        // the snapshot holds the OLD funding's data...
+        let snap = node
+            .with_channel(&channel_id, |c| {
+                Ok(c.enforcement_state.prev_funding_commitment.clone())
+            })
+            .expect("snapshot")
+            .expect("snapshot exists after swap");
+        assert_eq!(snap.outpoint, old_outpoint);
+        assert!(snap.current_holder_info.is_some(), "old holder info preserved");
+        // ...and the channel-scoped current was moved out (rebuilt by the new flow)
+        assert!(
+            node.with_channel(&channel_id, |c| {
+                Ok(c.enforcement_state.current_holder_commit_info.is_none())
+            })
+            .expect("moved")
+        );
+
+        // the lock retires the snapshot (the splice tx spent the old funding)
+        node.with_channel(&channel_id, |c| {
+            c.confirm_funding_locked(&chan.setup.funding_outpoint).expect("lock");
+            assert!(c.enforcement_state.prev_funding_commitment.is_none(), "retired at lock");
+            Ok(())
+        })
+        .expect("retire");
+    }
+
+    #[test]
     fn setup_channel_incompatible_splice_test() {
         let (node, channel_id) =
             init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());

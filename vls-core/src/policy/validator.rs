@@ -20,7 +20,7 @@ use lightning::ln::chan_utils::{ClosingTransaction, HTLCOutputInCommitment, TxCr
 use lightning::offers::invoice::UnsignedBolt12Invoice;
 
 use lightning::types::payment::PaymentHash;
-use log::{debug, error};
+use log::{debug, error, info};
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, Bytes, IfIsHumanReadable};
 use txoo::proof::{TxoProof, VerifyError};
@@ -785,9 +785,31 @@ pub struct EnforcementState {
     /// a splice, and one side's tag must not arm the other's guard.
     #[serde(default)]
     pub holder_commitment_funding: Option<OutPoint>,
+    /// R10.4/F1 justice snapshot: the previous funding's commitment
+    /// state at the splice swap. Preserved until the funding retires
+    /// (funding_locked — by then the splice tx has spent it, so stale
+    /// old-funding commitments are double-spents). The channel-scoped
+    /// fields are rebuilt by the new funding's flow; without this
+    /// snapshot the old funding's close inputs would be lost.
+    #[serde(default)]
+    pub prev_funding_commitment: Option<PrevFundingCommitment>,
     /// The funding the stored COUNTERPARTY commitment info belongs to.
     #[serde(default)]
     pub counterparty_commitment_funding: Option<OutPoint>,
+}
+
+/// The retiring funding's commitment state, snapshotted at a splice
+/// swap for the justice window (R10.4/F1).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PrevFundingCommitment {
+    /// The funding this record belongs to
+    pub outpoint: OutPoint,
+    /// The current holder commitment info on that funding
+    pub current_holder_info: Option<CommitmentInfo2>,
+    /// Counterparty signatures on that holder commitment
+    pub current_holder_signatures: Option<CommitmentSignatures>,
+    /// The pending-next holder commitment, if any, on that funding
+    pub next_holder_info: Option<(CommitmentInfo2, CommitmentSignatures)>,
 }
 
 impl EnforcementState {
@@ -801,6 +823,7 @@ impl EnforcementState {
             next_counterparty_commit_num: 0,
             next_counterparty_revoke_num: 0,
             holder_commitment_funding: None,
+            prev_funding_commitment: None,
             counterparty_commitment_funding: None,
             current_counterparty_point: None,
             previous_counterparty_point: None,
@@ -971,6 +994,28 @@ impl EnforcementState {
         self.previous_counterparty_point = self.current_counterparty_point;
         self.current_counterparty_point = Some(current_point);
         self.next_counterparty_commit_num = num;
+    }
+
+    /// Snapshot the channel-scoped commitment state for the retiring
+    /// funding at a splice swap (R10.4/F1): moves the current and
+    /// pending holder commitment info into the per-funding record so
+    /// the new funding's flow can rebuild the channel-scoped fields
+    /// without destroying the old funding's close inputs.
+    pub fn snapshot_funding_for_splice(&mut self, outpoint: OutPoint) {
+        info!("snapshot_funding_for_splice: {}", outpoint);
+        self.prev_funding_commitment = Some(PrevFundingCommitment {
+            outpoint,
+            current_holder_info: self.current_holder_commit_info.take(),
+            current_holder_signatures: self.current_counterparty_signatures.take(),
+            next_holder_info: self.next_holder_commit_info.take(),
+        });
+    }
+
+    /// Retire the previous-funding record — called when the funding
+    /// locks (the splice tx has spent the old funding; stale
+    /// old-funding commitments are double-spents by then).
+    pub fn retire_prev_funding(&mut self) {
+        self.prev_funding_commitment = None;
     }
 
     #[allow(missing_docs)]

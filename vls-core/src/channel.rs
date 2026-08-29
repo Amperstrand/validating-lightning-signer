@@ -2071,8 +2071,11 @@ impl Channel {
         info!("funding_locked: locking funding outpoint {}", outpoint);
         self.funding_locked = Some(*outpoint);
         // R21 F2: the lock retires the previous funding — clear the
-        // splice-window view so late commitments cannot match it
+        // splice-window view so late commitments cannot match it, and
+        // retire the F1 justice snapshot (the splice tx has spent the
+        // old funding; stale old-funding commitments are double-spents)
         self.prev_setup = None;
+        self.enforcement_state.retire_prev_funding();
         self.persist()?;
         Ok(())
     }
