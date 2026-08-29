@@ -424,6 +424,66 @@ mod tests {
     }
 
     #[test]
+    fn both_fundings_views_signable_post_swap() {
+        // R17.2 sketch 3 (composite): after the splice swap, BOTH
+        // funding views remain usable — the OLD funding's snapshot
+        // record intact (justice), the NEW funding's same-number
+        // re-sign rebuilding the channel-scoped state WITHOUT
+        // advancing the numbering (reorgs/re-signs are not
+        // commitments).
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+        let dummy_sigs =
+            CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
+
+        // the OLD funding's commitment state + a channel with history
+        node.with_channel(&channel_id, |chan| {
+            chan.enforcement_state.current_holder_commit_info =
+                Some(make_test_commitment_info());
+            chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
+            chan.enforcement_state.current_counterparty_commit_info =
+                Some(make_test_commitment_info());
+            chan.enforcement_state.set_next_holder_commit_num_for_testing(1);
+            Ok(())
+        })
+        .expect("seed");
+
+        // the splice swap
+        let mut setup2 = make_test_channel_setup();
+        setup2.channel_value_sat += 1;
+        setup2.funding_outpoint.vout += 1;
+        node.setup_channel(channel_id.clone(), None, setup2, &DerivationPath::master())
+            .expect("swap");
+
+        // the NEW funding's same-number re-sign
+        node.with_channel(&channel_id, |chan| {
+            chan.enforcement_state.next_holder_commit_info =
+                Some((make_test_commitment_info(), dummy_sigs.clone()));
+            chan.activate_initial_commitment().expect("same-number re-sign");
+            // the numbering did NOT advance (1 -> 1, replace-in-place)
+            assert_eq!(
+                chan.enforcement_state.next_holder_commit_num, 1,
+                "re-sign does not advance numbering"
+            );
+            // the channel-scoped state was rebuilt for the new funding
+            assert!(chan.enforcement_state.current_holder_commit_info.is_some());
+            // the OLD funding's record is intact (the justice window)
+            let snap = chan
+                .enforcement_state
+                .prev_funding_commitment
+                .as_ref()
+                .expect("snapshot survives the re-sign");
+            assert!(snap.current_holder_info.is_some(), "old holder info");
+            assert!(
+                snap.current_counterparty_info.is_some(),
+                "old counterparty info"
+            );
+            Ok(())
+        })
+        .expect("composite invariants");
+    }
+
+    #[test]
     fn setup_channel_incompatible_splice_test() {
         let (node, channel_id) =
             init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
