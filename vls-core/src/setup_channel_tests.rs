@@ -371,6 +371,8 @@ mod tests {
             chan.enforcement_state.current_holder_commit_info =
                 Some(make_test_commitment_info());
             chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
+            chan.enforcement_state.current_counterparty_commit_info =
+                Some(make_test_commitment_info());
             Ok(chan.setup.funding_outpoint)
         })
         .expect("seed state");
@@ -394,6 +396,16 @@ mod tests {
             .expect("snapshot exists after swap");
         assert_eq!(snap.outpoint, old_outpoint);
         assert!(snap.current_holder_info.is_some(), "old holder info preserved");
+        assert!(
+            snap.current_counterparty_info.is_some(),
+            "old counterparty info preserved (the rbf-stale fix)"
+        );
+        assert!(
+            node.with_channel(&channel_id, |c| {
+                Ok(c.enforcement_state.current_counterparty_commit_info.is_none())
+            })
+            .expect("counterparty moved")
+        );
         // ...and the channel-scoped current was moved out (rebuilt by the new flow)
         assert!(
             node.with_channel(&channel_id, |c| {

@@ -811,6 +811,11 @@ pub struct PrevFundingCommitment {
     pub current_holder_signatures: Option<CommitmentSignatures>,
     /// The pending-next holder commitment, if any, on that funding
     pub next_holder_info: Option<(CommitmentInfo2, CommitmentSignatures)>,
+    /// The current COUNTERPARTY commitment info on that funding — moved
+    /// too, else its funding-1-scale totals trip the funding-2 view's
+    /// claimable check (the splice_rbf rejection, decoded from the
+    /// 889324+330 outputs vs the 894199 funding)
+    pub current_counterparty_info: Option<CommitmentInfo2>,
 }
 
 impl EnforcementState {
@@ -1009,6 +1014,7 @@ impl EnforcementState {
             current_holder_info: self.current_holder_commit_info.take(),
             current_holder_signatures: self.current_counterparty_signatures.take(),
             next_holder_info: self.next_holder_commit_info.take(),
+            current_counterparty_info: self.current_counterparty_commit_info.take(),
         });
     }
 
