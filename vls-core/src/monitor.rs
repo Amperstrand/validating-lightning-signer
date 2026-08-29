@@ -355,8 +355,12 @@ impl<'a> push_decoder::Listener for PushListener<'a> {
 
         closing_change.map(|c| decode_state.add_change(c));
 
-        if decode_state.closing_tx.is_some() {
-            assert_eq!(decode_state.input_num, 0, "closing tx must have only one input");
+        if decode_state.closing_tx.is_some() && decode_state.input_num != 0 {
+            // A multi-input spend of the funding is a splice (only the
+            // 2-of-2 funding keys can construct it), not a unilateral
+            // close — stop gathering it as a closing tx.
+            warn!("funding spent by multi-input tx (splice): not tracking as close");
+            decode_state.closing_tx = None;
         }
         decode_state.input_num += 1;
     }
