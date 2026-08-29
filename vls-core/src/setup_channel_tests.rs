@@ -7,6 +7,11 @@ mod tests {
     use bitcoin::hashes::hex::FromHex;
     use bitcoin::secp256k1::ecdsa::Signature;
     use bitcoin::secp256k1::SecretKey;
+    use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxIn};
+    use bitcoin::blockdata::witness::Witness;
+    use bitcoin::blockdata::locktime::absolute::LockTime;
+    use bitcoin::transaction::Version;
+    use bitcoin::blockdata::transaction::Sequence;
     use bitcoin::ScriptBuf;
     use lightning::ln::chan_utils::ChannelPublicKeys;
     use test_log::test;
@@ -225,7 +230,66 @@ mod tests {
             node.setup_channel(channel_id, None, setup1.clone(), &DerivationPath::master());
         let chan = result.expect("splice re-setup accepted");
         assert_eq!(chan.setup, setup1);
-        assert!(chan.prev_funding.is_some(), "previous funding recorded");
+        assert!(chan.prev_setup.is_some(), "previous funding recorded");
+    }
+
+    #[test]
+    fn setup_for_tx_funding_view_test() {
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+
+        // R10 both rails: a tx spending the CURRENT funding matches the
+        // current setup; after a splice, a tx spending the PREVIOUS
+        // funding matches the previous setup; anything else is rejected.
+        node.with_channel(&channel_id, |chan| {
+            let empty_tx = Transaction {
+                version: Version(2),
+                lock_time: LockTime::ZERO,
+                input: vec![],
+                output: vec![],
+            };
+            assert!(
+                chan.setup_for_tx(&empty_tx).is_err(),
+                "no funding input -> no match"
+            );
+            Ok(())
+        })
+        .expect("no-input case");
+
+        let mut setup2 = make_test_channel_setup();
+        setup2.channel_value_sat += 1;
+        setup2.funding_outpoint.vout += 1;
+        let prev_outpoint = node
+            .with_channel(&channel_id, |chan| Ok(chan.setup.funding_outpoint))
+            .expect("cur outpoint");
+        node.setup_channel(channel_id.clone(), None, setup2, &DerivationPath::master())
+            .expect("splice swap");
+
+        node.with_channel(&channel_id, |chan| {
+            let build = |outpoint: OutPoint| Transaction {
+                version: Version(2),
+                lock_time: LockTime::ZERO,
+                input: vec![TxIn {
+                    previous_output: outpoint,
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence::MAX,
+                    witness: Witness::default(),
+                }],
+                output: vec![],
+            };
+            let v = chan
+                .setup_for_tx(&build(chan.setup.funding_outpoint))
+                .expect("current view");
+            assert_eq!(v.funding_outpoint, chan.setup.funding_outpoint);
+            let v = chan.setup_for_tx(&build(prev_outpoint)).expect("prev view");
+            assert_eq!(v.funding_outpoint, prev_outpoint);
+            assert!(
+                chan.setup_for_tx(&build(OutPoint::null())).is_err(),
+                "unknown funding"
+            );
+            Ok(())
+        })
+        .expect("views");
     }
 
     #[test]

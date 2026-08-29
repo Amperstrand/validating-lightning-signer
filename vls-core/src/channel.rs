@@ -512,11 +512,12 @@ pub struct Channel {
     pub id: Option<ChannelId>,
     /// The chain monitor base
     pub monitor: ChainMonitorBase,
-    /// Previous funding (outpoint, channel value) while a splice is in
-    /// flight: CLN sends the post-splice SetupChannel BEFORE requesting
-    /// the splice tx signature, which spends the PREVIOUS funding
-    /// (the LDK "sign prev funding" case).
-    pub prev_funding: Option<(OutPoint, u64)>,
+    /// The previous setup while a splice is in flight: CLN sends the
+    /// post-splice SetupChannel BEFORE requesting the splice tx
+    /// signature (which spends the PREVIOUS funding — the LDK "sign
+    /// prev funding" case), and old-funding commitments can still
+    /// arrive after the swap (R10: validate against the matched view).
+    pub prev_setup: Option<ChannelSetup>,
     /// The confirmed (locked) funding outpoint — recorded by CLN's
     /// hsmd_lock_outpoint after mutual splice_locked (the funding7
     /// funding_locked analogue).
@@ -1981,9 +1982,9 @@ impl Channel {
         let channel_value_sat =
             if input.previous_output == self.setup.funding_outpoint {
                 self.setup.channel_value_sat
-            } else if let Some((prev_outpoint, prev_value)) = self.prev_funding {
-                if input.previous_output == prev_outpoint {
-                    prev_value
+            } else if let Some(ref prev_setup) = self.prev_setup {
+                if input.previous_output == prev_setup.funding_outpoint {
+                    prev_setup.channel_value_sat
                 } else {
                     return Err(Status::invalid_argument(
                         "splice input is not the channel funding outpoint",
@@ -2013,6 +2014,26 @@ impl Channel {
             .secp_ctx
             .sign_ecdsa(&Message::from_digest(sighash.to_byte_array()), &funding_key);
         Ok(sig)
+    }
+
+    /// The setup view a commitment's transaction targets — matched by
+    /// its funding input outpoint: the current (post-splice) funding or
+    /// the previous one while a splice is in flight. A commitment
+    /// spending neither is not ours.
+    pub fn setup_for_tx(&self, tx: &Transaction) -> Result<ChannelSetup, Status> {
+        for input in &tx.input {
+            if input.previous_output == self.setup.funding_outpoint {
+                return Ok(self.setup.clone());
+            }
+            if let Some(ref prev) = self.prev_setup {
+                if input.previous_output == prev.funding_outpoint {
+                    return Ok(prev.clone());
+                }
+            }
+        }
+        Err(Status::invalid_argument(
+            "commitment does not spend a known funding outpoint",
+        ))
     }
 
     /// Splice compatibility (the funding7 `is_compatible` shape): only
@@ -2905,8 +2926,12 @@ impl Channel {
 
         let node = self.get_node();
         let state = node.get_state();
+        // R10: compute against the funding this commitment's tx actually
+        // spends — an old-funding commitment arriving post-swap must not
+        // be valued against the new (possibly reduced) channel_value
+        let view = self.setup_for_tx(tx)?;
         let delta =
-            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup);
+            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &view);
 
         #[cfg(not(fuzzing))]
         self.check_holder_tx_signatures(

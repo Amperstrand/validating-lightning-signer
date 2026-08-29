@@ -1403,7 +1403,7 @@ impl Node {
                         id0: channel_id0.clone(),
                         id: channel_id.clone(),
                         monitor: monitor_base.clone(),
-                        prev_funding: None,
+                        prev_setup: None,
                         funding_locked: None,
                     };
 
@@ -1973,8 +1973,7 @@ impl Node {
                     )));
                 }
                 let mut spliced = c.clone();
-                spliced.prev_funding =
-                    Some((c.setup.funding_outpoint, c.setup.channel_value_sat));
+                spliced.prev_setup = Some(c.setup.clone());
                 spliced.setup = setup.clone();
                 spliced.monitor.replace_funding_outpoint(&setup.funding_outpoint);
                 *c = spliced.clone();
@@ -2051,7 +2050,7 @@ impl Node {
                 id0: channel_id0.clone(),
                 id: opt_channel_id.clone(),
                 monitor,
-                prev_funding: None,
+                prev_setup: None,
                 funding_locked: None,
             }
         };
