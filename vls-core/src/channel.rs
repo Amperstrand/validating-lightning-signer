@@ -2637,7 +2637,10 @@ impl Channel {
                 &self.enforcement_state,
                 commitment_number,
                 &remote_per_commitment_point,
-                &self.setup,
+                // route by the tx's funding input: during a splice window an
+                // old-funding commitment must validate against the prev view
+                // (the crash9/10 fee underflow validated it against self.setup)
+                &self.setup_for_tx(tx)?,
                 &self.get_chain_state(),
                 &info2,
             )
