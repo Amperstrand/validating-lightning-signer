@@ -1394,6 +1394,11 @@ impl Handler for ChannelHandler {
                 let remote_per_commitment_point =
                     PublicKey::from_slice(&m.remote_per_commitment_point.0).expect("pubkey");
                 let commit_num = m.commitment_number;
+                info!(
+                    "#6870-check: SignRemoteCommitmentTx num={} point={}",
+                    commit_num,
+                    remote_per_commitment_point
+                );
                 let feerate_sat_per_kw = m.feerate;
                 // Flip offered and received
                 let (offered_htlcs, received_htlcs) = extract_htlcs(&m.htlcs);
@@ -1414,6 +1419,11 @@ impl Handler for ChannelHandler {
                 let remote_per_commitment_point =
                     PublicKey::from_slice(&m.remote_per_commitment_point.0).expect("pubkey");
                 let commit_num = m.commitment_number;
+                info!(
+                    "#6870-check: SignRemoteCommitmentTx2 num={} point={}",
+                    commit_num,
+                    remote_per_commitment_point
+                );
                 let feerate_sat_per_kw = m.feerate;
                 // Flip offered and received
                 let (offered_htlcs, received_htlcs) = extract_htlcs(&m.htlcs);
