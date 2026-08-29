@@ -1670,11 +1670,12 @@ impl Handler for ChannelHandler {
                 }))
             }
             Message::SignSpliceTx(m) => {
-                let remote_funding_key =
-                    match PublicKey::from_slice(&m.remote_funding_key.0) {
+                let remote_funding_key = match PublicKey::from_slice(&m.remote_funding_key.0) {
                     Ok(k) => k,
                     Err(_) => {
-                        return Err(Status::invalid_argument("malformed remote funding key"))
+                        return Err(Error::Signing(Status::invalid_argument(
+                            "malformed remote funding key",
+                        )))
                     }
                 };
                 // the funding input carries no witness_utxo on the
