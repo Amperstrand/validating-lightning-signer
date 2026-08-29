@@ -85,15 +85,13 @@ mod tests {
             .expect("valid holder commitment");
     }
 
-    // THE SLOTS LEG 2 EXECUTABLE SPEC (documented-RED): the interleave —
-    // a new-funding commitment pending, then an old-funding straggler —
-    // currently fails at the RECOMPOSITION: the builder reads the live
-    // self.setup, so an old-funding tx cannot recompose-match post-splice
-    // ("recomposed tx mismatch"). This is precisely the gap the per-funding
-    // records close: the old funding's commitments must validate against
-    // their OWN record. Un-ignore when slots land.
+    // THE SLOTS LEG 2 ACCEPTANCE TEST (GREEN): the interleave — a
+    // new-funding commitment pending, then an old-funding straggler —
+    // both retained (the record holds the straggler; the channel slot
+    // keeps the new funding's pending). The view-parameterization stack
+    // (the recompose helper, the sighash, the builder, the storage gate)
+    // routes the old-funding tx through its own view end-to-end.
     #[test]
-    #[ignore = "slots leg 2 driver: the straggler recomposition needs the per-funding view"]
     fn splice_window_straggler_retains_new_funding_pending() {
         // The interleave: during the splice window, a new-funding commitment
         // is stored, then an old-funding straggler arrives — BOTH pendings
@@ -138,17 +136,51 @@ mod tests {
             &node_ctx, &chan_ctx, 1, 1100, 1_500_000, 1_399_000, vec![], vec![],
         );
         let (csig, hsigs) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut new_ctx);
-        validate_holder_commitment(&node_ctx, &chan_ctx, &new_ctx, &csig, &hsigs)
-            .expect("new-funding commitment");
-        // the helper auto-advances (revoke) after validating — roll the
-        // numbering back so the new-funding commitment is PENDING again,
-        // the state the interleave scenario needs (the straggler arrives
-        // while the new funding's commitment is stored-but-unrevoked)
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            chan.enforcement_state.set_next_holder_commit_num_for_testing(1);
-            Ok(())
-        })
-        .expect("rollback");
+        // the RAW validate (no helper tail): the new-funding commitment must
+        // stay PENDING (stored, not revoked) — the interleave state the
+        // straggler arrives into
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                let htlcs =
+                    Channel::htlcs_info2_to_oic(&new_ctx.offered_htlcs, &new_ctx.received_htlcs);
+                let channel_parameters = chan.make_channel_parameters();
+                let parameters = channel_parameters.as_holder_broadcastable();
+                let save_commit_num = chan.enforcement_state.next_holder_commit_num;
+                chan.enforcement_state.set_next_holder_commit_num_for_testing(new_ctx.commit_num);
+                let per_commitment_point = chan.get_per_commitment_point(new_ctx.commit_num)?;
+                chan.enforcement_state.set_next_holder_commit_num_for_testing(save_commit_num);
+                let keys = chan.make_holder_tx_keys(&per_commitment_point);
+                let redeem_scripts = build_tx_scripts(
+                    &keys,
+                    new_ctx.to_broadcaster,
+                    new_ctx.to_countersignatory,
+                    &htlcs,
+                    &parameters,
+                    &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
+                    &chan.setup.counterparty_points.funding_pubkey,
+                )
+                .expect("scripts");
+                let output_witscripts: Vec<_> =
+                    redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
+                chan.validate_holder_commitment_tx(
+                    &new_ctx
+                        .tx
+                        .as_ref()
+                        .unwrap()
+                        .trust()
+                        .built_transaction()
+                        .transaction,
+                    &output_witscripts,
+                    new_ctx.commit_num,
+                    new_ctx.feerate_per_kw,
+                    new_ctx.offered_htlcs.clone(),
+                    new_ctx.received_htlcs.clone(),
+                    &csig,
+                    &hsigs,
+                )
+            })
+            .expect("new-funding commitment stored pending");
 
         node_ctx.node.with_channel(&channel_id, |chan| {
             assert!(
@@ -165,8 +197,54 @@ mod tests {
             Ok(())
         })
         .expect("diagnostics");
-        validate_holder_commitment(&node_ctx, &chan_ctx, &straggler_ctx, &scsig, &shsigs)
-            .expect("straggler accepted");
+        // the RAW validate for the straggler too — the helper's num==0 tail
+        // would activate (consuming the slot); the interleave's post-state
+        // must keep both pendings untouched for the assertions
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                let htlcs = Channel::htlcs_info2_to_oic(
+                    &straggler_ctx.offered_htlcs,
+                    &straggler_ctx.received_htlcs,
+                );
+                let channel_parameters = chan.make_channel_parameters();
+                let parameters = channel_parameters.as_holder_broadcastable();
+                let save_commit_num = chan.enforcement_state.next_holder_commit_num;
+                chan.enforcement_state
+                    .set_next_holder_commit_num_for_testing(straggler_ctx.commit_num);
+                let per_commitment_point = chan.get_per_commitment_point(straggler_ctx.commit_num)?;
+                chan.enforcement_state.set_next_holder_commit_num_for_testing(save_commit_num);
+                let keys = chan.make_holder_tx_keys(&per_commitment_point);
+                let redeem_scripts = build_tx_scripts(
+                    &keys,
+                    straggler_ctx.to_broadcaster,
+                    straggler_ctx.to_countersignatory,
+                    &htlcs,
+                    &parameters,
+                    &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
+                    &chan.setup.counterparty_points.funding_pubkey,
+                )
+                .expect("scripts");
+                let output_witscripts: Vec<_> =
+                    redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
+                chan.validate_holder_commitment_tx(
+                    &straggler_ctx
+                        .tx
+                        .as_ref()
+                        .unwrap()
+                        .trust()
+                        .built_transaction()
+                        .transaction,
+                    &output_witscripts,
+                    straggler_ctx.commit_num,
+                    straggler_ctx.feerate_per_kw,
+                    straggler_ctx.offered_htlcs.clone(),
+                    straggler_ctx.received_htlcs.clone(),
+                    &scsig,
+                    &shsigs,
+                )
+            })
+            .expect("straggler accepted (raw)");
 
         node_ctx.node.with_channel(&channel_id, |chan| {
             let prev = chan

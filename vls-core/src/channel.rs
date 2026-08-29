@@ -1005,6 +1005,7 @@ impl Channel {
     #[instrument(skip(self))]
     fn check_holder_tx_signatures(
         &self,
+        setup: &ChannelSetup,
         per_commitment_point: &PublicKey,
         txkeys: &TxCreationKeys,
         feerate_per_kw: u32,
@@ -1014,7 +1015,7 @@ impl Channel {
     ) -> Result<(), Status> {
         let redeemscript = make_funding_redeemscript(
             &self.keys.pubkeys(&self.secp_ctx).funding_pubkey,
-            &self.setup.counterparty_points.funding_pubkey,
+            &setup.counterparty_points.funding_pubkey,
         );
 
         // unwrap is safe because we just created the tx and it's well formed
@@ -1023,7 +1024,7 @@ impl Channel {
                 .p2wsh_signature_hash(
                     0,
                     &redeemscript,
-                    Amount::from_sat(self.setup.channel_value_sat),
+                    Amount::from_sat(setup.channel_value_sat),
                     EcdsaSighashType::All,
                 )
                 .unwrap()
@@ -1223,6 +1224,7 @@ impl Channel {
         info!("#hang-probe: delta+payments validated");
         #[cfg(not(fuzzing))]
         self.check_holder_tx_signatures(
+            &self.setup,
             &per_commitment_point,
             &txkeys,
             feerate_per_kw,
@@ -1254,9 +1256,19 @@ impl Channel {
                 counterparty_commit_sig.clone(),
                 counterparty_htlc_sigs.to_vec(),
             );
-            self.enforcement_state.next_holder_commit_info = Some((info2, counterparty_signatures));
-            self.enforcement_state.holder_commitment_funding =
-                Some(self.setup.funding_outpoint);
+            if commitment_number == self.enforcement_state.next_holder_commit_num {
+                self.enforcement_state.next_holder_commit_info =
+                    Some((info2, counterparty_signatures));
+                self.enforcement_state.holder_commitment_funding =
+                    Some(self.setup.funding_outpoint);
+            } else {
+                // The old-funding straggler: store into the snapshot record —
+                // NOT the channel slot (the clobber would lose the new
+                // funding's pending during the interleave); no retag.
+                if let Some(prev) = self.enforcement_state.prev_funding_commitment.as_mut() {
+                    prev.next_holder_info = Some((info2, counterparty_signatures));
+                }
+            }
         }
 
         trace_enforcement_state!(self);
@@ -1880,7 +1892,32 @@ impl Channel {
         to_counterparty_value_sat: u64,
         htlcs: Vec<HTLCOutputInCommitment>,
     ) -> CommitmentTransaction {
-        let channel_parameters = self.make_channel_parameters();
+        self.make_holder_commitment_tx_with_setup(
+            &self.setup,
+            commitment_number,
+            per_commitment_point,
+            feerate_per_kw,
+            to_holder_value_sat,
+            to_counterparty_value_sat,
+            htlcs,
+        )
+    }
+
+    /// Build a holder commitment tx against a specific funding view —
+    /// the recomposition of an old-funding commitment during the splice
+    /// window must match the tx it was built against (the retiring
+    /// funding's parameters), not the live post-splice setup.
+    pub(crate) fn make_holder_commitment_tx_with_setup(
+        &self,
+        setup: &ChannelSetup,
+        commitment_number: u64,
+        per_commitment_point: &PublicKey,
+        feerate_per_kw: u32,
+        to_holder_value_sat: u64,
+        to_counterparty_value_sat: u64,
+        htlcs: Vec<HTLCOutputInCommitment>,
+    ) -> CommitmentTransaction {
+        let channel_parameters = self.make_channel_parameters_with_setup(setup);
         let parameters = channel_parameters.as_holder_broadcastable();
         let mut commitment_tx = CommitmentTransaction::new(
             INITIAL_COMMITMENT_NUMBER - commitment_number,
@@ -1892,7 +1929,7 @@ impl Channel {
             &parameters,
             &self.secp_ctx,
         );
-        if self.setup.is_anchors() {
+        if setup.is_anchors() {
             commitment_tx = commitment_tx.with_non_zero_fee_anchors();
         }
         commitment_tx
@@ -1927,22 +1964,32 @@ impl Channel {
 
     /// Build channel parameters, used to further build a commitment transaction
     pub fn make_channel_parameters(&self) -> ChannelTransactionParameters {
+        self.make_channel_parameters_with_setup(&self.setup)
+    }
+
+    /// Build channel parameters against a specific funding view — an
+    /// old-funding commitment's recomposition must use the retiring
+    /// funding's parameters, not the live (post-splice) setup.
+    pub fn make_channel_parameters_with_setup(
+        &self,
+        setup: &ChannelSetup,
+    ) -> ChannelTransactionParameters {
         let funding_outpoint = chain::transaction::OutPoint {
-            txid: self.setup.funding_outpoint.txid,
-            index: self.setup.funding_outpoint.vout as u16,
+            txid: setup.funding_outpoint.txid,
+            index: setup.funding_outpoint.vout as u16,
         };
         let channel_parameters = ChannelTransactionParameters {
             holder_pubkeys: self.get_channel_basepoints(),
-            holder_selected_contest_delay: self.setup.holder_selected_contest_delay,
-            is_outbound_from_holder: self.setup.is_outbound,
+            holder_selected_contest_delay: setup.holder_selected_contest_delay,
+            is_outbound_from_holder: setup.is_outbound,
             counterparty_parameters: Some(CounterpartyChannelTransactionParameters {
-                pubkeys: self.setup.counterparty_points.clone(),
-                selected_contest_delay: self.setup.counterparty_selected_contest_delay,
+                pubkeys: setup.counterparty_points.clone(),
+                selected_contest_delay: setup.counterparty_selected_contest_delay,
             }),
             funding_outpoint: Some(funding_outpoint),
             splice_parent_funding_txid: None,
-            channel_type_features: self.setup.features(),
-            channel_value_satoshis: self.setup.channel_value_sat,
+            channel_type_features: setup.features(),
+            channel_value_satoshis: setup.channel_value_sat,
         };
         channel_parameters
     }
@@ -2853,7 +2900,8 @@ impl Channel {
 
         let htlcs = Self::htlcs_info2_to_oic(&info2.offered_htlcs, &info2.received_htlcs);
 
-        let recomposed_tx = self.make_holder_commitment_tx(
+        let recomposed_tx = self.make_holder_commitment_tx_with_setup(
+            &view,
             commitment_number,
             &per_commitment_point,
             feerate_per_kw,
@@ -2958,6 +3006,7 @@ impl Channel {
 
         #[cfg(not(fuzzing))]
         self.check_holder_tx_signatures(
+            &view,
             &per_commitment_point,
             &txkeys,
             feerate_per_kw,
@@ -2982,16 +3031,25 @@ impl Channel {
         if commitment_number == self.enforcement_state.next_holder_commit_num
             || (self.enforcement_state.prev_funding_commitment.is_some()
                 && commitment_number + 1 == self.enforcement_state.next_holder_commit_num
-                && self.enforcement_state.holder_commitment_funding
-                    != Some(self.setup.funding_outpoint))
+                && view.funding_outpoint != self.setup.funding_outpoint)
         {
             let counterparty_signatures = CommitmentSignatures(
                 counterparty_commit_sig.clone(),
                 counterparty_htlc_sigs.to_vec(),
             );
-            self.enforcement_state.next_holder_commit_info = Some((info2, counterparty_signatures));
-            self.enforcement_state.holder_commitment_funding =
-                Some(self.setup.funding_outpoint);
+            if commitment_number == self.enforcement_state.next_holder_commit_num {
+                self.enforcement_state.next_holder_commit_info =
+                    Some((info2, counterparty_signatures));
+                self.enforcement_state.holder_commitment_funding =
+                    Some(self.setup.funding_outpoint);
+            } else {
+                // The old-funding straggler: store into the snapshot record —
+                // NOT the channel slot (the clobber would lose the new
+                // funding's pending during the interleave); no retag.
+                if let Some(prev) = self.enforcement_state.prev_funding_commitment.as_mut() {
+                    prev.next_holder_info = Some((info2, counterparty_signatures));
+                }
+            }
         }
 
         trace_enforcement_state!(self);
