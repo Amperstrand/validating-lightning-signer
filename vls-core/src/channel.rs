@@ -2968,7 +2968,14 @@ impl Channel {
 
         // Remove the info and sigs from next holder and make current
         if let Some((info2, sigs)) = self.enforcement_state.next_holder_commit_info.take() {
-            self.enforcement_state.set_next_holder_commit_num(1, info2, sigs);
+            if self.enforcement_state.next_holder_commit_num == 0 {
+                self.enforcement_state.set_next_holder_commit_num(1, info2, sigs);
+            } else {
+                // same-number splice re-activation: replace the current
+                // holder commitment in place (the number does not advance)
+                self.enforcement_state.current_holder_commit_info = Some(info2);
+                self.enforcement_state.current_counterparty_signatures = Some(sigs);
+            }
         } else {
             return Err(invalid_argument(format!(
                 "activate_initial_commitment called before validation of the initial commitment"

@@ -301,6 +301,11 @@ mod tests {
                 Some((make_test_commitment_info(), dummy_sigs.clone()));
             chan.activate_initial_commitment().expect("num-0 re-activation");
             assert!(chan.activate_initial_commitment().is_err(), "replay rejected");
+            // same-number splice re-activation with a fresh pending: the
+            // current info is replaced in place, the number does not advance
+            chan.enforcement_state.next_holder_commit_info =
+                Some((make_test_commitment_info(), dummy_sigs.clone()));
+            chan.activate_initial_commitment().expect("splice re-activation");
             chan.enforcement_state.set_next_holder_commit_num_for_testing(2);
             chan.enforcement_state.next_holder_commit_info =
                 Some((make_test_commitment_info(), dummy_sigs.clone()));
