@@ -28,6 +28,12 @@ pub struct ChannelEntry {
     pub id: Option<ChannelId>,
     /// Enforcement and validation state for the channel
     pub enforcement_state: EnforcementState,
+    /// The retiring funding's setup during a splice window — restored so
+    /// old-funding commitments keep their view across restarts (the crash9
+    /// fix: a hardcoded None validated them against the post-splice
+    /// funding — "fee underflow 894199 - 995120").
+    #[serde(default)]
+    pub prev_setup: Option<ChannelSetup>,
     /// Birth blockheight for stub channels, None for regular channels
     pub blockheight: Option<u32>,
 }

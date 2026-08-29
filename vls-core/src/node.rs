@@ -1403,7 +1403,7 @@ impl Node {
                         id0: channel_id0.clone(),
                         id: channel_id.clone(),
                         monitor: monitor_base.clone(),
-                        prev_setup: None,
+                        prev_setup: channel_entry.prev_setup,
                         funding_locked: None,
                     };
 

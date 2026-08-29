@@ -145,5 +145,6 @@ pub fn channel_entry_with_id(channel_id: lightning_signer::channel::ChannelId) -
         id: Some(channel_id),
         enforcement_state: EnforcementState::new(0),
         blockheight: None,
+        prev_setup: None,
     }
 }

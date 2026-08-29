@@ -164,6 +164,7 @@ impl<S: KVVStore, F: ValueFormat> Persist for KVVPersister<S, F> {
             id: None,
             enforcement_state: EnforcementState::new(0),
             blockheight: Some(stub.blockheight),
+            prev_setup: None,
         };
         let value = F::ser_value(&entry)?;
         self.put(&key, value)
@@ -214,6 +215,7 @@ impl<S: KVVStore, F: ValueFormat> Persist for KVVPersister<S, F> {
             id: channel.id.clone(),
             enforcement_state: channel.enforcement_state.clone(),
             blockheight: None,
+            prev_setup: channel.prev_setup.clone(),
         };
         let value = F::ser_value(&entry)?;
         self.put(&key, value)
