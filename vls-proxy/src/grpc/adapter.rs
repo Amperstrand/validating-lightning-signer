@@ -175,10 +175,14 @@ impl ProtocolAdapter {
                                     let reply = ChannelReply { reply: resp.message, is_temporary_failure: resp.is_temporary_failure };
                                     let send_res = channel_req.reply_tx.send(reply);
                                     if send_res.is_err() {
-                                        error!("failed to send response back to internal channel; \
-                                               triggering shutdown");
-                                        shutdown_trigger.trigger();
-                                        break;
+                                        // The awaiting task is gone (connection
+                                        // teardown aborts in-flight request tasks —
+                                        // e.g. lightningd's restart closes the hsmd
+                                        // socket). The reply is undeliverable by
+                                        // definition; dropping it is correct. The
+                                        // old proxy-wide shutdown here starved the
+                                        // restarted node's HsmdInit (restart-death).
+                                        warn!("dropping signer reply: requesting task is gone");
                                     }
                                 } else {
                                     error!("got response for unknown request ID {}; \
