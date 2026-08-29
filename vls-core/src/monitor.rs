@@ -878,6 +878,21 @@ impl ChainMonitorBase {
         state.funding_vouts.push(outpoint.vout);
     }
 
+    /// Replace the tracked funding outpoint — splicing moves the channel
+    /// to new funding once the splice is signed. The pre-splice outpoint
+    /// remains covered by the tracker's earlier listener registration.
+    /// Funding depth restarts at zero for the new outpoint.
+    pub fn replace_funding_outpoint(&mut self, outpoint: &OutPoint) {
+        self.funding_outpoint = *outpoint;
+        let mut state = self.get_state();
+        state.funding_txids.clear();
+        state.funding_vouts.clear();
+        state.funding_txids.push(outpoint.txid);
+        state.funding_vouts.push(outpoint.vout);
+        state.funding_height = None;
+        state.funding_double_spent_height = None;
+    }
+
     /// Add a funding input
     /// For single-funding
     pub fn add_funding_inputs(&self, tx: &Transaction) {

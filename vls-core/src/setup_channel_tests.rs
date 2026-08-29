@@ -210,21 +210,18 @@ mod tests {
     }
 
     #[test]
-    fn setup_channel_already_setup_test() {
+    fn setup_channel_splice_test() {
         let (node, channel_id) =
             init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
 
-        // Trying to ready it again with different values should fail.
+        // A different setup for a Ready channel is CLN's post-splice
+        // re-setup: accepted, with both funding outpoints watched.
         let mut setup1 = make_test_channel_setup();
         setup1.channel_value_sat += 1;
-        let result = node.setup_channel(channel_id, None, setup1, &DerivationPath::master());
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.code(), Code::InvalidArgument);
-        assert_eq!(
-            err.message(),
-            format!("channel already ready with different setup: {}", TEST_CHANNEL_ID[0])
-        );
+        let result =
+            node.setup_channel(channel_id, None, setup1.clone(), &DerivationPath::master());
+        let chan = result.expect("splice re-setup accepted");
+        assert_eq!(chan.setup, setup1);
     }
 
     #[test]

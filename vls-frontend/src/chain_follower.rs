@@ -255,6 +255,19 @@ impl ChainFollower {
 pub fn get_first_and_last_checkpoint(
     network: Network,
 ) -> Option<(u32, (u32, BlockHash, FilterHeader, BlockHeader))> {
+    // inr2 patch (2026-08-28): mirror the txoo get_latest_checkpoint env
+    // override — the proxy-side source must start at the same anchor as the
+    // vlsd-side tracker fast-forward (see VLS_SIGNET_ANCHOR in txoo patch).
+    if network == Network::Signet {
+        if let Ok(anchor) = std::env::var("VLS_SIGNET_ANCHOR") {
+            let parts: Vec<&str> = anchor.splitn(4, ':').collect();
+            if parts.len() == 4 {
+                let height: u32 = parts[0].parse().expect("VLS_SIGNET_ANCHOR height");
+                let ckp = decode_checkpoint((height, parts[1], parts[2], parts[3]));
+                return Some((height, ckp));
+            }
+        }
+    }
     let checkpoints = match network {
         Network::Bitcoin => CHECKPOINTS_BITCOIN,
         Network::Testnet => CHECKPOINTS_TESTNET,

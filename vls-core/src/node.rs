@@ -1932,6 +1932,49 @@ impl Node {
         // continue with the initial channel_id0.
         let chan_id = opt_channel_id.as_ref().unwrap_or(&channel_id0);
 
+        // Splice: CLN re-sends hsmd_setup_channel with post-splice
+        // parameters after splice commitments are secured. Accept the new
+        // setup for a Ready channel, keeping both funding outpoints watched.
+        {
+            let channels = self.get_channels();
+            let arcobj = channels
+                .get(&channel_id0)
+                .ok_or_else(|| {
+                    invalid_argument(format!("channel does not exist: {}", channel_id0))
+                })?
+                .clone();
+            drop(channels);
+            let mut slot = arcobj.lock().unwrap();
+            if let ChannelSlot::Ready(c) = &mut *slot {
+                if c.setup == setup {
+                    return Ok(c.clone());
+                }
+                let mut spliced = c.clone();
+                spliced.setup = setup.clone();
+                spliced.monitor.replace_funding_outpoint(&setup.funding_outpoint);
+                spliced.reset_commitment_chain_for_splice();
+                *c = spliced.clone();
+                drop(slot);
+                warn!(
+                    "splice: channel {} setup updated, value {}",
+                    channel_id0, setup.channel_value_sat
+                );
+                validator.validate_setup_channel(self, &setup, holder_shutdown_key_path)?;
+                let provider = ChannelCommitmentPointProvider::new(arcobj.clone());
+                tracker.add_listener(
+                    spliced.monitor.as_monitor(Box::new(provider)),
+                    OrderedSet::from_iter(vec![setup.funding_outpoint.txid]),
+                );
+                self.persister
+                    .update_tracker(&self.get_id(), &tracker)
+                    .map_err(|_| internal_error("tracker persist failed"))?;
+                self.persister
+                    .update_channel(&self.get_id(), &spliced)
+                    .map_err(|_| internal_error("persist failed"))?;
+                return Ok(spliced);
+            }
+        }
+
         let chan = {
             let channels = self.get_channels();
             let arcobj = channels.get(&channel_id0).ok_or_else(|| {

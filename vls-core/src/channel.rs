@@ -1940,6 +1940,52 @@ impl Channel {
     }
 
     /// Sign a mutual close transaction after rebuilding it from the supplied arguments
+    /// Sign a splice transaction input with the channel funding key;
+    /// CLN's channeld requests this once splice commitments are secured.
+    /// Signer-side checks on top of the stock-hsmd trust model: the
+    /// counterparty funding key must match the channel's, and the input
+    /// must spend the channel's current funding outpoint. The psbt amount
+    /// is cross-checked when present (the accepter's funding input has no
+    /// witness_utxo — the channel value stands in).
+    pub fn sign_splice_tx(
+        &self,
+        tx: &Transaction,
+        input_index: u32,
+        remote_funding_key: &PublicKey,
+        input_amount_sat: Option<u64>,
+    ) -> Result<Signature, Status> {
+        if *remote_funding_key != self.setup.counterparty_points.funding_pubkey {
+            return Err(Status::invalid_argument("remote funding key mismatch"));
+        }
+        let input = tx
+            .input
+            .get(input_index as usize)
+            .ok_or_else(|| Status::invalid_argument("splice input index out of range"))?;
+        if input.previous_output != self.setup.funding_outpoint {
+            return Err(Status::invalid_argument("splice input is not the channel funding outpoint"));
+        }
+        let input_amount_sat =
+            input_amount_sat.unwrap_or(self.setup.channel_value_sat);
+        if input_amount_sat != self.setup.channel_value_sat {
+            return Err(Status::invalid_argument("splice input value is not the channel value"));
+        }
+        let funding_key = self.keys.funding_key(None);
+        let funding_pubkey = PublicKey::from_secret_key(&self.secp_ctx, &funding_key);
+        let redeemscript = make_funding_redeemscript(&funding_pubkey, remote_funding_key);
+        let sighash = SighashCache::new(tx)
+            .p2wsh_signature_hash(
+                input_index as usize,
+                &redeemscript,
+                Amount::from_sat(input_amount_sat),
+                EcdsaSighashType::All,
+            )
+            .map_err(|_| Status::internal("splice sighash failed"))?;
+        let sig = self
+            .secp_ctx
+            .sign_ecdsa(&Message::from_digest(sighash.to_byte_array()), &funding_key);
+        Ok(sig)
+    }
+
     pub fn sign_mutual_close_tx_phase2(
         &mut self,
         to_holder_value_sat: u64,
@@ -2835,6 +2881,16 @@ impl Channel {
     /// a new commitment "current" this final step must be invoked explicitly.
     ///
     /// Returns the next per_commitment_point.
+    /// Reset the commitment chain for a splice: CLN numbers post-splice
+    /// commitments from 0 (a fresh chain per funding). Counterparty
+    /// revocation secrets are preserved for justice on the old funding.
+    pub fn reset_commitment_chain_for_splice(&mut self) {
+        let secrets = self.enforcement_state.counterparty_secrets.take();
+        self.enforcement_state =
+            EnforcementState::new(self.enforcement_state.initial_holder_value);
+        self.enforcement_state.counterparty_secrets = secrets;
+    }
+
     pub fn activate_initial_commitment(&mut self) -> Result<PublicKey, Status> {
         debug!("activate_initial_commitment");
 

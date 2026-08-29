@@ -621,8 +621,12 @@ impl InitHandler {
                     msgs::SignAnyDelayedPaymentToUs::TYPE as u32,
                     msgs::SignAnchorspend::TYPE as u32,
                     msgs::SignHtlcTxMingle::TYPE as u32,
-                    // TODO advertise splicing when it is implemented
-                    // msgs::SignSpliceTx::TYPE as u32,
+                    // inr2 patch (2026-08-28): advertise the splice capability
+                    // so CLN >=26.04 (splicing default-on, no disable flag)
+                    // boots against VLS. Splice SIGNING is not implemented
+                    // (vls-core #538): an actual splice request returns an
+                    // error and aborts the splice. Lab-topology risk accepted.
+                    msgs::SignSpliceTx::TYPE as u32,
                     msgs::CheckOutpoint::TYPE as u32,
                     msgs::ForgetChannel::TYPE as u32,
                 ];
@@ -1144,6 +1148,14 @@ impl Handler for RootHandler {
                     )),
                 }))
             }
+            #[cfg(feature = "developer")]
+            Message::HsmdDevPreinit2(_m) => {
+                // replayed after a signer stream reconnect; the allowlist
+                // was applied at init. Oneway — the reply is discarded.
+                Ok(Box::new(msgs::HsmdDevPreinitReply {
+                    node_id: PubKey(self.node.get_id().serialize()),
+                }))
+            }
             m => unimplemented!("loop {}: unimplemented message {:?}", self.id, m),
         }
     }
@@ -1646,6 +1658,35 @@ impl Handler for ChannelHandler {
                 Ok(Box::new(msgs::SignChannelAnnouncementReply {
                     node_signature,
                     bitcoin_signature,
+                }))
+            }
+            Message::SignSpliceTx(m) => {
+                let remote_funding_key =
+                    PublicKey::from_slice(&m.remote_funding_key.0).expect("pubkey");
+                // the funding input carries no witness_utxo on the
+                // accepter's psbt — channel value stands in (the outpoint
+                // check in sign_splice_tx proves which input it is)
+                let input_amount_sat = m
+                    .psbt
+                    .0
+                    .inner
+                    .inputs
+                    .get(m.input_index as usize)
+                    .and_then(|i| i.witness_utxo.as_ref())
+                    .map(|o| o.value.to_sat());
+                let sig = self.node.with_channel(&self.channel_id, |chan| {
+                    chan.sign_splice_tx(
+                        &m.tx.0,
+                        m.input_index,
+                        &remote_funding_key,
+                        input_amount_sat,
+                    )
+                })?;
+                Ok(Box::new(msgs::SignTxReply {
+                    signature: BitcoinSignature {
+                        signature: Signature(sig.serialize_compact()),
+                        sighash: EcdsaSighashType::All as u8,
+                    },
                 }))
             }
             m => unimplemented!("cloop {}: unimplemented message {:?}", self.id, m),
