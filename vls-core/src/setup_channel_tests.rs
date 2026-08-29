@@ -1,9 +1,11 @@
 #[cfg(test)]
 mod tests {
     use crate::channel::ChannelId;
+    use crate::policy::validator::CommitmentSignatures;
     use bitcoin;
     use bitcoin::bip32::DerivationPath;
     use bitcoin::hashes::hex::FromHex;
+    use bitcoin::secp256k1::ecdsa::Signature;
     use bitcoin::secp256k1::SecretKey;
     use bitcoin::ScriptBuf;
     use lightning::ln::chan_utils::ChannelPublicKeys;
@@ -215,13 +217,28 @@ mod tests {
             init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
 
         // A different setup for a Ready channel is CLN's post-splice
-        // re-setup: accepted, with both funding outpoints watched.
+        // re-setup: a new funding outpoint with a new value.
         let mut setup1 = make_test_channel_setup();
         setup1.channel_value_sat += 1;
+        setup1.funding_outpoint.vout += 1;
         let result =
             node.setup_channel(channel_id, None, setup1.clone(), &DerivationPath::master());
         let chan = result.expect("splice re-setup accepted");
         assert_eq!(chan.setup, setup1);
+        assert!(chan.prev_funding.is_some(), "previous funding recorded");
+    }
+
+    #[test]
+    fn setup_channel_incompatible_splice_test() {
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+
+        // Same funding outpoint with a different value is not a splice.
+        let mut setup1 = make_test_channel_setup();
+        setup1.channel_value_sat += 1;
+        let result =
+            node.setup_channel(channel_id, None, setup1, &DerivationPath::master());
+        assert!(result.is_err());
     }
 
     #[test]
@@ -267,5 +284,32 @@ mod tests {
         let holder_shutdown_key_path = to_derivation_path(&[7u32]);
         let result = node.setup_channel(channel_id, None, setup.clone(), &holder_shutdown_key_path);
         assert_status_ok!(result);
+    }
+    #[test]
+    fn activate_initial_commitment_same_num_splice_test() {
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+
+        // Same-number (0) re-activation with a freshly-stored pending
+        // commitment is the legal splice transition (BOLTs #1160 L1847);
+        // a replay after the pending is consumed, or activation on an
+        // advanced chain (num > 1), is rejected.
+        let dummy_sigs =
+            CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
+        node.with_channel(&channel_id, |chan| {
+            chan.enforcement_state.next_holder_commit_info =
+                Some((make_test_commitment_info(), dummy_sigs.clone()));
+            chan.activate_initial_commitment().expect("num-0 re-activation");
+            assert!(chan.activate_initial_commitment().is_err(), "replay rejected");
+            chan.enforcement_state.set_next_holder_commit_num_for_testing(2);
+            chan.enforcement_state.next_holder_commit_info =
+                Some((make_test_commitment_info(), dummy_sigs.clone()));
+            assert!(
+                chan.activate_initial_commitment().is_err(),
+                "advanced chain rejected"
+            );
+            Ok(())
+        })
+        .expect("with_channel");
     }
 }

@@ -1404,6 +1404,7 @@ impl Node {
                         id: channel_id.clone(),
                         monitor: monitor_base.clone(),
                         prev_funding: None,
+                        funding_locked: None,
                     };
 
                     channel.restore_payments();
@@ -1665,6 +1666,21 @@ impl Node {
             ChannelSlot::Stub(_) =>
                 Err(invalid_argument(format!("channel not ready: {}", &channel_id))),
             ChannelSlot::Ready(chan) => f(chan),
+        }
+    }
+
+    /// Record a funding lock for the channel; a stub has no setup to
+    /// confirm against yet (the initial lock is reiterated after setup).
+    pub fn confirm_funding_lock(
+        &self,
+        channel_id: &ChannelId,
+        outpoint: &OutPoint,
+    ) -> Result<(), Status> {
+        let slot_arc = self.get_channel(channel_id)?;
+        let mut slot = slot_arc.lock().unwrap();
+        match &mut *slot {
+            ChannelSlot::Stub(_) => Ok(()),
+            ChannelSlot::Ready(chan) => chan.confirm_funding_locked(outpoint),
         }
     }
 
@@ -1950,12 +1966,17 @@ impl Node {
                 if c.setup == setup {
                     return Ok(c.clone());
                 }
+                if !c.is_splice_compatible(&setup) {
+                    return Err(invalid_argument(format!(
+                        "incompatible splice setup for channel {}",
+                        channel_id0
+                    )));
+                }
                 let mut spliced = c.clone();
                 spliced.prev_funding =
                     Some((c.setup.funding_outpoint, c.setup.channel_value_sat));
                 spliced.setup = setup.clone();
                 spliced.monitor.replace_funding_outpoint(&setup.funding_outpoint);
-                spliced.reset_commitment_chain_for_splice();
                 *c = spliced.clone();
                 drop(slot);
                 warn!(
@@ -2031,6 +2052,7 @@ impl Node {
                 id: opt_channel_id.clone(),
                 monitor,
                 prev_funding: None,
+                funding_locked: None,
             }
         };
 

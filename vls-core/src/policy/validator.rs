@@ -776,6 +776,18 @@ pub struct EnforcementState {
     /// Counterparty revocation secrets.
     /// This is an Option for backwards compatibility with old databases.
     pub counterparty_secrets: Option<CounterpartyCommitmentSecrets>,
+
+    /// The funding the stored HOLDER commitment info belongs to —
+    /// same-number commitments for a DIFFERENT funding are the legal
+    /// splice re-sign (BOLTs #1160 L1847: the splice commitment_signed
+    /// uses the same commitment_number), not retries. Per-side: the
+    /// holder and counterparty stores advance at different times during
+    /// a splice, and one side's tag must not arm the other's guard.
+    #[serde(default)]
+    pub holder_commitment_funding: Option<OutPoint>,
+    /// The funding the stored COUNTERPARTY commitment info belongs to.
+    #[serde(default)]
+    pub counterparty_commitment_funding: Option<OutPoint>,
 }
 
 impl EnforcementState {
@@ -788,6 +800,8 @@ impl EnforcementState {
             next_holder_commit_num: 0,
             next_counterparty_commit_num: 0,
             next_counterparty_revoke_num: 0,
+            holder_commitment_funding: None,
+            counterparty_commitment_funding: None,
             current_counterparty_point: None,
             previous_counterparty_point: None,
             current_holder_commit_info: None,

@@ -517,6 +517,10 @@ pub struct Channel {
     /// the splice tx signature, which spends the PREVIOUS funding
     /// (the LDK "sign prev funding" case).
     pub prev_funding: Option<(OutPoint, u64)>,
+    /// The confirmed (locked) funding outpoint — recorded by CLN's
+    /// hsmd_lock_outpoint after mutual splice_locked (the funding7
+    /// funding_locked analogue).
+    pub funding_locked: Option<OutPoint>,
 }
 
 impl Debug for Channel {
@@ -858,6 +862,8 @@ impl Channel {
             *remote_per_commitment_point,
             info2.clone(),
         )?;
+        self.enforcement_state.counterparty_commitment_funding =
+            Some(self.setup.funding_outpoint);
 
         state.apply_payments(
             &self.id0,
@@ -1236,12 +1242,17 @@ impl Channel {
             validator.clone(),
         )?;
 
-        if commitment_number == self.enforcement_state.next_holder_commit_num {
+        if commitment_number == self.enforcement_state.next_holder_commit_num
+            || self.enforcement_state.holder_commitment_funding
+                != Some(self.setup.funding_outpoint)
+        {
             let counterparty_signatures = CommitmentSignatures(
                 counterparty_commit_sig.clone(),
                 counterparty_htlc_sigs.to_vec(),
             );
             self.enforcement_state.next_holder_commit_info = Some((info2, counterparty_signatures));
+            self.enforcement_state.holder_commitment_funding =
+                Some(self.setup.funding_outpoint);
         }
 
         trace_enforcement_state!(self);
@@ -2004,6 +2015,45 @@ impl Channel {
         Ok(sig)
     }
 
+    /// Splice compatibility (the funding7 `is_compatible` shape): only
+    /// the funding identity and balance fields may differ; the
+    /// counterparty funding key may rotate; unset shutdown scripts stay
+    /// unset. Anything else changing is not a splice.
+    pub fn is_splice_compatible(&self, new_setup: &ChannelSetup) -> bool {
+        let mut other = new_setup.clone();
+        other.counterparty_points.funding_pubkey =
+            self.setup.counterparty_points.funding_pubkey.clone();
+        if self.setup.holder_shutdown_script.is_none() {
+            other.holder_shutdown_script = None;
+        }
+        if self.setup.counterparty_shutdown_script.is_none() {
+            other.counterparty_shutdown_script = None;
+        }
+        let funding_changed = other.funding_outpoint != self.setup.funding_outpoint;
+        other.funding_outpoint = self.setup.funding_outpoint;
+        other.channel_value_sat = self.setup.channel_value_sat;
+        other.push_value_msat = self.setup.push_value_msat;
+        other == self.setup && funding_changed
+    }
+
+    /// Record the funding lock (CLN's hsmd_lock_outpoint after mutual
+    /// splice_locked). Idempotent; must match the current funding.
+    pub fn confirm_funding_locked(&mut self, outpoint: &OutPoint) -> Result<(), Status> {
+        if self.funding_locked == Some(*outpoint) {
+            return Ok(());
+        }
+        if *outpoint != self.setup.funding_outpoint {
+            return Err(Status::invalid_argument(format!(
+                "funding_locked: {} is not the current funding {}",
+                outpoint, self.setup.funding_outpoint
+            )));
+        }
+        info!("funding_locked: locking funding outpoint {}", outpoint);
+        self.funding_locked = Some(*outpoint);
+        self.persist()?;
+        Ok(())
+    }
+
     pub fn sign_mutual_close_tx_phase2(
         &mut self,
         to_holder_value_sat: u64,
@@ -2670,6 +2720,8 @@ impl Channel {
             point,
             info2.clone(),
         )?;
+        self.enforcement_state.counterparty_commitment_funding =
+            Some(self.setup.funding_outpoint);
 
         state.apply_payments(
             &self.id0,
@@ -2878,12 +2930,17 @@ impl Channel {
             validator.clone(),
         )?;
 
-        if commitment_number == self.enforcement_state.next_holder_commit_num {
+        if commitment_number == self.enforcement_state.next_holder_commit_num
+            || self.enforcement_state.holder_commitment_funding
+                != Some(self.setup.funding_outpoint)
+        {
             let counterparty_signatures = CommitmentSignatures(
                 counterparty_commit_sig.clone(),
                 counterparty_htlc_sigs.to_vec(),
             );
             self.enforcement_state.next_holder_commit_info = Some((info2, counterparty_signatures));
+            self.enforcement_state.holder_commitment_funding =
+                Some(self.setup.funding_outpoint);
         }
 
         trace_enforcement_state!(self);
@@ -2899,20 +2956,10 @@ impl Channel {
     /// a new commitment "current" this final step must be invoked explicitly.
     ///
     /// Returns the next per_commitment_point.
-    /// Reset the commitment chain for a splice: CLN numbers post-splice
-    /// commitments from 0 (a fresh chain per funding). Counterparty
-    /// revocation secrets are preserved for justice on the old funding.
-    pub fn reset_commitment_chain_for_splice(&mut self) {
-        let secrets = self.enforcement_state.counterparty_secrets.take();
-        self.enforcement_state =
-            EnforcementState::new(self.enforcement_state.initial_holder_value);
-        self.enforcement_state.counterparty_secrets = secrets;
-    }
-
     pub fn activate_initial_commitment(&mut self) -> Result<PublicKey, Status> {
         debug!("activate_initial_commitment");
 
-        if self.enforcement_state.next_holder_commit_num != 0 {
+        if self.enforcement_state.next_holder_commit_num > 1 {
             return Err(invalid_argument(format!(
                 "activate_initial_commitment called with next_holder_commit_num {}",
                 self.enforcement_state.next_holder_commit_num

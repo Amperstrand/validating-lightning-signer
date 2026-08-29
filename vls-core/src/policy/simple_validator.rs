@@ -776,7 +776,12 @@ impl Validator for SimpleValidator {
         // Is this a retry?
         // not a security problem, because it's OK to re-sign an old commitment
         // that the *counterparty* revoked
-        if commit_num + 1 == estate.next_counterparty_commit_num {
+        // A same-number commitment for a DIFFERENT funding is the legal
+        // splice re-sign (BOLTs #1160 L1847), not a retry.
+        if commit_num + 1 == estate.next_counterparty_commit_num
+            && estate.counterparty_commitment_funding
+                == Some(setup.funding_outpoint)
+        {
             // The commit_point must be the same as previous
             match estate.current_counterparty_point {
                 None => {
@@ -871,7 +876,10 @@ impl Validator for SimpleValidator {
             scoped_debug_return!(estate, commit_num, commitment_point, setup, cstate, info2);
 
         // Is this a retry?
-        if commit_num + 1 == estate.next_holder_commit_num {
+        if commit_num + 1 == estate.next_holder_commit_num
+            && estate.holder_commitment_funding
+                == Some(setup.funding_outpoint)
+        {
             // The CommitmentInfo2 must be the same as previously
             // unwrap is safe, because commitment number can't be > 0 without a holder commitment_info
             let holder_commit_info =

@@ -1340,8 +1340,7 @@ impl Handler for ChannelHandler {
             Message::LockOutpoint(m) => {
                 let funding_outpoint =
                     OutPoint { txid: m.funding_txid, vout: m.funding_txout as u32 };
-                // FIXME - make the call on the node!
-                warn!("null placeholder for LockOutpoint on outpoint {:?}", funding_outpoint);
+                self.node.confirm_funding_lock(&self.channel_id, &funding_outpoint)?;
                 Ok(Box::new(msgs::LockOutpointReply {}))
             }
             Message::SignRemoteHtlcTx(m) => {
