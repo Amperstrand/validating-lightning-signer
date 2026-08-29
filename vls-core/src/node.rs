@@ -1989,12 +1989,13 @@ impl Node {
                         setup.push_value_msat
                     )));
                 }
+                let old_funding_outpoint = c.setup.funding_outpoint;
                 let mut spliced = c.clone();
                 // R10.4/F1: snapshot the retiring funding's commitment
                 // state BEFORE the new funding's flow rebuilds the
                 // channel-scoped fields (the justice window)
                 spliced.enforcement_state
-                    .snapshot_funding_for_splice(c.setup.funding_outpoint);
+                    .snapshot_funding_for_splice(old_funding_outpoint);
                 spliced.prev_setup = Some(c.setup.clone());
                 spliced.setup = setup.clone();
                 spliced.monitor.replace_funding_outpoint(&setup.funding_outpoint);
@@ -2006,6 +2007,7 @@ impl Node {
                 );
                 validator.validate_setup_channel(self, &setup, holder_shutdown_key_path)?;
                 let provider = ChannelCommitmentPointProvider::new(arcobj.clone());
+                tracker.remove_listener(&old_funding_outpoint);
                 tracker.add_listener(
                     spliced.monitor.as_monitor(Box::new(provider)),
                     OrderedSet::from_iter(vec![setup.funding_outpoint.txid]),

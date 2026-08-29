@@ -429,6 +429,35 @@ mod tests {
     }
 
     #[test]
+    fn splice_retires_old_tracker_listener() {
+        // The fresh-vlsd restart crash (the rbo3 decode): the splice
+        // path added the new funding's tracker listener without
+        // retiring the old entry — the persisted map carried both, and
+        // the node restore panicked with "some chain tracker listeners
+        // were not restored". One channel = exactly one entry, keyed by
+        // the CURRENT funding.
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+        let old_outpoint = node
+            .with_channel(&channel_id, |chan| Ok(chan.setup.funding_outpoint))
+            .expect("old outpoint");
+
+        let mut setup2 = make_test_channel_setup();
+        setup2.channel_value_sat += 1;
+        setup2.funding_outpoint.vout += 1;
+        node.setup_channel(channel_id.clone(), None, setup2, &DerivationPath::master())
+            .expect("splice swap");
+
+        let keys: Vec<_> = node.get_tracker().listeners.keys().cloned().collect();
+        assert!(
+            !keys.contains(&old_outpoint),
+            "old listener retired, got {:?}",
+            keys
+        );
+        assert_eq!(keys.len(), 1, "exactly one listener entry, got {:?}", keys);
+    }
+
+    #[test]
     fn divergent_views_never_panic() {
         // R17.2 sketch 4: interleaved divergent access to both funding
         // views after the swap — view routing for both outpoints plus
