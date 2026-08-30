@@ -2776,6 +2776,38 @@ impl Channel {
                 );
             }
             policy_err!(validator, "policy-commitment", "recomposed tx mismatch");
+
+            // fork-local (inr2-splice-dev) WORKAROUND: permissive mode
+            // continues here (strict mode returned the policy error above).
+            // Falling through would sign the DIVERGENT recomposition below —
+            // a signature over a tx the host never sent, which its peer then
+            // rejects ("Bad commit_sig" — the splice-resume rejection-loop
+            // root cause; this very warning is the tell). Instead sign the
+            // HOST's tx verbatim — stock-hsmd semantics: adapt to how CLN
+            // behaves. The funding view is routed by the tx's own input
+            // (setup_for_tx), matching the validation routing above.
+            // Full write-up: lightning-playground
+            // docs/HACK-SPLICE-RESUME-FEE-RETRY.md + STATE.md.
+            let host_view = self.setup_for_tx(tx)?;
+            let host_redeemscript = make_funding_redeemscript(
+                &self.keys.pubkeys(&self.secp_ctx).funding_pubkey,
+                &host_view.counterparty_points.funding_pubkey,
+            );
+            let host_sighash = Message::from_digest(
+                SighashCache::new(tx)
+                    .p2wsh_signature_hash(
+                        0,
+                        &host_redeemscript,
+                        Amount::from_sat(host_view.channel_value_sat),
+                        EcdsaSighashType::All,
+                    )
+                    .map_err(|e| internal_error(format!("host-tx sighash: {}", e)))?
+                    .to_byte_array(),
+            );
+            let host_sig = self
+                .secp_ctx
+                .sign_ecdsa(&host_sighash, &self.keys.funding_key(None));
+            return Ok(host_sig);
         }
 
         // The comparison in the previous block will fail if any of the
