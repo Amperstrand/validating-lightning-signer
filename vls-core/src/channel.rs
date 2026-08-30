@@ -2127,8 +2127,24 @@ impl Channel {
         // splice-window view so late commitments cannot match it, and
         // retire the F1 justice snapshot (the splice tx has spent the
         // old funding; stale old-funding commitments are double-spents)
+        let was_splice = self.prev_setup.is_some();
         self.prev_setup = None;
         self.enforcement_state.retire_prev_funding();
+        if was_splice {
+            // Fix #14 (the crash27 xpay decode): the old funding's
+            // channel-scoped commitment infos are stale at the lockin.
+            // The splice tx SPENT that funding, and the window-close can
+            // race the commitment exchange — the post-close splicing
+            // commitment hits the storage gate's anti-replay rules, so
+            // the old-scale info survives (cur_cp=995120 vs the new
+            // 894199 view) and the payment's claimable check underflows
+            // (checked_sub -> None -> the channeld dies). The new
+            // funding's flows install fresh infos; the spent funding's
+            // commitments carry no enforcement value. Conditional on
+            // was_splice: the INITIAL lockin keeps its num-0 baseline.
+            self.enforcement_state.current_holder_commit_info = None;
+            self.enforcement_state.current_counterparty_commit_info = None;
+        }
         self.persist()?;
         Ok(())
     }
