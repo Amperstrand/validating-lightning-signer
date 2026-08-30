@@ -185,10 +185,17 @@ impl ProtocolAdapter {
                                         warn!("dropping signer reply: requesting task is gone");
                                     }
                                 } else {
-                                    error!("got response for unknown request ID {}; \
-                                            triggering shutdown", resp.request_id);
-                                    shutdown_trigger.trigger();
-                                    break;
+                                    // A duplicate or late delivery: the vlsd's stream may
+                                    // redeliver a completed request's reply (at-least-once
+                                    // semantics, e.g. around reconnects). The pending entry
+                                    // was already consumed — dropping the duplicate is
+                                    // correct. The old proxy-wide shutdown here re-introduced
+                                    // the teardown-abort class (the quiet-box probe failure:
+                                    // 'unknown request ID 1' seconds after launch).
+                                    warn!(
+                                        "dropping reply for unknown request ID {}",
+                                        resp.request_id
+                                    );
                                 }
                             }
                             Some(Err(err)) => {
