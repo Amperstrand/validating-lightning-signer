@@ -1996,7 +1996,20 @@ impl Node {
                 // channel-scoped fields (the justice window)
                 spliced.enforcement_state
                     .snapshot_funding_for_splice(old_funding_outpoint);
-                spliced.prev_setup = Some(c.setup.clone());
+                // fork-local (inr2-splice-dev) RBF fix: only set prev_setup
+                // when empty — an ALWAYS-overwrite loses the ORIGINAL funding
+                // at the SECOND splice's swap (the RBF replacement spends the
+                // ORIGINAL, not splice-1's still-pending outpoint!) and
+                // sign_splice_tx then rejects "splice input is not the channel
+                // funding outpoint". Keeping the OLDEST un-replaced funding
+                // resolves the RBF's parent; funding_locked clears prev_setup
+                // at the confirmation, so the sequential case (splice-1
+                // confirmed, then the next splice) still gets the
+                // just-replaced funding as prev. Evidence:
+                // lightning-playground THE-RBF-COUNTER-VALIDATION.md.
+                if spliced.prev_setup.is_none() {
+                    spliced.prev_setup = Some(c.setup.clone());
+                }
                 spliced.setup = setup.clone();
                 spliced.monitor.replace_funding_outpoint(&setup.funding_outpoint);
                 *c = spliced.clone();
