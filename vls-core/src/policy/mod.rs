@@ -114,8 +114,16 @@ fn temporary_policy_error_with_filter(
         Err(temporary_policy_error(tag, msg))
     } else {
         warn!("policy temporarily failed: {} {}", tag, msg);
+        // fork-local (inr2-splice-dev): Backtrace::new() symbolizes a full
+        // backtrace — 1.14s in the debug build — on EVERY temporary policy
+        // warning. The post-splice commitment signs trigger
+        // policy-commitment-spends-active-utxo every time (the new funding
+        // is legitimately unconfirmed), so this path is hot for splicing
+        // and its latency skews the exchange timing. Opt-in via env.
         #[cfg(feature = "use_backtrace")]
-        warn!("BACKTRACE:\n{:?}", backtrace::Backtrace::new());
+        if std::env::var_os("VLS_POLICY_BACKTRACE").is_some() {
+            warn!("BACKTRACE:\n{:?}", backtrace::Backtrace::new());
+        }
         Ok(())
     }
 }
