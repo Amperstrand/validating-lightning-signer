@@ -751,7 +751,14 @@ impl Handler for RootHandler {
                 Ok(Box::new(msgs::SignMessageReply { signature: RecoverableSignature(sig_slice) }))
             }
             Message::Ecdh(m) => {
-                let pubkey = PublicKey::from_slice(&m.point.0).expect("pubkey");
+                let pubkey = match PublicKey::from_slice(&m.point.0) {
+                    Ok(k) => k,
+                    Err(_) => {
+                        return Err(Error::Signing(Status::invalid_argument(
+                            "malformed pubkey",
+                        )))
+                    }
+                };
                 let secret = self.node.ecdh(&pubkey).as_slice().try_into().unwrap();
                 Ok(Box::new(msgs::EcdhReply { secret: Secret(secret) }))
             }
@@ -1246,7 +1253,14 @@ impl Handler for ChannelHandler {
             }
             Message::Ecdh(m) => {
                 // TODO DRY with root handler
-                let pubkey = PublicKey::from_slice(&m.point.0).expect("pubkey");
+                let pubkey = match PublicKey::from_slice(&m.point.0) {
+                    Ok(k) => k,
+                    Err(_) => {
+                        return Err(Error::Signing(Status::invalid_argument(
+                            "malformed pubkey",
+                        )))
+                    }
+                };
                 let secret = self.node.ecdh(&pubkey).as_slice().try_into().unwrap();
                 Ok(Box::new(msgs::EcdhReply { secret: Secret(secret) }))
             }
@@ -1347,7 +1361,14 @@ impl Handler for ChannelHandler {
                 let psbt = &m.psbt.inner;
                 let tx = m.tx.0;
                 let remote_per_commitment_point =
-                    PublicKey::from_slice(&m.remote_per_commitment_point.0).expect("pubkey");
+                    match PublicKey::from_slice(&m.remote_per_commitment_point.0) {
+                        Ok(k) => k,
+                        Err(_) => {
+                            return Err(Error::Signing(Status::invalid_argument(
+                                "malformed remote per commitment point",
+                            )))
+                        }
+                    };
                 assert_eq!(psbt.outputs.len(), 1);
                 assert_eq!(psbt.inputs.len(), 1);
                 assert_eq!(tx.output.len(), 1);
@@ -1391,7 +1412,14 @@ impl Handler for ChannelHandler {
                 let witscripts = extract_psbt_witscripts(&psbt);
                 let tx = m.tx;
                 let remote_per_commitment_point =
-                    PublicKey::from_slice(&m.remote_per_commitment_point.0).expect("pubkey");
+                    match PublicKey::from_slice(&m.remote_per_commitment_point.0) {
+                        Ok(k) => k,
+                        Err(_) => {
+                            return Err(Error::Signing(Status::invalid_argument(
+                                "malformed remote per commitment point",
+                            )))
+                        }
+                    };
                 let commit_num = m.commitment_number;
                 info!(
                     "#6870-check: SignRemoteCommitmentTx num={} point={}",
@@ -1416,7 +1444,14 @@ impl Handler for ChannelHandler {
             }
             Message::SignRemoteCommitmentTx2(m) => {
                 let remote_per_commitment_point =
-                    PublicKey::from_slice(&m.remote_per_commitment_point.0).expect("pubkey");
+                    match PublicKey::from_slice(&m.remote_per_commitment_point.0) {
+                        Ok(k) => k,
+                        Err(_) => {
+                            return Err(Error::Signing(Status::invalid_argument(
+                                "malformed remote per commitment point",
+                            )))
+                        }
+                    };
                 let commit_num = m.commitment_number;
                 info!(
                     "#6870-check: SignRemoteCommitmentTx2 num={} point={}",
@@ -1766,7 +1801,14 @@ fn sign_remote_htlc_to_us(
     input: u32,
 ) -> Result<Box<dyn SerBolt>> {
     let remote_per_commitment_point =
-        PublicKey::from_slice(&remote_per_commitment_point.0).expect("pubkey");
+        match PublicKey::from_slice(&remote_per_commitment_point.0) {
+            Ok(k) => k,
+            Err(_) => {
+                return Err(Error::Signing(Status::invalid_argument(
+                    "malformed remote per commitment point",
+                )))
+            }
+        };
     let redeemscript = ScriptBuf::from(wscript.0.clone());
     let input = input as usize;
     let htlc_amount =
