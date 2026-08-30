@@ -3034,6 +3034,17 @@ impl Channel {
         // be valued against the new (possibly reduced) channel_value
         let view = self.setup_for_tx(tx)?;
         info!("#hang-probe: view matched");
+        info!(
+            "validate-diag: view_outpoint={:?} view_value={} fee={} to_b={} to_c={} htlcs={} num={}",
+            view.funding_outpoint,
+            view.channel_value_sat,
+            info2.feerate_per_kw,
+            info2.to_broadcaster_value_sat,
+            info2.to_countersigner_value_sat,
+            info2.offered_htlcs.iter().map(|h| h.value_sat).sum::<u64>()
+                + info2.received_htlcs.iter().map(|h| h.value_sat).sum::<u64>(),
+            commitment_number
+        );
         let delta =
             self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &view, self.prev_setup.as_ref())?;
         info!("#hang-probe: claimable done");
