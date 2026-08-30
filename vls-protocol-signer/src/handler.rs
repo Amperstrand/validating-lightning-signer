@@ -1579,20 +1579,26 @@ impl Handler for ChannelHandler {
                             // The newer protocol defers until an explicit `RevokeCommitmentTx`
                             if commit_num > 0 {
                                 Ok((chan.get_per_commitment_point(commit_num + 1)?, None))
-                            } else if chan.enforcement_state.next_holder_commit_num <= 1 {
+                            } else if chan
+                                .enforcement_state
+                                .next_holder_commit_info
+                                .is_some()
+                            {
                                 // Commitment 0 is special because it doesn't
                                 // have a previous commitment.  Since the
                                 // revocation of the previous commitment normally
                                 // makes a new commitment "current" this final
-                                // step must be invoked explicitly.
+                                // step must be invoked explicitly — but ONLY
+                                // when the validation just stored a pending
+                                // (the presence check). On a restored mid-splice
+                                // channel the num-0 revalidation's storage gate
+                                // does not fire (the replay is behind, or the
+                                // pending was consumed pre-crash) — activating
+                                // then errored "before validation" and killed
+                                // the recovery (the crash14/15 stalls).
                                 Ok((chan.activate_initial_commitment()?, None))
                             } else {
-                                // A num-0 replay on an advanced (restored,
-                                // mid-splice) channel: the storage gate did not
-                                // fire for the behind message — activating here
-                                // panicked the recovery flow ("before
-                                // validation", the crash14 stall). Return the
-                                // point; the stale replay is inert.
+                                // No pending stored — the stale replay is inert.
                                 Ok((chan.get_per_commitment_point(1)?, None))
                             }
                         }
@@ -1641,20 +1647,26 @@ impl Handler for ChannelHandler {
                             // The newer protocol defers until an explicit `RevokeCommitmentTx`
                             if commit_num > 0 {
                                 Ok((chan.get_per_commitment_point(commit_num + 1)?, None))
-                            } else if chan.enforcement_state.next_holder_commit_num <= 1 {
+                            } else if chan
+                                .enforcement_state
+                                .next_holder_commit_info
+                                .is_some()
+                            {
                                 // Commitment 0 is special because it doesn't
                                 // have a previous commitment.  Since the
                                 // revocation of the previous commitment normally
                                 // makes a new commitment "current" this final
-                                // step must be invoked explicitly.
+                                // step must be invoked explicitly — but ONLY
+                                // when the validation just stored a pending
+                                // (the presence check). On a restored mid-splice
+                                // channel the num-0 revalidation's storage gate
+                                // does not fire (the replay is behind, or the
+                                // pending was consumed pre-crash) — activating
+                                // then errored "before validation" and killed
+                                // the recovery (the crash14/15 stalls).
                                 Ok((chan.activate_initial_commitment()?, None))
                             } else {
-                                // A num-0 replay on an advanced (restored,
-                                // mid-splice) channel: the storage gate did not
-                                // fire for the behind message — activating here
-                                // panicked the recovery flow ("before
-                                // validation", the crash14 stall). Return the
-                                // point; the stale replay is inert.
+                                // No pending stored — the stale replay is inert.
                                 Ok((chan.get_per_commitment_point(1)?, None))
                             }
                         }
