@@ -1579,13 +1579,21 @@ impl Handler for ChannelHandler {
                             // The newer protocol defers until an explicit `RevokeCommitmentTx`
                             if commit_num > 0 {
                                 Ok((chan.get_per_commitment_point(commit_num + 1)?, None))
-                            } else {
+                            } else if chan.enforcement_state.next_holder_commit_num <= 1 {
                                 // Commitment 0 is special because it doesn't
                                 // have a previous commitment.  Since the
                                 // revocation of the previous commitment normally
                                 // makes a new commitment "current" this final
                                 // step must be invoked explicitly.
                                 Ok((chan.activate_initial_commitment()?, None))
+                            } else {
+                                // A num-0 replay on an advanced (restored,
+                                // mid-splice) channel: the storage gate did not
+                                // fire for the behind message — activating here
+                                // panicked the recovery flow ("before
+                                // validation", the crash14 stall). Return the
+                                // point; the stale replay is inert.
+                                Ok((chan.get_per_commitment_point(1)?, None))
                             }
                         }
                     })?;
@@ -1633,13 +1641,21 @@ impl Handler for ChannelHandler {
                             // The newer protocol defers until an explicit `RevokeCommitmentTx`
                             if commit_num > 0 {
                                 Ok((chan.get_per_commitment_point(commit_num + 1)?, None))
-                            } else {
+                            } else if chan.enforcement_state.next_holder_commit_num <= 1 {
                                 // Commitment 0 is special because it doesn't
                                 // have a previous commitment.  Since the
                                 // revocation of the previous commitment normally
                                 // makes a new commitment "current" this final
                                 // step must be invoked explicitly.
                                 Ok((chan.activate_initial_commitment()?, None))
+                            } else {
+                                // A num-0 replay on an advanced (restored,
+                                // mid-splice) channel: the storage gate did not
+                                // fire for the behind message — activating here
+                                // panicked the recovery flow ("before
+                                // validation", the crash14 stall). Return the
+                                // point; the stale replay is inert.
+                                Ok((chan.get_per_commitment_point(1)?, None))
                             }
                         }
                     })?;
