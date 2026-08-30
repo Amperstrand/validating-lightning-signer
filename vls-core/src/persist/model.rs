@@ -34,6 +34,10 @@ pub struct ChannelEntry {
     /// funding — "fee underflow 894199 - 995120").
     #[serde(default)]
     pub prev_setup: Option<ChannelSetup>,
+    /// fork-local (inr2-splice-dev) RBF: the two-deep prev chain's second
+    /// hop (the original funding during an RBF window).
+    #[serde(default)]
+    pub prev_prev_setup: Option<ChannelSetup>,
     /// Birth blockheight for stub channels, None for regular channels
     pub blockheight: Option<u32>,
 }

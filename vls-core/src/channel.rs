@@ -518,6 +518,12 @@ pub struct Channel {
     /// prev funding" case), and old-funding commitments can still
     /// arrive after the swap (R10: validate against the matched view).
     pub prev_setup: Option<ChannelSetup>,
+    /// fork-local (inr2-splice-dev) RBF: the TWO-DEEP prev chain — during
+    /// an RBF window THREE fundings coexist (the original, the replaced
+    /// splice-1, the replacement splice-2); the chain keeps them all
+    /// reachable for the routing and the splice-tx sign check (see
+    /// node.rs's swap site + STATE.md "L3 DECODED").
+    pub prev_prev_setup: Option<ChannelSetup>,
     /// The confirmed (locked) funding outpoint — recorded by CLN's
     /// hsmd_lock_outpoint after mutual splice_locked (the funding7
     /// funding_locked analogue).
@@ -2035,6 +2041,14 @@ impl Channel {
             } else if let Some(ref prev_setup) = self.prev_setup {
                 if input.previous_output == prev_setup.funding_outpoint {
                     prev_setup.channel_value_sat
+                } else if let Some(ref pp) = self.prev_prev_setup {
+                    if input.previous_output == pp.funding_outpoint {
+                        pp.channel_value_sat
+                    } else {
+                        return Err(Status::invalid_argument(
+                            "splice input is not the channel funding outpoint",
+                        ));
+                    }
                 } else {
                     return Err(Status::invalid_argument(
                         "splice input is not the channel funding outpoint",
@@ -2078,6 +2092,11 @@ impl Channel {
             if let Some(ref prev) = self.prev_setup {
                 if input.previous_output == prev.funding_outpoint {
                     return Ok(prev.clone());
+                }
+            }
+            if let Some(ref pp) = self.prev_prev_setup {
+                if input.previous_output == pp.funding_outpoint {
+                    return Ok(pp.clone());
                 }
             }
         }
@@ -2127,8 +2146,9 @@ impl Channel {
         // splice-window view so late commitments cannot match it, and
         // retire the F1 justice snapshot (the splice tx has spent the
         // old funding; stale old-funding commitments are double-spents)
-        let was_splice = self.prev_setup.is_some();
+        let was_splice = self.prev_setup.is_some() || self.prev_prev_setup.is_some();
         self.prev_setup = None;
+        self.prev_prev_setup = None;
         self.enforcement_state.retire_prev_funding();
         if was_splice {
             // Fix #14 (the crash27 xpay decode): the old funding's

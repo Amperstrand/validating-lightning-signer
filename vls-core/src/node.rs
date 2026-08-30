@@ -1404,6 +1404,7 @@ impl Node {
                         id: channel_id.clone(),
                         monitor: monitor_base.clone(),
                         prev_setup: channel_entry.prev_setup,
+                        prev_prev_setup: channel_entry.prev_prev_setup,
                         funding_locked: None,
                     };
 
@@ -1996,20 +1997,16 @@ impl Node {
                 // channel-scoped fields (the justice window)
                 spliced.enforcement_state
                     .snapshot_funding_for_splice(old_funding_outpoint);
-                // fork-local (inr2-splice-dev) RBF fix: only set prev_setup
-                // when empty — an ALWAYS-overwrite loses the ORIGINAL funding
-                // at the SECOND splice's swap (the RBF replacement spends the
-                // ORIGINAL, not splice-1's still-pending outpoint!) and
-                // sign_splice_tx then rejects "splice input is not the channel
-                // funding outpoint". Keeping the OLDEST un-replaced funding
-                // resolves the RBF's parent; funding_locked clears prev_setup
-                // at the confirmation, so the sequential case (splice-1
-                // confirmed, then the next splice) still gets the
-                // just-replaced funding as prev. Evidence:
-                // lightning-playground THE-RBF-COUNTER-VALIDATION.md.
-                if spliced.prev_setup.is_none() {
-                    spliced.prev_setup = Some(c.setup.clone());
-                }
+                // fork-local (inr2-splice-dev) RBF fix v2 (the TWO-DEEP prev
+                // chain — supersedes the keep-oldest variant whose side effect
+                // was L3: splice-1's view became unreachable and its
+                // still-exchanged commitments underflowed against the
+                // splice-2 fallback). The chain shift keeps ALL THREE RBF
+                // window fundings reachable: prev_prev (the original — the
+                // RBF splice's input), prev (the just-replaced — its
+                // commitments), setup (the new). funding_locked clears both.
+                spliced.prev_prev_setup = spliced.prev_setup.clone();
+                spliced.prev_setup = Some(c.setup.clone());
                 spliced.setup = setup.clone();
                 spliced.monitor.replace_funding_outpoint(&setup.funding_outpoint);
                 *c = spliced.clone();
@@ -2088,6 +2085,7 @@ impl Node {
                 id: opt_channel_id.clone(),
                 monitor,
                 prev_setup: None,
+                prev_prev_setup: None,
                 funding_locked: None,
             }
         };
