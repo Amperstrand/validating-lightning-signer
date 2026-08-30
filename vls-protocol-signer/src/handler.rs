@@ -621,11 +621,12 @@ impl InitHandler {
                     msgs::SignAnyDelayedPaymentToUs::TYPE as u32,
                     msgs::SignAnchorspend::TYPE as u32,
                     msgs::SignHtlcTxMingle::TYPE as u32,
-                    // inr2 patch (2026-08-28): advertise the splice capability
-                    // so CLN >=26.04 (splicing default-on, no disable flag)
-                    // boots against VLS. Splice SIGNING is not implemented
-                    // (vls-core #538): an actual splice request returns an
-                    // error and aborts the splice. Lab-topology risk accepted.
+                    // Advertise the splice capability so CLN >=26.04
+                    // (splicing default-on, no disable flag) boots against
+                    // VLS. Splice signing IS implemented (the inr2 splice
+                    // arc: sign_splice_tx, the same-number model, the
+                    // view-parameterized validation stack — 9/12 of CLN's
+                    // own splice suite green).
                     msgs::SignSpliceTx::TYPE as u32,
                     msgs::CheckOutpoint::TYPE as u32,
                     msgs::ForgetChannel::TYPE as u32,

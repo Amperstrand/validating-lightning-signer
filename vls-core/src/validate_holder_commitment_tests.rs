@@ -1549,4 +1549,92 @@ mod tests {
             })
             .expect("success");
     }
+
+    #[test]
+    fn post_lock_straggler_rejected() {
+        // F2's replay rail: funding_locked closes the splice window
+        // (prev_setup cleared) — an old-funding commitment arriving after
+        // the lock is REJECTED. The straggler acceptance is window-scoped.
+        let node_ctx = test_node_ctx(1);
+        let mut chan_ctx = fund_test_channel(&node_ctx, 3_000_000);
+        let channel_id = chan_ctx.channel_id.clone();
+
+        // the straggler's message built BEFORE the splice (the old funding)
+        let mut straggler_ctx = channel_commitment(
+            &node_ctx, &chan_ctx, 0, 0, 2_999_000, 0, vec![], vec![],
+        );
+        let (scsig, shsigs) =
+            counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut straggler_ctx);
+
+        // the splice
+        let mut tx_ctx = TestFundingTxContext::new();
+        tx_ctx.inputs.push(bitcoin::TxIn {
+            previous_output: chan_ctx.setup.funding_outpoint,
+            script_sig: bitcoin::ScriptBuf::new(),
+            sequence: bitcoin::Sequence::MAX,
+            witness: bitcoin::Witness::default(),
+        });
+        chan_ctx.setup.channel_value_sat -= 100_000;
+        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let splice_tx = tx_ctx.to_tx();
+        assert!(
+            funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
+            "splice accepted"
+        );
+
+        // the lock closes the window
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                let outpoint = chan.setup.funding_outpoint;
+                chan.confirm_funding_locked(&outpoint)
+            })
+            .expect("lock");
+
+        // the straggler post-lock: REJECTED (the window is closed)
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                let htlcs = Channel::htlcs_info2_to_oic(
+                    &straggler_ctx.offered_htlcs,
+                    &straggler_ctx.received_htlcs,
+                );
+                let channel_parameters = chan.make_channel_parameters();
+                let parameters = channel_parameters.as_holder_broadcastable();
+                let save = chan.enforcement_state.next_holder_commit_num;
+                chan.enforcement_state.set_next_holder_commit_num_for_testing(0);
+                let per_commitment_point = chan.get_per_commitment_point(0)?;
+                chan.enforcement_state.set_next_holder_commit_num_for_testing(save);
+                let keys = chan.make_holder_tx_keys(&per_commitment_point);
+                let redeem_scripts = build_tx_scripts(
+                    &keys,
+                    straggler_ctx.to_broadcaster,
+                    straggler_ctx.to_countersignatory,
+                    &htlcs,
+                    &parameters,
+                    &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
+                    &chan.setup.counterparty_points.funding_pubkey,
+                )
+                .expect("scripts");
+                let output_witscripts: Vec<_> =
+                    redeem_scripts.iter().map(|sc| sc.as_bytes().to_vec()).collect();
+                chan.validate_holder_commitment_tx(
+                    &straggler_ctx
+                        .tx
+                        .as_ref()
+                        .unwrap()
+                        .trust()
+                        .built_transaction()
+                        .transaction,
+                    &output_witscripts,
+                    straggler_ctx.commit_num,
+                    straggler_ctx.feerate_per_kw,
+                    straggler_ctx.offered_htlcs.clone(),
+                    straggler_ctx.received_htlcs.clone(),
+                    &scsig,
+                    &shsigs,
+                )
+            })
+            .expect_err("the post-lock straggler must be rejected (the window is closed)");
+    }
 }
