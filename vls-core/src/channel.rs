@@ -797,7 +797,7 @@ impl Channel {
         let node = self.get_node();
         let mut state = node.get_state();
         let delta =
-            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup)?;
+            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup, self.prev_setup.as_ref())?;
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(None, Some(&info2));
 
@@ -1173,7 +1173,7 @@ impl Channel {
         let node = self.get_node();
         let state = node.get_state();
         let delta =
-            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup)?;
+            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup, self.prev_setup.as_ref())?;
 
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(Some(&info2), None);
@@ -1331,7 +1331,7 @@ impl Channel {
         let mut state = node.get_state();
 
         let delta =
-            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup)?;
+            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup, self.prev_setup.as_ref())?;
 
         let (next_holder_commitment_point, maybe_old_secret) = self
             .advance_holder_commitment_state(
@@ -2673,8 +2673,26 @@ impl Channel {
 
         let node = self.get_node();
         let mut state = node.get_state();
+        let diag_view = self.setup_for_tx(tx)?;
+        info!(
+            "claimable-diag: view_outpoint={:?} view_value={} fee={} to_b={} to_c={} htlcs={} num={}",
+            diag_view.funding_outpoint,
+            diag_view.channel_value_sat,
+            info2.feerate_per_kw,
+            info2.to_broadcaster_value_sat,
+            info2.to_countersigner_value_sat,
+            info2.offered_htlcs.iter().map(|h| h.value_sat).sum::<u64>()
+                + info2.received_htlcs.iter().map(|h| h.value_sat).sum::<u64>(),
+            commitment_number
+        );
+        info!(
+            "claimable-diag2: cur_holder_total={:?} cur_cp_total={:?} is_outbound={}",
+            self.enforcement_state.current_holder_commit_info.as_ref().map(|i| i.total_value()),
+            self.enforcement_state.current_counterparty_commit_info.as_ref().map(|i| i.total_value()),
+            diag_view.is_outbound
+        );
         let delta =
-            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup_for_tx(tx)?)?;
+            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &diag_view, self.prev_setup.as_ref())?;
 
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(None, Some(&info2));
@@ -3001,7 +3019,7 @@ impl Channel {
         let view = self.setup_for_tx(tx)?;
         info!("#hang-probe: view matched");
         let delta =
-            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &view)?;
+            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &view, self.prev_setup.as_ref())?;
         info!("#hang-probe: claimable done");
 
         #[cfg(not(fuzzing))]

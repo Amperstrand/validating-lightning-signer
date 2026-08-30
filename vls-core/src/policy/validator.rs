@@ -1141,6 +1141,7 @@ impl EnforcementState {
         new_holder_tx: Option<&CommitmentInfo2>,
         new_counterparty_tx: Option<&CommitmentInfo2>,
         channel_setup: &ChannelSetup,
+        prev_setup: Option<&ChannelSetup>,
     ) -> Result<BalanceDelta, Status> {
         fn flatten_or_err(o: Option<Option<u64>>) -> Result<Option<u64>, Status> {
             match o {
@@ -1158,20 +1159,26 @@ impl EnforcementState {
             new_holder_tx.is_none() || new_counterparty_tx.is_none(),
             "must have at most one new tx"
         );
+        // The current commitments were built against the pre-splice funding
+        // during the splice window — value them against it. The old-scale
+        // totals against the reduced new funding trip checked_sub (the
+        // crash22 decode: cur_cp=995120 vs the 894199 view) and rejected
+        // the splicing commitment.
+        let before_setup = prev_setup.unwrap_or(channel_setup);
         // Our balance in the holder commitment tx
         let cur_holder_bal = flatten_or_err(self.current_holder_commit_info.as_ref().map(|tx| {
             tx.claimable_balance(
                 preimage_map,
-                channel_setup.is_outbound,
-                channel_setup.channel_value_sat,
+                before_setup.is_outbound,
+                before_setup.channel_value_sat,
             )
         }))?;
         // Our balance in the counterparty commitment tx
         let cur_cp_bal = flatten_or_err(self.current_counterparty_commit_info.as_ref().map(|tx| {
             tx.claimable_balance(
                 preimage_map,
-                channel_setup.is_outbound,
-                channel_setup.channel_value_sat,
+                before_setup.is_outbound,
+                before_setup.channel_value_sat,
             )
         }))?;
         // Our overall balance is the lower of the two
