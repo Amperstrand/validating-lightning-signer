@@ -364,8 +364,12 @@ impl OnchainValidator {
         );
 
         // If we are trying to move beyond the initial commitment, ensure funding is on-chain and
-        // had enough confirmations.
-        if commit_num > 0 {
+        // had enough confirmations. fork-local (inr2-splice-dev): during a
+        // splice window (splice_pending) the current funding IS the
+        // unconfirmed splice output — committing against it is the protocol;
+        // the burial requirement applies to the post-lock state. The
+        // unspent/closing checks below always apply.
+        if commit_num > 0 && !cstate.splice_pending {
             if cstate.funding_depth < self.policy.min_funding_depth as u32 {
                 temporary_policy_err!(
                     self,

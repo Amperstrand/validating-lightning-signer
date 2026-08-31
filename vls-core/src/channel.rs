@@ -688,7 +688,12 @@ impl Channel {
     }
 
     pub(crate) fn get_chain_state(&self) -> ChainState {
-        self.monitor.as_chain_state()
+        let mut cs = self.monitor.as_chain_state();
+        // The splice window: prev_setup survives from the swap until
+        // funding_locked — exactly the "committing against the unconfirmed
+        // splice output is the protocol" period.
+        cs.splice_pending = self.prev_setup.is_some();
+        cs
     }
 
     /// Get the counterparty's public keys
@@ -2812,16 +2817,23 @@ impl Channel {
                     &recomposed_tx.trust().built_transaction().transaction
                 );
             }
+            // fork-local (inr2-splice-dev) WORKAROUND (permissive-only):
+            // strict mode returns the policy error here — the strict-safe
+            // variant (sign the host tx when its input spends a KNOWN
+            // funding view) was tried and REJECTED by the mutated-tx
+            // rails (bad_locktime/bad_pubkey/etc. keep the input valid —
+            // the input check is not the security line; an exact-match
+            // recomposition from the other view is, and that needs the
+            // view-parameterized rebuild — the recorded strict-mode gap).
             policy_err!(validator, "policy-commitment", "recomposed tx mismatch");
 
-            // fork-local (inr2-splice-dev) WORKAROUND: permissive mode
-            // continues here (strict mode returned the policy error above).
-            // Falling through would sign the DIVERGENT recomposition below —
-            // a signature over a tx the host never sent, which its peer then
-            // rejects ("Bad commit_sig" — the splice-resume rejection-loop
-            // root cause; this very warning is the tell). Instead sign the
-            // HOST's tx verbatim — stock-hsmd semantics: adapt to how CLN
-            // behaves. The funding view is routed by the tx's own input
+            // Permissive mode continues here. Falling through would sign
+            // the DIVERGENT recomposition below — a signature over a tx
+            // the host never sent, which its peer then rejects ("Bad
+            // commit_sig" — the splice-resume rejection-loop root cause;
+            // this very warning is the tell). Instead sign the HOST's tx
+            // verbatim — stock-hsmd semantics: adapt to how CLN behaves.
+            // The funding view is routed by the tx's own input
             // (setup_for_tx), matching the validation routing above.
             // Full write-up: lightning-playground
             // docs/HACK-SPLICE-RESUME-FEE-RETRY.md + STATE.md.

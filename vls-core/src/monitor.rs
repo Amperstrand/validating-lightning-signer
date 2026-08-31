@@ -919,6 +919,7 @@ impl ChainMonitorBase {
                 .or(state.unilateral_closing_height)
                 .map(|h| state.height + 1 - h)
                 .unwrap_or(0),
+            splice_pending: false,
         }
     }
 

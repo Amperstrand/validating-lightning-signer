@@ -576,6 +576,13 @@ pub struct ChainState {
     pub funding_double_spent_depth: u32,
     /// Zero or the number of confirmations of a closing tx
     pub closing_depth: u32,
+    /// fork-local (inr2-splice-dev): a splice is in flight — the current
+    /// funding is the not-yet-confirmed splice output, which the protocol
+    /// legitimately commits against (the safety is the commitment chain +
+    /// the splice tx's own confirmation; the burial requirement applies to
+    /// the post-lock state). See onchain_validator's
+    /// ensure_funding_buried_and_unspent.
+    pub splice_pending: bool,
 }
 
 /// A factory for validators

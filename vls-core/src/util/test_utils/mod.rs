@@ -281,6 +281,7 @@ pub fn make_test_chain_state() -> ChainState {
         funding_depth: 0,
         funding_double_spent_depth: 0,
         closing_depth: 0,
+        splice_pending: false,
     }
 }
 
