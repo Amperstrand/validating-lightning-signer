@@ -838,7 +838,7 @@ impl EnforcementState {
     /// is unset), the snapshot's copy when the view IS the retiring
     /// funding, None otherwise.
     pub fn holder_commit_info_for(&self, view_outpoint: &OutPoint) -> Option<&CommitmentInfo2> {
-        if self.holder_commitment_funding.map_or(true, |f| f == *view_outpoint) {
+        if self.holder_commitment_funding.is_none_or(|f| f == *view_outpoint) {
             self.current_holder_commit_info.as_ref()
         } else if let Some(prev) = self.prev_funding_commitment.as_ref() {
             if prev.outpoint == *view_outpoint {
@@ -857,7 +857,7 @@ impl EnforcementState {
         &self,
         view_outpoint: &OutPoint,
     ) -> Option<&CommitmentInfo2> {
-        if self.counterparty_commitment_funding.map_or(true, |f| f == *view_outpoint) {
+        if self.counterparty_commitment_funding.is_none_or(|f| f == *view_outpoint) {
             self.current_counterparty_commit_info.as_ref()
         } else if let Some(prev) = self.prev_funding_commitment.as_ref() {
             if prev.outpoint == *view_outpoint {
@@ -1258,7 +1258,7 @@ impl EnforcementState {
         // the view; anything else → the previous funding (crash22/legacy).
         let cur_holder_value_sat = if self
             .holder_commitment_funding
-            .map_or(false, |f| f == channel_setup.funding_outpoint)
+            .is_some_and(|f| f == channel_setup.funding_outpoint)
         {
             channel_setup.channel_value_sat
         } else {
@@ -1266,7 +1266,7 @@ impl EnforcementState {
         };
         let cur_counterparty_value_sat = if self
             .counterparty_commitment_funding
-            .map_or(false, |f| f == channel_setup.funding_outpoint)
+            .is_some_and(|f| f == channel_setup.funding_outpoint)
         {
             channel_setup.channel_value_sat
         } else {

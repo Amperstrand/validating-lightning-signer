@@ -2136,8 +2136,7 @@ impl Channel {
     /// unset. Anything else changing is not a splice.
     pub fn is_splice_compatible(&self, new_setup: &ChannelSetup) -> bool {
         let mut other = new_setup.clone();
-        other.counterparty_points.funding_pubkey =
-            self.setup.counterparty_points.funding_pubkey.clone();
+        other.counterparty_points.funding_pubkey = self.setup.counterparty_points.funding_pubkey;
         if self.setup.holder_shutdown_script.is_none() {
             other.holder_shutdown_script = None;
         }
