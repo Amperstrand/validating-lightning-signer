@@ -625,8 +625,8 @@ impl InitHandler {
                     // (splicing default-on, no disable flag) boots against
                     // VLS. Splice signing IS implemented (the inr2 splice
                     // arc: sign_splice_tx, the same-number model, the
-                    // view-parameterized validation stack — 9/12 of CLN's
-                    // own splice suite green).
+                    // view-parameterized validation stack — 12/12 of CLN's
+                    // own splice suite green, twice-verified).
                     msgs::SignSpliceTx::TYPE as u32,
                     msgs::CheckOutpoint::TYPE as u32,
                     msgs::ForgetChannel::TYPE as u32,
