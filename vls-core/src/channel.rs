@@ -2917,8 +2917,10 @@ impl Channel {
             point,
             info2.clone(),
         )?;
+        // Era-correct tag (see sign_counterparty_commitment_tx_phase2):
+        // tag with the funding view the signed tx actually spends.
         self.enforcement_state.counterparty_commitment_funding =
-            Some(self.setup.funding_outpoint);
+            Some(diag_view.funding_outpoint);
 
         state.apply_payments(
             &self.id0,

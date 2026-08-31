@@ -98,6 +98,7 @@ workspace = true
 features = ["dummy-source"]
 
 [dev-dependencies]
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 paste = "1.0"
 # For logging in unit tests

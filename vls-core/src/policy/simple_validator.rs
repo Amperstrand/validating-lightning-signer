@@ -809,7 +809,18 @@ impl Validator for SimpleValidator {
             }
 
             // The CommitmentInfo2 must be the same as previously
-            let prev_commit_info = estate.get_previous_counterparty_commit_info(commit_num);
+            // (era-aware: a same-number retry against the RETIRING
+            // funding's view reads the snapshot's copy — the channel
+            // fields may already hold the new funding's era)
+            let prev_commit_info = if estate.counterparty_commitment_funding
+                == Some(setup.funding_outpoint)
+            {
+                estate.get_previous_counterparty_commit_info(commit_num)
+            } else {
+                estate
+                    .counterparty_commit_info_for(&setup.funding_outpoint)
+                    .cloned()
+            };
             if Some(info2) != prev_commit_info.as_ref() {
                 #[cfg(not(feature = "log_pretty_print"))]
                 policy_log!(
@@ -880,11 +891,23 @@ impl Validator for SimpleValidator {
             && estate.holder_commitment_funding
                 == Some(setup.funding_outpoint)
         {
-            // The CommitmentInfo2 must be the same as previously
-            // unwrap is safe, because commitment number can't be > 0 without a holder commitment_info
-            let holder_commit_info =
-                &estate.current_holder_commit_info.as_ref().expect("current_holder_commit_info");
-            if info2 != *holder_commit_info {
+            // The CommitmentInfo2 must be the same as previously.
+            // Era-aware: during a splice window the old funding's info
+            // lives in the snapshot (the swap moves it) — the raw
+            // field-expect PANICKED on the legal moved state; resolve
+            // by the view's era instead. None = nothing stored for
+            // this era at this num: not a retry-with-changed-info.
+            let holder_commit_info = match estate.holder_commit_info_for(&setup.funding_outpoint) {
+                Some(info) => info,
+                None => {
+                    // The point check above already passed for a retry;
+                    // with no era-stored info there is nothing to compare
+                    // — treat as the first arrival for this era.
+                    *debug_on_return = false;
+                    return Ok(());
+                }
+            };
+            if *info2 != *holder_commit_info {
                 dbgvals!(*info2, holder_commit_info);
                 policy_err!(
                     self,

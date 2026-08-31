@@ -826,6 +826,53 @@ pub struct PrevFundingCommitment {
 }
 
 impl EnforcementState {
+    /// Era-aware resolution of the stored HOLDER commitment info for a
+    /// given funding view. During a splice window the channel-level
+    /// fields belong to the CURRENT funding's era and the retiring
+    /// funding's info lives in the snapshot — resolving by raw field
+    /// mixes eras (the disconnect_sig decode: a re-signed new-funding
+    /// commitment flipped the channel fields, then the old-funding
+    /// straggler validated new-era totals against the 1M view and
+    /// underflowed; the retry rails' raw expect PANICKED on the moved
+    /// info). Returns the channel-level info when its tag matches (or
+    /// is unset), the snapshot's copy when the view IS the retiring
+    /// funding, None otherwise.
+    pub fn holder_commit_info_for(&self, view_outpoint: &OutPoint) -> Option<&CommitmentInfo2> {
+        if self.holder_commitment_funding.map_or(true, |f| f == *view_outpoint) {
+            self.current_holder_commit_info.as_ref()
+        } else if let Some(prev) = self.prev_funding_commitment.as_ref() {
+            if prev.outpoint == *view_outpoint {
+                prev.current_holder_info.as_ref()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Era-aware resolution of the stored COUNTERPARTY commitment info
+    /// (see [`Self::holder_commit_info_for`]).
+    pub fn counterparty_commit_info_for(
+        &self,
+        view_outpoint: &OutPoint,
+    ) -> Option<&CommitmentInfo2> {
+        if self
+            .counterparty_commitment_funding
+            .map_or(true, |f| f == *view_outpoint)
+        {
+            self.current_counterparty_commit_info.as_ref()
+        } else if let Some(prev) = self.prev_funding_commitment.as_ref() {
+            if prev.outpoint == *view_outpoint {
+                prev.current_counterparty_info.as_ref()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
     /// Create state for a new channel.
     ///
     /// `initial_holder_value` is in satoshi and represents the lowest value
@@ -1166,33 +1213,114 @@ impl EnforcementState {
             new_holder_tx.is_none() || new_counterparty_tx.is_none(),
             "must have at most one new tx"
         );
-        // The current commitments were built against the pre-splice funding
-        // during the splice window — value them against it. The old-scale
-        // totals against the reduced new funding trip checked_sub (the
-        // crash22 decode: cur_cp=995120 vs the 894199 view) and rejected
-        // the splicing commitment.
-        let before_setup = prev_setup.unwrap_or(channel_setup);
-        // Our balance in the holder commitment tx
-        let cur_holder_bal = flatten_or_err(self.current_holder_commit_info.as_ref().map(|tx| {
-            tx.claimable_balance(
-                preimage_map,
-                before_setup.is_outbound,
-                before_setup.channel_value_sat,
-            )
-        }))?;
+        // During a splice window, value each CURRENT info against the
+        // funding it was built for (the R30 rule — the disconnect_sig
+        // underflow): the channel-scoped currents may be NEW-funding
+        // scale while an OLD-funding straggler arrives (or vice versa,
+        // the crash22 shape), and cross-funding valuation underflows
+        // checked_sub. Three sources, in order:
+        //  - an old-funding straggler's "before" is the OLD funding's
+        //    own last state: the splice snapshot record;
+        //  - channel-scoped currents tagged for the previous funding
+        //    are valued against the previous funding;
+        //  - anything else is valued against the new tx's view.
+        let straggler_funding =
+            prev_setup.filter(|p| p.funding_outpoint == channel_setup.funding_outpoint);
+        let prev_value_sat = prev_setup.map(|p| p.channel_value_sat);
+        let snap = self.prev_funding_commitment.as_ref();
+
+        let cur_holder = match (&straggler_funding, snap) {
+            (Some(_), Some(s)) => s.current_holder_info.clone(),
+            _ => self.current_holder_commit_info.clone(),
+        };
+        let cur_counterparty = match (&straggler_funding, snap) {
+            (Some(_), Some(s)) => s.current_counterparty_info.clone(),
+            _ => self.current_counterparty_commit_info.clone(),
+        };
+        let cur_value_sat = if straggler_funding.is_some() {
+            channel_setup.channel_value_sat
+        } else {
+            prev_value_sat.unwrap_or(channel_setup.channel_value_sat)
+        };
+        debug!(
+            "claimable-diag: straggler={} snap_holder={} snap_cp={} cur_holder={} cur_cp={} cur_value={} view_value={} prev_value={:?}",
+            straggler_funding.is_some(),
+            snap.map(|s| s.current_holder_info.is_some()).unwrap_or(false),
+            snap.map(|s| s.current_counterparty_info.is_some()).unwrap_or(false),
+            cur_holder.is_some(),
+            cur_counterparty.is_some(),
+            cur_value_sat,
+            channel_setup.channel_value_sat,
+            prev_value_sat,
+        );
+
+        // Case B (the 33× live residual, Round 30): a NEW-funding
+        // commitment re-validated while the channel currents are already
+        // new-scale — valuing them against prev (1M) underflows. The
+        // per-side funding tags record which funding each current info
+        // was built for: tagged for the new tx's view → value against
+        // the view; anything else → the previous funding (crash22/legacy).
+        let cur_holder_value_sat = if self
+            .holder_commitment_funding
+            .map_or(false, |f| f == channel_setup.funding_outpoint)
+        {
+            channel_setup.channel_value_sat
+        } else {
+            prev_value_sat.unwrap_or(channel_setup.channel_value_sat)
+        };
+        let cur_counterparty_value_sat = if self
+            .counterparty_commitment_funding
+            .map_or(false, |f| f == channel_setup.funding_outpoint)
+        {
+            channel_setup.channel_value_sat
+        } else {
+            prev_value_sat.unwrap_or(channel_setup.channel_value_sat)
+        };
+
+        // Our balance in the holder commitment tx. On the straggler path
+        // the snapshot may hold NEW-funding data (the live order: the
+        // new-funding signs precede the swap, so the swap-time snapshot
+        // captures already-rebuilt currents — diag2 req429: cur=1,095,120
+        // against a 1M view); a cross-funding valuation underflows and
+        // must mean "no usable before-state for this funding" (the
+        // initial-value fallback), never a rejection.
+        let cur_holder_bal = if straggler_funding.is_some() {
+            cur_holder.as_ref().and_then(|tx| {
+                tx.claimable_balance(preimage_map, channel_setup.is_outbound, cur_value_sat)
+            })
+        } else {
+            flatten_or_err(cur_holder.as_ref().map(|tx| {
+                tx.claimable_balance(preimage_map, channel_setup.is_outbound, cur_holder_value_sat)
+            }))?
+        };
         // Our balance in the counterparty commitment tx
-        let cur_cp_bal = flatten_or_err(self.current_counterparty_commit_info.as_ref().map(|tx| {
-            tx.claimable_balance(
-                preimage_map,
-                before_setup.is_outbound,
-                before_setup.channel_value_sat,
-            )
-        }))?;
+        let cur_cp_bal = if straggler_funding.is_some() {
+            cur_counterparty.as_ref().and_then(|tx| {
+                tx.claimable_balance(preimage_map, channel_setup.is_outbound, cur_value_sat)
+            })
+        } else {
+            flatten_or_err(cur_counterparty.as_ref().map(|tx| {
+                tx.claimable_balance(
+                    preimage_map,
+                    channel_setup.is_outbound,
+                    cur_counterparty_value_sat,
+                )
+            }))?
+        };
         // Our overall balance is the lower of the two
         let cur_bal_opt = min_opt(cur_holder_bal, cur_cp_bal);
 
-        // Perform balance calculations given the new transaction
-        let new_holder_bal = flatten_or_err(new_holder_tx.or(self.current_holder_commit_info.as_ref()).map(|tx| {
+        // Perform balance calculations given the new transaction.
+        // The `.or` fallbacks are ERA-AWARE (the disconnect_sig decode's
+        // last hole): when a straggler is being validated against the
+        // retiring funding's view, the absent new-tx side must fall
+        // back to the info OF THAT ERA (the snapshot's copy), not the
+        // channel-level fields which may already hold the new funding's
+        // scale — valuing those against the old view underflows
+        // checked_sub (new-era 1,099,000 vs the 1,000,000 view).
+        let new_holder_fallback = self.holder_commit_info_for(&channel_setup.funding_outpoint);
+        let new_cp_fallback = self.counterparty_commit_info_for(&channel_setup.funding_outpoint);
+        let new_holder_bal = flatten_or_err(new_holder_tx.or(new_holder_fallback).map(|tx| {
             tx.claimable_balance(
                 preimage_map,
                 channel_setup.is_outbound,
@@ -1200,7 +1328,7 @@ impl EnforcementState {
             )
         }))?;
         let new_cp_bal = flatten_or_err(
-            new_counterparty_tx.or(self.current_counterparty_commit_info.as_ref()).map(|tx| {
+            new_counterparty_tx.or(new_cp_fallback).map(|tx| {
                 tx.claimable_balance(
                     preimage_map,
                     channel_setup.is_outbound,

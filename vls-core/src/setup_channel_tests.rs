@@ -601,6 +601,122 @@ mod tests {
     }
 
     #[test]
+    fn setup_channel_splice_replay_idempotent() {
+        // R7 receive-side row 1 (the resume/retransmit contract): CLN
+        // re-drives the splice negotiation after a disconnect, which
+        // re-sends the SAME hsmd_setup_channel — the replay must be
+        // idempotent: accepted, with NO second snapshot (prev chain
+        // unchanged) and no tracker churn.
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+        let orig = make_test_channel_setup();
+
+        let mut setup2 = make_test_channel_setup();
+        setup2.channel_value_sat += 1;
+        setup2.funding_outpoint.vout += 1;
+        node.setup_channel(channel_id.clone(), None, setup2.clone(), &DerivationPath::master())
+            .expect("splice swap");
+
+        let (prev_before, prevprev_before, keys_before) = node
+            .with_channel(&channel_id, |chan| {
+                Ok((
+                    chan.prev_setup.clone(),
+                    chan.prev_prev_setup.clone(),
+                    node.get_tracker().listeners.keys().cloned().collect::<Vec<_>>(),
+                ))
+            })
+            .expect("state after first swap");
+        assert_eq!(prev_before, Some(orig.clone()), "first swap recorded the original as prev");
+
+        let chan = node
+            .setup_channel(channel_id.clone(), None, setup2.clone(), &DerivationPath::master())
+            .expect("splice replay accepted");
+        assert_eq!(chan.setup, setup2);
+
+        let (prev_after, prevprev_after, keys_after) = node
+            .with_channel(&channel_id, |chan| {
+                Ok((
+                    chan.prev_setup.clone(),
+                    chan.prev_prev_setup.clone(),
+                    node.get_tracker().listeners.keys().cloned().collect::<Vec<_>>(),
+                ))
+            })
+            .expect("state after replay");
+        assert_eq!(
+            prev_after, Some(orig),
+            "replay does NOT re-snapshot (prev stays the original funding)"
+        );
+        assert_eq!(
+            prevprev_after, prevprev_before,
+            "replay does not deepen the prev chain"
+        );
+        assert_eq!(keys_after, keys_before, "replay does not churn tracker listeners");
+    }
+
+    #[test]
+    fn tx_aborted_candidate_superseded_by_next_splice() {
+        // R8.3 supersession: a tx_abort'd (never confirmed) candidate is
+        // REPLACED by the next splice's setup — no funding_locked in
+        // between. The prev chain keeps every window funding's view
+        // reachable (two-deep: original in prev_prev, the replaced
+        // candidate in prev), and both remain signable.
+        let (node, channel_id) =
+            init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
+        let setup_a = make_test_channel_setup();
+        let base = setup_a.channel_value_sat;
+
+        let mut setup_b = make_test_channel_setup();
+        setup_b.funding_outpoint.vout += 1;
+        setup_b.channel_value_sat = base + 1000;
+        let mut setup_c = make_test_channel_setup();
+        setup_c.funding_outpoint.vout += 2;
+        setup_c.channel_value_sat = base + 2000;
+
+        node.setup_channel(channel_id.clone(), None, setup_b, &DerivationPath::master())
+            .expect("first swap (the candidate that will be tx_abort'd)");
+        let chan = node
+            .setup_channel(channel_id.clone(), None, setup_c.clone(), &DerivationPath::master())
+            .expect("superseding swap accepted");
+        assert_eq!(chan.setup, setup_c);
+        assert_eq!(
+            chan.prev_prev_setup.map(|s| s.funding_outpoint),
+            Some(setup_a.funding_outpoint),
+            "original funding preserved at two-deep"
+        );
+        assert!(
+            chan.prev_setup.is_some(),
+            "the replaced candidate is retained in the prev chain"
+        );
+
+        // both retired views stay routable and signable
+        node.with_channel(&channel_id, |chan| {
+            let build = |outpoint: OutPoint| Transaction {
+                version: Version(2),
+                lock_time: LockTime::ZERO,
+                input: vec![TxIn {
+                    previous_output: outpoint,
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence::MAX,
+                    witness: Witness::default(),
+                }],
+                output: vec![],
+            };
+            let v = chan.setup_for_tx(&build(setup_a.funding_outpoint)).expect("orig view");
+            assert_eq!(v.funding_outpoint, setup_a.funding_outpoint);
+            let remote_key = setup_a.counterparty_points.funding_pubkey;
+            chan.sign_splice_tx(
+                &build(setup_a.funding_outpoint),
+                0,
+                &remote_key,
+                Some(base),
+            )
+            .expect("orig funding still signable through the chain");
+            Ok(())
+        })
+        .expect("supersession invariants");
+    }
+
+    #[test]
     fn setup_channel_incompatible_splice_test() {
         let (node, channel_id) =
             init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
@@ -702,4 +818,5 @@ mod tests {
         })
         .expect("with_channel");
     }
+
 }
