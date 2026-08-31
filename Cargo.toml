@@ -58,3 +58,7 @@ mockall = "0.13.1"
 
 [patch.crates-io]
 txoo = { path = "../txoo-src" }
+
+[profile.mutants]
+inherits = "dev"
+debug = 0
