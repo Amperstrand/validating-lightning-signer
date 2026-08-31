@@ -1,6 +1,5 @@
 use arbitrary::{Arbitrary, Unstructured};
 use bitcoin::secp256k1;
-use lightning::ln::chan_utils::MAX_HTLCS;
 use lightning::types::payment::PaymentHash;
 use lightning_signer::bitcoin;
 use lightning_signer::channel::ChannelId;
@@ -18,6 +17,10 @@ use lightning_signer::util::test_utils::{
 use secp256k1::ecdsa::Signature;
 use std::str::FromStr;
 use std::sync::Arc;
+
+// lightning 0.2.5 replaced this public const with max_htlcs(channel_type);
+// the harness's capacity semantics are pinned to the 0.1.8 protocol ceiling
+const MAX_HTLCS: u16 = 483;
 
 #[derive(Debug, Arbitrary)]
 pub enum Action {
