@@ -248,7 +248,8 @@ mod tests {
             witness: bitcoin::Witness::default(),
         });
         chan_ctx.setup.channel_value_sat += 95_450;
-        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let vout =
+            tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
         let splice_tx = tx_ctx.to_tx();
         assert!(
             funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
@@ -311,8 +312,7 @@ mod tests {
                 // must resolve the SNAPSHOT's old-era copy — this is the
                 // only shape reaching holder_commit_info_for's snapshot
                 // match (the tag branch returns first on a new view)
-                let old_resign_cp =
-                    CommitmentInfo2::new(true, 995_120, 0, vec![], vec![], 0);
+                let old_resign_cp = CommitmentInfo2::new(true, 995_120, 0, vec![], vec![], 0);
                 let d_resign = chan.enforcement_state.claimable_balances(
                     &*state,
                     None,
@@ -320,13 +320,75 @@ mod tests {
                     &view_old,
                     Some(&view_old),
                 )?;
-                Ok((d_validate, d_sign, d_resign))
+
+                // The match-arm precision pair (mutants 1229/1233, the
+                // vls-mutants MISSED snapshot-arm deletions): a deleted
+                // `(Some(_), Some(s))` arm makes the straggler path value
+                // the channel's NEW-era currents against the OLD funding —
+                // that underflows to `None`, and min_opt SKIPS a None, so
+                // the surviving side carries the same minimum. The arm is
+                // invisible unless the snapshot side under test is the
+                // DECISIVE minimum of the before-side — which needs an
+                // ASYMMETRIC snapshot, one per direction (at the 1M view,
+                // claimable = 1_000_000 - to_b, so to_b picks the winner):
+                //   shape A: snapshot holder 600_000 < snapshot cp 601_000
+                //            → before pinned to the HOLDER arm (kills 1229)
+                //   shape B: snapshot cp     600_000 < snapshot holder 601_000
+                //            → before pinned to the COUNTERPARTY arm (1233)
+                // The after side of both is the resolver-fed cp fallback
+                // (601_000) against the 1_000_000 straggler.
+                let mut d_arm = |holder_to_b: u64, cp_to_b: u64| {
+                    let mut snap = chan
+                        .enforcement_state
+                        .prev_funding_commitment
+                        .take()
+                        .expect("snapshot present");
+                    snap.current_holder_info =
+                        Some(CommitmentInfo2::new(true, 600_000, holder_to_b, vec![], vec![], 0));
+                    snap.current_counterparty_info =
+                        Some(CommitmentInfo2::new(true, 600_000, cp_to_b, vec![], vec![], 0));
+                    chan.enforcement_state.prev_funding_commitment = Some(snap);
+                    chan.enforcement_state.claimable_balances(
+                        &*state,
+                        Some(&straggler_info),
+                        None,
+                        &view_old,
+                        Some(&view_old),
+                    )
+                };
+                // shape A: holder arm decisive (600_000 vs 601_000)
+                let d_snap_holder_min = d_arm(400_000, 399_000)?;
+                // shape B: counterparty arm decisive (601_000 vs 600_000)
+                let d_snap_cp_min = d_arm(399_000, 400_000)?;
+
+                // restore the symmetric snapshot (the doc'd fixture state)
+                let mut snap = chan
+                    .enforcement_state
+                    .prev_funding_commitment
+                    .take()
+                    .expect("snapshot present");
+                snap.current_holder_info =
+                    Some(CommitmentInfo2::new(true, 600_000, 399_000, vec![], vec![], 0));
+                snap.current_counterparty_info =
+                    Some(CommitmentInfo2::new(true, 600_000, 399_000, vec![], vec![], 0));
+                chan.enforcement_state.prev_funding_commitment = Some(snap);
+
+                Ok((d_validate, d_sign, d_resign, d_snap_holder_min, d_snap_cp_min))
             })
             .expect("all three shapes compute");
 
         eprintln!(
-            "DELTA validate=({},{}) sign=({},{}) resign=({},{})",
-            deltas.0 .0, deltas.0 .1, deltas.1 .0, deltas.1 .1, deltas.2 .0, deltas.2 .1
+            "DELTA validate=({},{}) sign=({},{}) resign=({},{}) snapH=({},{}) snapC=({},{})",
+            deltas.0 .0,
+            deltas.0 .1,
+            deltas.1 .0,
+            deltas.1 .1,
+            deltas.2 .0,
+            deltas.2 .1,
+            deltas.3 .0,
+            deltas.3 .1,
+            deltas.4 .0,
+            deltas.4 .1
         );
         assert_eq!(
             (deltas.0 .0, deltas.0 .1),
@@ -346,6 +408,21 @@ mod tests {
             "old-view re-sign shape: the holder fallback resolves the \
              snapshot's old-era copy (the decisive minimum against the \
              1_000_000 cp side)"
+        );
+        assert_eq!(
+            (deltas.3 .0, deltas.3 .1),
+            (600_000u64, 601_000u64),
+            "asymmetric A: before pinned to the snapshot HOLDER arm — a \
+             deleted arm underflows to None, min_opt skips it, and the \
+             before-side would drift to 601_000 (the cp side)"
+        );
+        assert_eq!(
+            (deltas.4 .0, deltas.4 .1),
+            (600_000u64, 600_000u64),
+            "asymmetric B: before pinned to the snapshot COUNTERPARTY arm \
+             — same None-skip blindness in the other direction (the \
+             before-side would drift to 601_000, the holder side; the \
+             after side is the same cp fallback, 600_000)"
         );
     }
 }
