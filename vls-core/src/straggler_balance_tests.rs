@@ -224,4 +224,128 @@ mod tests {
             })
             .expect("straggler accepted despite the cross-funding snapshot");
     }
+
+    // Mutant-killer precision rail (the vls-mutants MISSED trio on
+    // holder/counterparty_commit_info_for): Ok/Err rails cannot see a
+    // resolver that returns None or wrong-era data — min_opt treats a
+    // None fallback as absent and the surviving side carries the result
+    // to the same Ok. These asserts read the BalanceDelta itself: each
+    // era resolver feeds a specific side of a specific shape, and the
+    // pinned numbers move when a resolver vanishes or swaps era.
+    #[test]
+    fn claimable_balances_delta_era_precision() {
+        let node_ctx = test_node_ctx(1);
+        let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+
+        let old_setup = chan_ctx.setup.clone();
+        let channel_id = chan_ctx.channel_id.clone();
+
+        let mut tx_ctx = TestFundingTxContext::new();
+        tx_ctx.inputs.push(bitcoin::TxIn {
+            previous_output: old_setup.funding_outpoint,
+            script_sig: bitcoin::ScriptBuf::new(),
+            sequence: bitcoin::Sequence::MAX,
+            witness: bitcoin::Witness::default(),
+        });
+        chan_ctx.setup.channel_value_sat += 95_450;
+        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let splice_tx = tx_ctx.to_tx();
+        assert!(
+            funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
+            "splice accepted"
+        );
+
+        let deltas = node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                let view_old = chan.prev_setup.clone().expect("window open");
+                let view_new = chan.setup.clone();
+
+                let mut snap = chan
+                    .enforcement_state
+                    .prev_funding_commitment
+                    .take()
+                    .expect("snapshot present");
+                snap.current_holder_info =
+                    Some(CommitmentInfo2::new(true, 600_000, 399_000, vec![], vec![], 0));
+                snap.current_counterparty_info =
+                    Some(CommitmentInfo2::new(true, 600_000, 399_000, vec![], vec![], 0));
+                chan.enforcement_state.prev_funding_commitment = Some(snap);
+
+                // Distinct per-side scales so each resolver is the
+                // DECISIVE minimum of its shape (a resolver hidden above
+                // the min is invisible to these asserts):
+                // channel holder (tagged new): claimable 1_450 @ the new view
+                // channel cp     (tagged new): claimable 5_450 @ the new view
+                // snapshot sides (old era):     claimable 601_000 @ the old view
+                let new_holder_info =
+                    CommitmentInfo2::new(true, 1_000, 1_094_000, vec![], vec![], 0);
+                let new_cp_info = CommitmentInfo2::new(true, 5_000, 1_090_000, vec![], vec![], 0);
+                chan.enforcement_state.current_holder_commit_info = Some(new_holder_info.clone());
+                chan.enforcement_state.holder_commitment_funding = Some(view_new.funding_outpoint);
+                chan.enforcement_state.current_counterparty_commit_info = Some(new_cp_info.clone());
+                chan.enforcement_state.counterparty_commitment_funding =
+                    Some(view_new.funding_outpoint);
+
+                // the straggler (mirrored orientation: our side is the
+                // countersigner) — claimable 1_000_000 @ the old view
+                let straggler_info = CommitmentInfo2::new(true, 995_120, 0, vec![], vec![], 0);
+
+                let state = node_ctx.node.get_state();
+                let d_validate = chan.enforcement_state.claimable_balances(
+                    &*state,
+                    Some(&straggler_info),
+                    None,
+                    &view_old,
+                    Some(&view_old),
+                )?;
+                let d_sign = chan.enforcement_state.claimable_balances(
+                    &*state,
+                    None,
+                    Some(&new_cp_info),
+                    &view_new,
+                    Some(&view_old),
+                )?;
+                // the old-funding RE-SIGN shape (the resume's re-sign of
+                // the retiring funding's commitment): the holder fallback
+                // must resolve the SNAPSHOT's old-era copy — this is the
+                // only shape reaching holder_commit_info_for's snapshot
+                // match (the tag branch returns first on a new view)
+                let old_resign_cp =
+                    CommitmentInfo2::new(true, 995_120, 0, vec![], vec![], 0);
+                let d_resign = chan.enforcement_state.claimable_balances(
+                    &*state,
+                    None,
+                    Some(&old_resign_cp),
+                    &view_old,
+                    Some(&view_old),
+                )?;
+                Ok((d_validate, d_sign, d_resign))
+            })
+            .expect("all three shapes compute");
+
+        eprintln!(
+            "DELTA validate=({},{}) sign=({},{}) resign=({},{})",
+            deltas.0 .0, deltas.0 .1, deltas.1 .0, deltas.1 .1, deltas.2 .0, deltas.2 .1
+        );
+        assert_eq!(
+            (deltas.0 .0, deltas.0 .1),
+            (601_000u64, 601_000u64),
+            "straggler shape: cur from the snapshot, new carried by the \
+             snapshot-cp fallback (the resolver's copy, not the channel's)"
+        );
+        assert_eq!(
+            (deltas.1 .0, deltas.1 .1),
+            (1_450u64, 1_450u64),
+            "sign shape: both sides resolve the new-era channel infos \
+             (the holder fallback is the decisive minimum)"
+        );
+        assert_eq!(
+            (deltas.2 .0, deltas.2 .1),
+            (601_000u64, 601_000u64),
+            "old-view re-sign shape: the holder fallback resolves the \
+             snapshot's old-era copy (the decisive minimum against the \
+             1_000_000 cp side)"
+        );
+    }
 }
