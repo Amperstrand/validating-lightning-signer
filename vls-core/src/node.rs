@@ -1995,12 +1995,11 @@ impl Node {
                 // R10.4/F1: snapshot the retiring funding's commitment
                 // state BEFORE the new funding's flow rebuilds the
                 // channel-scoped fields (the justice window)
-// BOLT #2: Uses the same `commitment_number` as the existing commitment transaction.
-                    // BOLT #2: MUST set `funding_txid` in each `commitment_signed` message to match the
-                    // BOLT #2: funding transaction spent by that commitment transaction.
-                    // REF VLS 4b9cffb:EnforcementStateWithFunding (2023 per-funding overlays)
-                                    spliced.enforcement_state
-                    .snapshot_funding_for_splice(old_funding_outpoint);
+                // BOLT #2: Uses the same `commitment_number` as the existing commitment transaction.
+                // BOLT #2: MUST set `funding_txid` in each `commitment_signed` message to match the
+                // BOLT #2: funding transaction spent by that commitment transaction.
+                // REF VLS 4b9cffb:EnforcementStateWithFunding (2023 per-funding overlays)
+                spliced.enforcement_state.snapshot_funding_for_splice(old_funding_outpoint);
                 // fork-local (inr2-splice-dev) RBF fix v2 (the TWO-DEEP prev
                 // chain — supersedes the keep-oldest variant whose side effect
                 // was L3: splice-1's view became unreachable and its

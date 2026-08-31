@@ -41,14 +41,10 @@ mod tests {
         let tx = splice_tx_spending(setup.funding_outpoint);
 
         let sig1 = node
-            .with_channel(&channel_id, |chan| {
-                chan.sign_splice_tx(&tx, 0, &remote_key, None)
-            })
+            .with_channel(&channel_id, |chan| chan.sign_splice_tx(&tx, 0, &remote_key, None))
             .expect("first sign");
         let sig2 = node
-            .with_channel(&channel_id, |chan| {
-                chan.sign_splice_tx(&tx, 0, &remote_key, None)
-            })
+            .with_channel(&channel_id, |chan| chan.sign_splice_tx(&tx, 0, &remote_key, None))
             .expect("replay sign");
         assert_eq!(
             sig1.serialize_compact(),
@@ -84,7 +80,7 @@ mod tests {
 
         let remote_key = setup_a.counterparty_points.funding_pubkey;
         for (outpoint, view_value) in [
-            (setup_a.funding_outpoint, base),      // prev_prev (the original)
+            (setup_a.funding_outpoint, base),        // prev_prev (the original)
             (setup_b.funding_outpoint, base + 1000), // prev (the replaced candidate)
             (setup_c.funding_outpoint, base + 2000), // current
         ] {

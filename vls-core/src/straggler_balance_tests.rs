@@ -31,9 +31,8 @@ mod tests {
         let old_setup = chan_ctx.setup.clone();
         let channel_id = chan_ctx.channel_id.clone();
 
-        let mut straggler_ctx = channel_commitment(
-            &node_ctx, &chan_ctx, 1, 3755, 995_120, 0, vec![], vec![],
-        );
+        let mut straggler_ctx =
+            channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 995_120, 0, vec![], vec![]);
         let (scsig, shsigs) =
             counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut straggler_ctx);
 
@@ -45,17 +44,18 @@ mod tests {
             witness: bitcoin::Witness::default(),
         });
         chan_ctx.setup.channel_value_sat += 95_450;
-        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let vout =
+            tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
         let splice_tx = tx_ctx.to_tx();
         assert!(
             funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
             "splice accepted"
         );
 
-        let mut new_ctx = channel_commitment(
-            &node_ctx, &chan_ctx, 1, 3755, 1_090_000, 0, vec![], vec![],
-        );
-        let (ncsig, nhsigs) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut new_ctx);
+        let mut new_ctx =
+            channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 1_090_000, 0, vec![], vec![]);
+        let (ncsig, nhsigs) =
+            counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut new_ctx);
 
         let raw_validate = |ctx: &TestCommitmentTxContext,
                             sig: &Signature,
@@ -145,9 +145,8 @@ mod tests {
         let old_setup = chan_ctx.setup.clone();
         let channel_id = chan_ctx.channel_id.clone();
 
-        let mut straggler_ctx = channel_commitment(
-            &node_ctx, &chan_ctx, 1, 3755, 995_120, 0, vec![], vec![],
-        );
+        let mut straggler_ctx =
+            channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 995_120, 0, vec![], vec![]);
         let (scsig, shsigs) =
             counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut straggler_ctx);
 
@@ -159,7 +158,8 @@ mod tests {
             witness: bitcoin::Witness::default(),
         });
         chan_ctx.setup.channel_value_sat += 95_450;
-        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let vout =
+            tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
         let splice_tx = tx_ctx.to_tx();
         assert!(
             funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
@@ -171,27 +171,12 @@ mod tests {
         node_ctx
             .node
             .with_channel(&channel_id, |chan| {
-                let mut snap = chan
-                    .enforcement_state
-                    .prev_funding_commitment
-                    .take()
-                    .expect("window open");
-                snap.current_holder_info = Some(CommitmentInfo2::new(
-                    true,
-                    0,
-                    1_090_000,
-                    vec![],
-                    vec![],
-                    3755,
-                ));
-                snap.current_counterparty_info = Some(CommitmentInfo2::new(
-                    true,
-                    0,
-                    1_090_000,
-                    vec![],
-                    vec![],
-                    3755,
-                ));
+                let mut snap =
+                    chan.enforcement_state.prev_funding_commitment.take().expect("window open");
+                snap.current_holder_info =
+                    Some(CommitmentInfo2::new(true, 0, 1_090_000, vec![], vec![], 3755));
+                snap.current_counterparty_info =
+                    Some(CommitmentInfo2::new(true, 0, 1_090_000, vec![], vec![], 3755));
                 chan.enforcement_state.prev_funding_commitment = Some(snap);
                 Ok(())
             })
@@ -226,13 +211,7 @@ mod tests {
                 let output_witscripts: Vec<_> =
                     redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
                 chan.validate_holder_commitment_tx(
-                    &straggler_ctx
-                        .tx
-                        .as_ref()
-                        .unwrap()
-                        .trust()
-                        .built_transaction()
-                        .transaction,
+                    &straggler_ctx.tx.as_ref().unwrap().trust().built_transaction().transaction,
                     &output_witscripts,
                     straggler_ctx.commit_num,
                     straggler_ctx.feerate_per_kw,

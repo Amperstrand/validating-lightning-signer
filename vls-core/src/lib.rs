@@ -147,11 +147,11 @@ mod sign_justice_sweep_tests;
 #[cfg(test)]
 mod sign_mutual_close_tests;
 #[cfg(test)]
+mod sign_onchain_tx_tests;
+#[cfg(test)]
 mod sign_splice_tests;
 #[cfg(test)]
 mod straggler_balance_tests;
-#[cfg(test)]
-mod sign_onchain_tx_tests;
 #[cfg(test)]
 mod validate_counterparty_revocation_tests;
 #[cfg(test)]

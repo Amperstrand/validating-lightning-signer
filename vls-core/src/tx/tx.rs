@@ -199,6 +199,7 @@ impl CommitmentInfo2 {
     /// - the output to us
     /// - HTLCs offered to us for which the preimage is known
     /// - HTLCs we offer for which the preimage is unknown
+    ///
     /// None = the commitment's totals do not fit the funding value or
     /// the arithmetic overflowed — a mismatch to REJECT, not a panic
     /// (the RBF two-swap case made the stock expect fire and kill the

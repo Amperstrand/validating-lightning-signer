@@ -4,14 +4,14 @@ mod tests {
     use crate::policy::validator::CommitmentSignatures;
     use bitcoin;
     use bitcoin::bip32::DerivationPath;
+    use bitcoin::blockdata::locktime::absolute::LockTime;
+    use bitcoin::blockdata::transaction::Sequence;
+    use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxIn};
+    use bitcoin::blockdata::witness::Witness;
     use bitcoin::hashes::hex::FromHex;
     use bitcoin::secp256k1::ecdsa::Signature;
     use bitcoin::secp256k1::SecretKey;
-    use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxIn};
-    use bitcoin::blockdata::witness::Witness;
-    use bitcoin::blockdata::locktime::absolute::LockTime;
     use bitcoin::transaction::Version;
-    use bitcoin::blockdata::transaction::Sequence;
     use bitcoin::ScriptBuf;
     use lightning::ln::chan_utils::ChannelPublicKeys;
     use test_log::test;
@@ -250,9 +250,8 @@ mod tests {
                 input: vec![],
                 output: vec![],
             };
-            let v = chan
-                .setup_for_tx(&empty_tx)
-                .expect("no-input tx falls back to the current view");
+            let v =
+                chan.setup_for_tx(&empty_tx).expect("no-input tx falls back to the current view");
             assert_eq!(v.funding_outpoint, chan.setup.funding_outpoint);
             Ok(())
         })
@@ -279,18 +278,14 @@ mod tests {
                 }],
                 output: vec![],
             };
-            let v = chan
-                .setup_for_tx(&build(chan.setup.funding_outpoint))
-                .expect("current view");
+            let v = chan.setup_for_tx(&build(chan.setup.funding_outpoint)).expect("current view");
             assert_eq!(v.funding_outpoint, chan.setup.funding_outpoint);
             let v = chan.setup_for_tx(&build(prev_outpoint)).expect("prev view");
             assert_eq!(v.funding_outpoint, prev_outpoint);
             // unknown funding input falls back to the current view — the
             // recomposition check downstream is the guard (upstream's
             // FailedPrecondition on mismatched recomposed txs)
-            let v = chan
-                .setup_for_tx(&build(OutPoint::null()))
-                .expect("fallback to current view");
+            let v = chan.setup_for_tx(&build(OutPoint::null())).expect("fallback to current view");
             assert_eq!(v.funding_outpoint, chan.setup.funding_outpoint);
             Ok(())
         })
@@ -301,9 +296,8 @@ mod tests {
     fn out_splice_value_arithmetic_test() {
         let (node, channel_id) =
             init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
-        let base_value = node
-            .with_channel(&channel_id, |chan| Ok(chan.setup.channel_value_sat))
-            .expect("value");
+        let base_value =
+            node.with_channel(&channel_id, |chan| Ok(chan.setup.channel_value_sat)).expect("value");
 
         // R19.3 out-splice rail: the new funding may carry a REDUCED
         // channel_value (funds leave via the splice tx)
@@ -370,11 +364,9 @@ mod tests {
         // R10.4/F1: the splice swap snapshots the retiring funding's
         // commitment state (the justice window) BEFORE the new funding's
         // flow rebuilds the channel-scoped fields
-        let dummy_sigs =
-            CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
+        let dummy_sigs = CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
         node.with_channel(&channel_id, |chan| {
-            chan.enforcement_state.current_holder_commit_info =
-                Some(make_test_commitment_info());
+            chan.enforcement_state.current_holder_commit_info = Some(make_test_commitment_info());
             chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
             chan.enforcement_state.current_counterparty_commit_info =
                 Some(make_test_commitment_info());
@@ -394,9 +386,7 @@ mod tests {
 
         // the snapshot holds the OLD funding's data...
         let snap = node
-            .with_channel(&channel_id, |c| {
-                Ok(c.enforcement_state.prev_funding_commitment.clone())
-            })
+            .with_channel(&channel_id, |c| Ok(c.enforcement_state.prev_funding_commitment.clone()))
             .expect("snapshot")
             .expect("snapshot exists after swap");
         assert_eq!(snap.outpoint, old_outpoint);
@@ -405,19 +395,17 @@ mod tests {
             snap.current_counterparty_info.is_some(),
             "old counterparty info preserved (the rbf-stale fix)"
         );
-        assert!(
-            node.with_channel(&channel_id, |c| {
+        assert!(node
+            .with_channel(&channel_id, |c| {
                 Ok(c.enforcement_state.current_counterparty_commit_info.is_none())
             })
-            .expect("counterparty moved")
-        );
+            .expect("counterparty moved"));
         // ...and the channel-scoped current was moved out (rebuilt by the new flow)
-        assert!(
-            node.with_channel(&channel_id, |c| {
+        assert!(node
+            .with_channel(&channel_id, |c| {
                 Ok(c.enforcement_state.current_holder_commit_info.is_none())
             })
-            .expect("moved")
-        );
+            .expect("moved"));
 
         // the lock retires the snapshot (the splice tx spent the old funding)
         node.with_channel(&channel_id, |c| {
@@ -449,11 +437,7 @@ mod tests {
             .expect("splice swap");
 
         let keys: Vec<_> = node.get_tracker().listeners.keys().cloned().collect();
-        assert!(
-            !keys.contains(&old_outpoint),
-            "old listener retired, got {:?}",
-            keys
-        );
+        assert!(!keys.contains(&old_outpoint), "old listener retired, got {:?}", keys);
         assert_eq!(keys.len(), 1, "exactly one listener entry, got {:?}", keys);
     }
 
@@ -466,12 +450,10 @@ mod tests {
         // changes, the snapshot stays intact.
         let (node, channel_id) =
             init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
-        let dummy_sigs =
-            CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
+        let dummy_sigs = CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
 
         node.with_channel(&channel_id, |chan| {
-            chan.enforcement_state.current_holder_commit_info =
-                Some(make_test_commitment_info());
+            chan.enforcement_state.current_holder_commit_info = Some(make_test_commitment_info());
             chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
             chan.enforcement_state.current_counterparty_commit_info =
                 Some(make_test_commitment_info());
@@ -487,12 +469,8 @@ mod tests {
             .expect("swap");
 
         node.with_channel(&channel_id, |chan| {
-            let prev_outpoint = chan
-                .enforcement_state
-                .prev_funding_commitment
-                .as_ref()
-                .expect("snapshot")
-                .outpoint;
+            let prev_outpoint =
+                chan.enforcement_state.prev_funding_commitment.as_ref().expect("snapshot").outpoint;
             let cur_outpoint = chan.setup.funding_outpoint;
             assert_ne!(prev_outpoint, cur_outpoint);
 
@@ -523,11 +501,8 @@ mod tests {
                 "numbering never advances on the interleave"
             );
 
-            let snap = chan
-                .enforcement_state
-                .prev_funding_commitment
-                .as_ref()
-                .expect("snapshot survives");
+            let snap =
+                chan.enforcement_state.prev_funding_commitment.as_ref().expect("snapshot survives");
             assert!(snap.current_holder_info.is_some());
             assert!(snap.current_counterparty_info.is_some());
 
@@ -550,13 +525,11 @@ mod tests {
         // commitments).
         let (node, channel_id) =
             init_node_and_channel(TEST_NODE_CONFIG, TEST_SEED[1], make_test_channel_setup());
-        let dummy_sigs =
-            CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
+        let dummy_sigs = CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
 
         // the OLD funding's commitment state + a channel with history
         node.with_channel(&channel_id, |chan| {
-            chan.enforcement_state.current_holder_commit_info =
-                Some(make_test_commitment_info());
+            chan.enforcement_state.current_holder_commit_info = Some(make_test_commitment_info());
             chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
             chan.enforcement_state.current_counterparty_commit_info =
                 Some(make_test_commitment_info());
@@ -591,10 +564,7 @@ mod tests {
                 .as_ref()
                 .expect("snapshot survives the re-sign");
             assert!(snap.current_holder_info.is_some(), "old holder info");
-            assert!(
-                snap.current_counterparty_info.is_some(),
-                "old counterparty info"
-            );
+            assert!(snap.current_counterparty_info.is_some(), "old counterparty info");
             Ok(())
         })
         .expect("composite invariants");
@@ -643,13 +613,11 @@ mod tests {
             })
             .expect("state after replay");
         assert_eq!(
-            prev_after, Some(orig),
+            prev_after,
+            Some(orig),
             "replay does NOT re-snapshot (prev stays the original funding)"
         );
-        assert_eq!(
-            prevprev_after, prevprev_before,
-            "replay does not deepen the prev chain"
-        );
+        assert_eq!(prevprev_after, prevprev_before, "replay does not deepen the prev chain");
         assert_eq!(keys_after, keys_before, "replay does not churn tracker listeners");
     }
 
@@ -683,10 +651,7 @@ mod tests {
             Some(setup_a.funding_outpoint),
             "original funding preserved at two-deep"
         );
-        assert!(
-            chan.prev_setup.is_some(),
-            "the replaced candidate is retained in the prev chain"
-        );
+        assert!(chan.prev_setup.is_some(), "the replaced candidate is retained in the prev chain");
 
         // both retired views stay routable and signable
         node.with_channel(&channel_id, |chan| {
@@ -704,13 +669,8 @@ mod tests {
             let v = chan.setup_for_tx(&build(setup_a.funding_outpoint)).expect("orig view");
             assert_eq!(v.funding_outpoint, setup_a.funding_outpoint);
             let remote_key = setup_a.counterparty_points.funding_pubkey;
-            chan.sign_splice_tx(
-                &build(setup_a.funding_outpoint),
-                0,
-                &remote_key,
-                Some(base),
-            )
-            .expect("orig funding still signable through the chain");
+            chan.sign_splice_tx(&build(setup_a.funding_outpoint), 0, &remote_key, Some(base))
+                .expect("orig funding still signable through the chain");
             Ok(())
         })
         .expect("supersession invariants");
@@ -724,8 +684,7 @@ mod tests {
         // Same funding outpoint with a different value is not a splice.
         let mut setup1 = make_test_channel_setup();
         setup1.channel_value_sat += 1;
-        let result =
-            node.setup_channel(channel_id, None, setup1, &DerivationPath::master());
+        let result = node.setup_channel(channel_id, None, setup1, &DerivationPath::master());
         assert!(result.is_err());
     }
 
@@ -782,8 +741,7 @@ mod tests {
         // commitment is the legal splice transition (BOLTs #1160 L1847);
         // a replay after the pending is consumed, or activation on an
         // advanced chain (num > 1), is rejected.
-        let dummy_sigs =
-            CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
+        let dummy_sigs = CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
         node.with_channel(&channel_id, |chan| {
             chan.enforcement_state.next_holder_commit_info =
                 Some((make_test_commitment_info(), dummy_sigs.clone()));
@@ -810,13 +768,9 @@ mod tests {
             chan.enforcement_state.set_next_holder_commit_num_for_testing(2);
             chan.enforcement_state.next_holder_commit_info =
                 Some((make_test_commitment_info(), dummy_sigs.clone()));
-            assert!(
-                chan.activate_initial_commitment().is_err(),
-                "advanced chain rejected"
-            );
+            assert!(chan.activate_initial_commitment().is_err(), "advanced chain rejected");
             Ok(())
         })
         .expect("with_channel");
     }
-
 }

@@ -359,12 +359,14 @@ impl<'a> push_decoder::Listener for PushListener<'a> {
             // A multi-input spend of the funding is a splice (only the
             // 2-of-2 funding keys can construct it), not a unilateral
             // close — stop gathering it as a closing tx.
-            warn!("        // BOLT #2: If any splice transaction reaches acceptable depth:
+            warn!(
+                "        // BOLT #2: If any splice transaction reaches acceptable depth:
         // BOLT #2: MUST send `splice_locked` with the `txid` of that transaction.
         // BOLT #2: MUST stop sending `commitment_signed` for RBF attempts and ancestors
         // BOLT #2: of this splice transaction.
         // REF the multi-input discriminator (a splice spend is not a close)
-funding spent by multi-input tx (splice): not tracking as close");
+funding spent by multi-input tx (splice): not tracking as close"
+            );
             decode_state.closing_tx = None;
         }
         decode_state.input_num += 1;
@@ -1190,8 +1192,7 @@ mod tests {
         // new funding's confirmation rebuilds the depth.
         let tx1 = make_tx(vec![make_txin(1)]);
         let old_outpoint = OutPoint::new(tx1.compute_txid(), 0);
-        let mut base =
-            ChainMonitorBase::new(old_outpoint, 0, &ChannelId::new(&[33u8; 32]));
+        let mut base = ChainMonitorBase::new(old_outpoint, 0, &ChannelId::new(&[33u8; 32]));
         let cpp = Box::new(DummyCommitmentPointProvider {});
         let monitor = base.as_monitor(cpp);
         let block_hash = BlockHash::all_zeros();
