@@ -773,14 +773,16 @@ impl Validator for SimpleValidator {
             );
         }
 
+        // BOLT #2: MUST reuse the same commitment number for its next `commitment_signed`.
+        // BOLT #2: MUST set `next_funding_txid` to the txid of that interactive transaction.
+        // REF the reestablish retransmit contract (R7.2; the disconnect tier's replay rails)
         // Is this a retry?
         // not a security problem, because it's OK to re-sign an old commitment
         // that the *counterparty* revoked
         // A same-number commitment for a DIFFERENT funding is the legal
         // splice re-sign (BOLTs #1160 L1847), not a retry.
         if commit_num + 1 == estate.next_counterparty_commit_num
-            && estate.counterparty_commitment_funding
-                == Some(setup.funding_outpoint)
+            && estate.counterparty_commitment_funding == Some(setup.funding_outpoint)
         {
             // The commit_point must be the same as previous
             match estate.current_counterparty_point {
@@ -812,15 +814,12 @@ impl Validator for SimpleValidator {
             // (era-aware: a same-number retry against the RETIRING
             // funding's view reads the snapshot's copy — the channel
             // fields may already hold the new funding's era)
-            let prev_commit_info = if estate.counterparty_commitment_funding
-                == Some(setup.funding_outpoint)
-            {
-                estate.get_previous_counterparty_commit_info(commit_num)
-            } else {
-                estate
-                    .counterparty_commit_info_for(&setup.funding_outpoint)
-                    .cloned()
-            };
+            let prev_commit_info =
+                if estate.counterparty_commitment_funding == Some(setup.funding_outpoint) {
+                    estate.get_previous_counterparty_commit_info(commit_num)
+                } else {
+                    estate.counterparty_commit_info_for(&setup.funding_outpoint).cloned()
+                };
             if Some(info2) != prev_commit_info.as_ref() {
                 #[cfg(not(feature = "log_pretty_print"))]
                 policy_log!(
@@ -888,8 +887,7 @@ impl Validator for SimpleValidator {
 
         // Is this a retry?
         if commit_num + 1 == estate.next_holder_commit_num
-            && estate.holder_commitment_funding
-                == Some(setup.funding_outpoint)
+            && estate.holder_commitment_funding == Some(setup.funding_outpoint)
         {
             // The CommitmentInfo2 must be the same as previously.
             // Era-aware: during a splice window the old funding's info

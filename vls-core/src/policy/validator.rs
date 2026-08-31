@@ -857,10 +857,7 @@ impl EnforcementState {
         &self,
         view_outpoint: &OutPoint,
     ) -> Option<&CommitmentInfo2> {
-        if self
-            .counterparty_commitment_funding
-            .map_or(true, |f| f == *view_outpoint)
-        {
+        if self.counterparty_commitment_funding.map_or(true, |f| f == *view_outpoint) {
             self.current_counterparty_commit_info.as_ref()
         } else if let Some(prev) = self.prev_funding_commitment.as_ref() {
             if prev.outpoint == *view_outpoint {
@@ -1199,9 +1196,8 @@ impl EnforcementState {
     ) -> Result<BalanceDelta, Status> {
         fn flatten_or_err(o: Option<Option<u64>>) -> Result<Option<u64>, Status> {
             match o {
-                Some(None) => Err(Status::invalid_argument(
-                    "commitment totals exceed the funding value",
-                )),
+                Some(None) =>
+                    Err(Status::invalid_argument("commitment totals exceed the funding value")),
                 other => Ok(other.flatten()),
             }
         }
@@ -1327,15 +1323,13 @@ impl EnforcementState {
                 channel_setup.channel_value_sat,
             )
         }))?;
-        let new_cp_bal = flatten_or_err(
-            new_counterparty_tx.or(new_cp_fallback).map(|tx| {
-                tx.claimable_balance(
-                    preimage_map,
-                    channel_setup.is_outbound,
-                    channel_setup.channel_value_sat,
-                )
-            }),
-        )?;
+        let new_cp_bal = flatten_or_err(new_counterparty_tx.or(new_cp_fallback).map(|tx| {
+            tx.claimable_balance(
+                preimage_map,
+                channel_setup.is_outbound,
+                channel_setup.channel_value_sat,
+            )
+        }))?;
         let new_bal =
             min_opt(new_holder_bal, new_cp_bal).expect("already checked that we have a new tx");
 

@@ -807,8 +807,13 @@ impl Channel {
 
         let node = self.get_node();
         let mut state = node.get_state();
-        let delta =
-            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &self.setup, self.prev_setup.as_ref())?;
+        let delta = self.enforcement_state.claimable_balances(
+            &*state,
+            None,
+            Some(&info2),
+            &self.setup,
+            self.prev_setup.as_ref(),
+        )?;
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(None, Some(&info2));
 
@@ -873,8 +878,7 @@ impl Channel {
             *remote_per_commitment_point,
             info2.clone(),
         )?;
-        self.enforcement_state.counterparty_commitment_funding =
-            Some(self.setup.funding_outpoint);
+        self.enforcement_state.counterparty_commitment_funding = Some(self.setup.funding_outpoint);
 
         state.apply_payments(
             &self.id0,
@@ -1183,8 +1187,13 @@ impl Channel {
 
         let node = self.get_node();
         let state = node.get_state();
-        let delta =
-            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup, self.prev_setup.as_ref())?;
+        let delta = self.enforcement_state.claimable_balances(
+            &*state,
+            Some(&info2),
+            None,
+            &self.setup,
+            self.prev_setup.as_ref(),
+        )?;
 
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(Some(&info2), None);
@@ -1273,6 +1282,8 @@ impl Channel {
                 self.enforcement_state.holder_commitment_funding =
                     Some(self.setup.funding_outpoint);
             } else {
+                // BOLT #2: MUST NOT respond with `revoke_and_ack`.
+                // REF BOLTs #1160 L1852 (splice commitments carry no revoke)
                 // The old-funding straggler: store into the snapshot record —
                 // NOT the channel slot (the clobber would lose the new
                 // funding's pending during the interleave); no retag.
@@ -1341,8 +1352,13 @@ impl Channel {
         let node = self.get_node();
         let mut state = node.get_state();
 
-        let delta =
-            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &self.setup, self.prev_setup.as_ref())?;
+        let delta = self.enforcement_state.claimable_balances(
+            &*state,
+            Some(&info2),
+            None,
+            &self.setup,
+            self.prev_setup.as_ref(),
+        )?;
 
         let (next_holder_commitment_point, maybe_old_secret) = self
             .advance_holder_commitment_state(
@@ -2026,6 +2042,10 @@ impl Channel {
     /// (the setup has already swapped by signing time). The psbt amount
     /// is cross-checked when present (the accepter's funding input has
     /// no witness_utxo — the funding's value stands in).
+    // BOLT #2: MUST set `shared_input_signature` to a valid ECDSA signature for the
+    // BOLT #2: `tx_add_input` spending the previous channel funding output using the
+    // BOLT #2: `funding_pubkey` that matches this input.
+    // REF CLN hsmd/libhsmd.c:handle_sign_splice_tx (upstream: no validation — capability trust)
     pub fn sign_splice_tx(
         &self,
         tx: &Transaction,
@@ -2040,20 +2060,14 @@ impl Channel {
             .input
             .get(input_index as usize)
             .ok_or_else(|| Status::invalid_argument("splice input index out of range"))?;
-        let channel_value_sat =
-            if input.previous_output == self.setup.funding_outpoint {
-                self.setup.channel_value_sat
-            } else if let Some(ref prev_setup) = self.prev_setup {
-                if input.previous_output == prev_setup.funding_outpoint {
-                    prev_setup.channel_value_sat
-                } else if let Some(ref pp) = self.prev_prev_setup {
-                    if input.previous_output == pp.funding_outpoint {
-                        pp.channel_value_sat
-                    } else {
-                        return Err(Status::invalid_argument(
-                            "splice input is not the channel funding outpoint",
-                        ));
-                    }
+        let channel_value_sat = if input.previous_output == self.setup.funding_outpoint {
+            self.setup.channel_value_sat
+        } else if let Some(ref prev_setup) = self.prev_setup {
+            if input.previous_output == prev_setup.funding_outpoint {
+                prev_setup.channel_value_sat
+            } else if let Some(ref pp) = self.prev_prev_setup {
+                if input.previous_output == pp.funding_outpoint {
+                    pp.channel_value_sat
                 } else {
                     return Err(Status::invalid_argument(
                         "splice input is not the channel funding outpoint",
@@ -2063,7 +2077,12 @@ impl Channel {
                 return Err(Status::invalid_argument(
                     "splice input is not the channel funding outpoint",
                 ));
-            };
+            }
+        } else {
+            return Err(Status::invalid_argument(
+                "splice input is not the channel funding outpoint",
+            ));
+        };
         let input_amount_sat = input_amount_sat.unwrap_or(channel_value_sat);
         if input_amount_sat != channel_value_sat {
             return Err(Status::invalid_argument("splice input value is not the channel value"));
@@ -2079,9 +2098,8 @@ impl Channel {
                 EcdsaSighashType::All,
             )
             .map_err(|_| Status::internal("splice sighash failed"))?;
-        let sig = self
-            .secp_ctx
-            .sign_ecdsa(&Message::from_digest(sighash.to_byte_array()), &funding_key);
+        let sig =
+            self.secp_ctx.sign_ecdsa(&Message::from_digest(sighash.to_byte_array()), &funding_key);
         Ok(sig)
     }
 
@@ -2180,12 +2198,10 @@ impl Channel {
                 let ih = self.enforcement_state.initial_holder_value;
                 (ih, self.setup.channel_value_sat.saturating_sub(ih))
             };
-            self.enforcement_state.current_holder_commit_info = Some(CommitmentInfo2::new(
-                false, to_cp, to_holder, vec![], vec![], 0,
-            ));
-            self.enforcement_state.current_counterparty_commit_info = Some(CommitmentInfo2::new(
-                true, to_holder, to_cp, vec![], vec![], 0,
-            ));
+            self.enforcement_state.current_holder_commit_info =
+                Some(CommitmentInfo2::new(false, to_cp, to_holder, vec![], vec![], 0));
+            self.enforcement_state.current_counterparty_commit_info =
+                Some(CommitmentInfo2::new(true, to_holder, to_cp, vec![], vec![], 0));
         }
         self.persist()?;
         Ok(())
@@ -2746,11 +2762,19 @@ impl Channel {
         info!(
             "claimable-diag2: cur_holder_total={:?} cur_cp_total={:?} is_outbound={}",
             self.enforcement_state.current_holder_commit_info.as_ref().map(|i| i.total_value()),
-            self.enforcement_state.current_counterparty_commit_info.as_ref().map(|i| i.total_value()),
+            self.enforcement_state
+                .current_counterparty_commit_info
+                .as_ref()
+                .map(|i| i.total_value()),
             diag_view.is_outbound
         );
-        let delta =
-            self.enforcement_state.claimable_balances(&*state, None, Some(&info2), &diag_view, self.prev_setup.as_ref())?;
+        let delta = self.enforcement_state.claimable_balances(
+            &*state,
+            None,
+            Some(&info2),
+            &diag_view,
+            self.prev_setup.as_ref(),
+        )?;
 
         let incoming_payment_summary =
             self.enforcement_state.incoming_payments_summary(None, Some(&info2));
@@ -2853,9 +2877,7 @@ impl Channel {
                     .map_err(|e| internal_error(format!("host-tx sighash: {}", e)))?
                     .to_byte_array(),
             );
-            let host_sig = self
-                .secp_ctx
-                .sign_ecdsa(&host_sighash, &self.keys.funding_key(None));
+            let host_sig = self.secp_ctx.sign_ecdsa(&host_sighash, &self.keys.funding_key(None));
             return Ok(host_sig);
         }
 
@@ -2919,8 +2941,7 @@ impl Channel {
         )?;
         // Era-correct tag (see sign_counterparty_commitment_tx_phase2):
         // tag with the funding view the signed tx actually spends.
-        self.enforcement_state.counterparty_commitment_funding =
-            Some(diag_view.funding_outpoint);
+        self.enforcement_state.counterparty_commitment_funding = Some(diag_view.funding_outpoint);
 
         state.apply_payments(
             &self.id0,
@@ -3079,6 +3100,10 @@ impl Channel {
     /// holder's revocation secret for the prior commitment.  This
     /// method advances the expected next holder commitment number in
     /// the signer's state.
+    // BOLT #2: MUST validate each `commitment_signed` based on `funding_txid`.
+    // BOLT #2: If `funding_txid` is missing in one of the `commitment_signed` messages:
+    // BOLT #2: MUST send an `error` and fail the channel.
+    // REF the view-parameterized dispatch (setup_for_tx routes by the tx's funding input)
     pub fn validate_holder_commitment_tx(
         &mut self,
         tx: &Transaction,
@@ -3128,8 +3153,13 @@ impl Channel {
                 + info2.received_htlcs.iter().map(|h| h.value_sat).sum::<u64>(),
             commitment_number
         );
-        let delta =
-            self.enforcement_state.claimable_balances(&*state, Some(&info2), None, &view, self.prev_setup.as_ref())?;
+        let delta = self.enforcement_state.claimable_balances(
+            &*state,
+            Some(&info2),
+            None,
+            &view,
+            self.prev_setup.as_ref(),
+        )?;
         info!("#hang-probe: claimable done");
 
         #[cfg(not(fuzzing))]

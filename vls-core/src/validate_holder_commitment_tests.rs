@@ -101,29 +101,26 @@ mod tests {
         let channel_id = chan_ctx.channel_id.clone();
 
         // the OLD-funding straggler's message, built pre-swap
-        let mut straggler_ctx = channel_commitment(
-            &node_ctx, &chan_ctx, 0, 0, 995_120, 0, vec![], vec![],
-        );
+        let mut straggler_ctx =
+            channel_commitment(&node_ctx, &chan_ctx, 0, 0, 995_120, 0, vec![], vec![]);
         let (scsig, shsigs) =
             counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut straggler_ctx);
 
         // the old era's currents
-        let dummy_sigs =
-            crate::policy::validator::CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
+        let dummy_sigs = crate::policy::validator::CommitmentSignatures(
+            Signature::from_compact(&[0; 64]).unwrap(),
+            vec![],
+        );
         // old-era currents (1M-scale: the seeded helper is 3M-scale and
         // would overflow every 1M view)
-        let old_era_info = crate::tx::tx::CommitmentInfo2::new(
-            true, 600_000, 399_000, vec![], vec![], 0,
-        );
+        let old_era_info =
+            crate::tx::tx::CommitmentInfo2::new(true, 600_000, 399_000, vec![], vec![], 0);
         node_ctx
             .node
             .with_channel(&channel_id, |chan| {
-                chan.enforcement_state.current_holder_commit_info =
-                    Some(old_era_info.clone());
-                chan.enforcement_state.current_counterparty_signatures =
-                    Some(dummy_sigs.clone());
-                chan.enforcement_state.current_counterparty_commit_info =
-                    Some(old_era_info);
+                chan.enforcement_state.current_holder_commit_info = Some(old_era_info.clone());
+                chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
+                chan.enforcement_state.current_counterparty_commit_info = Some(old_era_info);
                 Ok(())
             })
             .expect("seed");
@@ -137,7 +134,8 @@ mod tests {
             witness: bitcoin::Witness::default(),
         });
         chan_ctx.setup.channel_value_sat += 100_000;
-        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let vout =
+            tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
         let splice_tx = tx_ctx.to_tx();
         assert!(
             funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
@@ -192,8 +190,6 @@ mod tests {
             })
             .expect("resign");
 
-
-
         // THE STRAGGLER, arriving AFTER the re-sign (the live ordering):
         // must still be ACCEPTED — the old-funding view with its OWN era's
         // currents, not the just-signed new-era info.
@@ -202,8 +198,7 @@ mod tests {
                             htlc_sigs: &Vec<Signature>|
          -> Result<(), Status> {
             node_ctx.node.with_channel(&channel_id, |chan| {
-                let htlcs =
-                    Channel::htlcs_info2_to_oic(&ctx.offered_htlcs, &ctx.received_htlcs);
+                let htlcs = Channel::htlcs_info2_to_oic(&ctx.offered_htlcs, &ctx.received_htlcs);
                 let channel_parameters = chan.make_channel_parameters();
                 let parameters = channel_parameters.as_holder_broadcastable();
                 let save_commit_num = chan.enforcement_state.next_holder_commit_num;
@@ -256,29 +251,26 @@ mod tests {
         let channel_id = chan_ctx.channel_id.clone();
 
         // the OLD-funding straggler's message, built pre-swap
-        let mut straggler_ctx = channel_commitment(
-            &node_ctx, &chan_ctx, 0, 0, 995_120, 0, vec![], vec![],
-        );
+        let mut straggler_ctx =
+            channel_commitment(&node_ctx, &chan_ctx, 0, 0, 995_120, 0, vec![], vec![]);
         let (scsig, shsigs) =
             counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut straggler_ctx);
 
         // the old era's currents + the splice swap
-        let dummy_sigs =
-            crate::policy::validator::CommitmentSignatures(Signature::from_compact(&[0; 64]).unwrap(), vec![]);
+        let dummy_sigs = crate::policy::validator::CommitmentSignatures(
+            Signature::from_compact(&[0; 64]).unwrap(),
+            vec![],
+        );
         // old-era currents (1M-scale: the seeded helper is 3M-scale and
         // would overflow every 1M view)
-        let old_era_info = crate::tx::tx::CommitmentInfo2::new(
-            true, 600_000, 399_000, vec![], vec![], 0,
-        );
+        let old_era_info =
+            crate::tx::tx::CommitmentInfo2::new(true, 600_000, 399_000, vec![], vec![], 0);
         node_ctx
             .node
             .with_channel(&channel_id, |chan| {
-                chan.enforcement_state.current_holder_commit_info =
-                    Some(old_era_info.clone());
-                chan.enforcement_state.current_counterparty_signatures =
-                    Some(dummy_sigs.clone());
-                chan.enforcement_state.current_counterparty_commit_info =
-                    Some(old_era_info);
+                chan.enforcement_state.current_holder_commit_info = Some(old_era_info.clone());
+                chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
+                chan.enforcement_state.current_counterparty_commit_info = Some(old_era_info);
                 Ok(())
             })
             .expect("seed");
@@ -291,7 +283,8 @@ mod tests {
             witness: bitcoin::Witness::default(),
         });
         chan_ctx.setup.channel_value_sat += 100_000;
-        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let vout =
+            tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
         let splice_tx = tx_ctx.to_tx();
         assert!(
             funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
@@ -299,17 +292,15 @@ mod tests {
         );
 
         // the new-funding commitment validated (the pre-kill exchange)
-        let mut new_ctx = channel_commitment(
-            &node_ctx, &chan_ctx, 1, 1100, 500_000, 599_000, vec![], vec![],
-        );
+        let mut new_ctx =
+            channel_commitment(&node_ctx, &chan_ctx, 1, 1100, 500_000, 599_000, vec![], vec![]);
         let (csig, hsigs) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut new_ctx);
         let raw_validate = |ctx: &TestCommitmentTxContext,
                             sig: &Signature,
                             htlc_sigs: &Vec<Signature>|
          -> Result<(), Status> {
             node_ctx.node.with_channel(&channel_id, |chan| {
-                let htlcs =
-                    Channel::htlcs_info2_to_oic(&ctx.offered_htlcs, &ctx.received_htlcs);
+                let htlcs = Channel::htlcs_info2_to_oic(&ctx.offered_htlcs, &ctx.received_htlcs);
                 let channel_parameters = chan.make_channel_parameters();
                 let parameters = channel_parameters.as_holder_broadcastable();
                 let save_commit_num = chan.enforcement_state.next_holder_commit_num;
@@ -369,8 +360,11 @@ mod tests {
             rt_state.prev_funding_commitment.is_some(),
             "the justice snapshot must round-trip (the disconnect_sig rejection's missing piece)"
         );
-        assert!(rt_state.holder_commitment_funding.is_some() || rt_state.counterparty_commitment_funding.is_some(),
-            "the funding tags must round-trip");
+        assert!(
+            rt_state.holder_commitment_funding.is_some()
+                || rt_state.counterparty_commitment_funding.is_some(),
+            "the funding tags must round-trip"
+        );
 
         // INSTALL the restored state (simulate the fresh signer loading
         // the round-tripped entries: wipe in-memory, reload from the
@@ -416,8 +410,7 @@ mod tests {
             .with_channel(&channel_id, |chan| {
                 chan.enforcement_state.current_holder_commit_info =
                     Some(make_test_commitment_info());
-                chan.enforcement_state.current_counterparty_signatures =
-                    Some(dummy_sigs.clone());
+                chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
                 chan.enforcement_state.current_counterparty_commit_info =
                     Some(make_test_commitment_info());
                 Ok(())
@@ -433,7 +426,8 @@ mod tests {
             witness: bitcoin::Witness::default(),
         });
         chan_ctx.setup.channel_value_sat -= 100_000;
-        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let vout =
+            tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
         let splice_tx = tx_ctx.to_tx();
         assert!(
             funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
@@ -441,16 +435,13 @@ mod tests {
         );
 
         // the new-funding same-number commitment (num=1)
-        let mut new_ctx = channel_commitment(
-            &node_ctx, &chan_ctx, 1, 1100, 1_500_000, 1_399_000, vec![], vec![],
-        );
+        let mut new_ctx =
+            channel_commitment(&node_ctx, &chan_ctx, 1, 1100, 1_500_000, 1_399_000, vec![], vec![]);
         let (csig, hsigs) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut new_ctx);
 
         let num_before = node_ctx
             .node
-            .with_channel(&channel_id, |chan| {
-                Ok(chan.enforcement_state.next_holder_commit_num)
-            })
+            .with_channel(&channel_id, |chan| Ok(chan.enforcement_state.next_holder_commit_num))
             .expect("num before");
 
         // the RAW validate (no helper tail — its num>0 branch REVOKES,
@@ -462,8 +453,7 @@ mod tests {
                             htlc_sigs: &Vec<Signature>|
          -> Result<(), Status> {
             node_ctx.node.with_channel(&channel_id, |chan| {
-                let htlcs =
-                    Channel::htlcs_info2_to_oic(&ctx.offered_htlcs, &ctx.received_htlcs);
+                let htlcs = Channel::htlcs_info2_to_oic(&ctx.offered_htlcs, &ctx.received_htlcs);
                 let channel_parameters = chan.make_channel_parameters();
                 let parameters = channel_parameters.as_holder_broadcastable();
                 let save_commit_num = chan.enforcement_state.next_holder_commit_num;
@@ -497,8 +487,7 @@ mod tests {
             })
         };
 
-        raw_validate(&new_ctx, &csig, &hsigs)
-            .expect("stored pending (first arrival)");
+        raw_validate(&new_ctx, &csig, &hsigs).expect("stored pending (first arrival)");
         raw_validate(&new_ctx, &csig, &hsigs)
             .expect("retransmit accepted (identical, still pending)");
 
@@ -524,8 +513,7 @@ mod tests {
                     .as_ref()
                     .expect("window still open");
                 assert!(
-                    prev.current_holder_info.is_some()
-                        && prev.current_counterparty_info.is_some(),
+                    prev.current_holder_info.is_some() && prev.current_counterparty_info.is_some(),
                     "old funding's justice snapshot survives the retransmit"
                 );
                 Ok(())
@@ -556,9 +544,8 @@ mod tests {
         // uses the LIVE channel state, so it must be built while the old
         // funding is current — it then spends the old outpoint; it gets
         // VALIDATED after the new-funding commitment, the interleave)
-        let mut straggler_ctx = channel_commitment(
-            &node_ctx, &chan_ctx, 0, 0, 2_999_000, 0, vec![], vec![],
-        );
+        let mut straggler_ctx =
+            channel_commitment(&node_ctx, &chan_ctx, 0, 0, 2_999_000, 0, vec![], vec![]);
         let (scsig, shsigs) =
             counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut straggler_ctx);
 
@@ -572,7 +559,8 @@ mod tests {
             witness: bitcoin::Witness::default(),
         });
         chan_ctx.setup.channel_value_sat -= 100_000;
-        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let vout =
+            tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
         let splice_tx = tx_ctx.to_tx();
         assert!(
             funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
@@ -580,9 +568,8 @@ mod tests {
         );
 
         // THE NEW-FUNDING COMMITMENT (num=1, the same-number re-sign)
-        let mut new_ctx = channel_commitment(
-            &node_ctx, &chan_ctx, 1, 1100, 1_500_000, 1_399_000, vec![], vec![],
-        );
+        let mut new_ctx =
+            channel_commitment(&node_ctx, &chan_ctx, 1, 1100, 1_500_000, 1_399_000, vec![], vec![]);
         let (csig, hsigs) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut new_ctx);
         // the RAW validate (no helper tail): the new-funding commitment must
         // stay PENDING (stored, not revoked) — the interleave state the
@@ -612,13 +599,7 @@ mod tests {
                 let output_witscripts: Vec<_> =
                     redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
                 chan.validate_holder_commitment_tx(
-                    &new_ctx
-                        .tx
-                        .as_ref()
-                        .unwrap()
-                        .trust()
-                        .built_transaction()
-                        .transaction,
+                    &new_ctx.tx.as_ref().unwrap().trust().built_transaction().transaction,
                     &output_witscripts,
                     new_ctx.commit_num,
                     new_ctx.feerate_per_kw,
@@ -630,21 +611,33 @@ mod tests {
             })
             .expect("new-funding commitment stored pending");
 
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            assert!(
-                chan.prev_setup.is_some(),
-                "DIAGNOSTIC: prev_setup is None — the new-channel path ran, not the splice"
-            );
-            let prev_out = chan.prev_setup.as_ref().unwrap().funding_outpoint;
-            let spends_old = straggler_ctx
-                .tx
-                .as_ref()
-                .map(|t| t.trust().built_transaction().transaction.input.iter().any(|i| i.previous_output == prev_out))
-                .unwrap_or(false);
-            assert!(spends_old, "DIAGNOSTIC: the straggler tx does not spend the prev outpoint");
-            Ok(())
-        })
-        .expect("diagnostics");
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                assert!(
+                    chan.prev_setup.is_some(),
+                    "DIAGNOSTIC: prev_setup is None — the new-channel path ran, not the splice"
+                );
+                let prev_out = chan.prev_setup.as_ref().unwrap().funding_outpoint;
+                let spends_old = straggler_ctx
+                    .tx
+                    .as_ref()
+                    .map(|t| {
+                        t.trust()
+                            .built_transaction()
+                            .transaction
+                            .input
+                            .iter()
+                            .any(|i| i.previous_output == prev_out)
+                    })
+                    .unwrap_or(false);
+                assert!(
+                    spends_old,
+                    "DIAGNOSTIC: the straggler tx does not spend the prev outpoint"
+                );
+                Ok(())
+            })
+            .expect("diagnostics");
         // the RAW validate for the straggler too — the helper's num==0 tail
         // would activate (consuming the slot); the interleave's post-state
         // must keep both pendings untouched for the assertions
@@ -660,7 +653,8 @@ mod tests {
                 let save_commit_num = chan.enforcement_state.next_holder_commit_num;
                 chan.enforcement_state
                     .set_next_holder_commit_num_for_testing(straggler_ctx.commit_num);
-                let per_commitment_point = chan.get_per_commitment_point(straggler_ctx.commit_num)?;
+                let per_commitment_point =
+                    chan.get_per_commitment_point(straggler_ctx.commit_num)?;
                 chan.enforcement_state.set_next_holder_commit_num_for_testing(save_commit_num);
                 let keys = chan.make_holder_tx_keys(&per_commitment_point);
                 let redeem_scripts = build_tx_scripts(
@@ -676,13 +670,7 @@ mod tests {
                 let output_witscripts: Vec<_> =
                     redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
                 chan.validate_holder_commitment_tx(
-                    &straggler_ctx
-                        .tx
-                        .as_ref()
-                        .unwrap()
-                        .trust()
-                        .built_transaction()
-                        .transaction,
+                    &straggler_ctx.tx.as_ref().unwrap().trust().built_transaction().transaction,
                     &output_witscripts,
                     straggler_ctx.commit_num,
                     straggler_ctx.feerate_per_kw,
@@ -694,25 +682,24 @@ mod tests {
             })
             .expect("straggler accepted (raw)");
 
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            let prev = chan
-                .enforcement_state
-                .prev_funding_commitment
-                .as_ref()
-                .expect("window open");
-            assert!(prev.next_holder_info.is_some(), "straggler retained in the record");
-            let slot = chan
-                .enforcement_state
-                .next_holder_commit_info
-                .as_ref()
-                .expect("channel slot non-empty");
-            assert_eq!(
-                slot.0.to_countersigner_value_sat, 1_399_000,
-                "channel slot still holds the NEW-funding pending (not clobbered)"
-            );
-            Ok(())
-        })
-        .expect("asserts");
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                let prev =
+                    chan.enforcement_state.prev_funding_commitment.as_ref().expect("window open");
+                assert!(prev.next_holder_info.is_some(), "straggler retained in the record");
+                let slot = chan
+                    .enforcement_state
+                    .next_holder_commit_info
+                    .as_ref()
+                    .expect("channel slot non-empty");
+                assert_eq!(
+                    slot.0.to_countersigner_value_sat, 1_399_000,
+                    "channel slot still holds the NEW-funding pending (not clobbered)"
+                );
+                Ok(())
+            })
+            .expect("asserts");
     }
 
     #[test]
@@ -2008,9 +1995,8 @@ mod tests {
         let channel_id = chan_ctx.channel_id.clone();
 
         // the straggler's message built BEFORE the splice (the old funding)
-        let mut straggler_ctx = channel_commitment(
-            &node_ctx, &chan_ctx, 0, 0, 2_999_000, 0, vec![], vec![],
-        );
+        let mut straggler_ctx =
+            channel_commitment(&node_ctx, &chan_ctx, 0, 0, 2_999_000, 0, vec![], vec![]);
         let (scsig, shsigs) =
             counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut straggler_ctx);
 
@@ -2023,7 +2009,8 @@ mod tests {
             witness: bitcoin::Witness::default(),
         });
         chan_ctx.setup.channel_value_sat -= 100_000;
-        let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let vout =
+            tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
         let splice_tx = tx_ctx.to_tx();
         assert!(
             funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
@@ -2067,13 +2054,7 @@ mod tests {
                 let output_witscripts: Vec<_> =
                     redeem_scripts.iter().map(|sc| sc.as_bytes().to_vec()).collect();
                 chan.validate_holder_commitment_tx(
-                    &straggler_ctx
-                        .tx
-                        .as_ref()
-                        .unwrap()
-                        .trust()
-                        .built_transaction()
-                        .transaction,
+                    &straggler_ctx.tx.as_ref().unwrap().trust().built_transaction().transaction,
                     &output_witscripts,
                     straggler_ctx.commit_num,
                     straggler_ctx.feerate_per_kw,

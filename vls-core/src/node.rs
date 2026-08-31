@@ -1995,7 +1995,11 @@ impl Node {
                 // R10.4/F1: snapshot the retiring funding's commitment
                 // state BEFORE the new funding's flow rebuilds the
                 // channel-scoped fields (the justice window)
-                spliced.enforcement_state
+// BOLT #2: Uses the same `commitment_number` as the existing commitment transaction.
+                    // BOLT #2: MUST set `funding_txid` in each `commitment_signed` message to match the
+                    // BOLT #2: funding transaction spent by that commitment transaction.
+                    // REF VLS 4b9cffb:EnforcementStateWithFunding (2023 per-funding overlays)
+                                    spliced.enforcement_state
                     .snapshot_funding_for_splice(old_funding_outpoint);
                 // fork-local (inr2-splice-dev) RBF fix v2 (the TWO-DEEP prev
                 // chain — supersedes the keep-oldest variant whose side effect
@@ -2005,6 +2009,10 @@ impl Node {
                 // window fundings reachable: prev_prev (the original — the
                 // RBF splice's input), prev (the just-replaced — its
                 // commitments), setup (the new). funding_locked clears both.
+                // BOLT #2: MUST NOT forget the channel until any inputs to the negotiated tx
+                // BOLT #2: have been spent.
+                // BOLT #2: SHOULD forget the current negotiation and reset their state.
+                // REF R8.3 supersession: unconfirmed candidate + next_setup replaced by the next splice
                 spliced.prev_prev_setup = spliced.prev_setup.clone();
                 spliced.prev_setup = Some(c.setup.clone());
                 spliced.setup = setup.clone();
