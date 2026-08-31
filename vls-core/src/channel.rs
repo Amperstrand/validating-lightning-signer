@@ -2151,19 +2151,36 @@ impl Channel {
         self.prev_prev_setup = None;
         self.enforcement_state.retire_prev_funding();
         if was_splice {
-            // Fix #14 (the crash27 xpay decode): the old funding's
-            // channel-scoped commitment infos are stale at the lockin.
-            // The splice tx SPENT that funding, and the window-close can
-            // race the commitment exchange — the post-close splicing
-            // commitment hits the storage gate's anti-replay rules, so
-            // the old-scale info survives (cur_cp=995120 vs the new
-            // 894199 view) and the payment's claimable check underflows
-            // (checked_sub -> None -> the channeld dies). The new
-            // funding's flows install fresh infos; the spent funding's
-            // commitments carry no enforcement value. Conditional on
-            // was_splice: the INITIAL lockin keeps its num-0 baseline.
-            self.enforcement_state.current_holder_commit_info = None;
-            self.enforcement_state.current_counterparty_commit_info = None;
+            // Fix #14 (the crash27 xpay decode), revised (p8 session):
+            // the surviving channel-scoped infos at the lockin are
+            // old-funding-scale (the multi-view exchange's last write)
+            // and the old funding is spent, so they carry no enforcement
+            // value — but NIL-ing them (the original Fix #14) breaks the
+            // mutual close: validate_mutual_close_tx hard-requires both
+            // infos ("current_holder_commit_info missing" ->
+            // STATUS_FAIL_HSM_IO kills closingd — found live by CLN's
+            // own test_script_splice_msat teardown). Install the NEW
+            // funding's baseline instead: the post-splice balance split
+            // from the setup, no HTLCs — exactly the num-0-equivalent
+            // the initial lockin keeps. push_value carries the
+            // fundee-relative balance (wrapped on splice-outs — the
+            // node.rs convention); wrapped values fall back to the
+            // initial_holder_value rail. The info feerate is not
+            // consulted by the mutual-close rails (value + htlcs only).
+            let push_sat = self.setup.push_value_msat / 1000;
+            let push_is_plain_msat = self.setup.push_value_msat <= i64::MAX as u64;
+            let (to_holder, to_cp) = if push_is_plain_msat {
+                (self.setup.channel_value_sat.saturating_sub(push_sat), push_sat)
+            } else {
+                let ih = self.enforcement_state.initial_holder_value;
+                (ih, self.setup.channel_value_sat.saturating_sub(ih))
+            };
+            self.enforcement_state.current_holder_commit_info = Some(CommitmentInfo2::new(
+                false, to_cp, to_holder, vec![], vec![], 0,
+            ));
+            self.enforcement_state.current_counterparty_commit_info = Some(CommitmentInfo2::new(
+                true, to_holder, to_cp, vec![], vec![], 0,
+            ));
         }
         self.persist()?;
         Ok(())
