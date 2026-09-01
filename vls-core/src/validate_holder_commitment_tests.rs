@@ -1690,7 +1690,8 @@ mod tests {
                         state,
                         0,
                         make_test_pubkey(0x08),
-                        commit_info.clone()
+                        commit_info.clone(),
+                        false,
                     ),
                     "policy-other",
                     "set_next_counterparty_commit_num: can\'t set next to 0"
@@ -1710,7 +1711,8 @@ mod tests {
                     state,
                     1,
                     make_test_pubkey(0x10),
-                    commit_info.clone()
+                    commit_info.clone(),
+                    false,
                 ));
                 assert_eq!(state.next_counterparty_revoke_num, 0);
                 assert_eq!(state.next_counterparty_commit_num, 1);
@@ -1722,7 +1724,8 @@ mod tests {
                     state,
                     1,
                     make_test_pubkey(0x10),
-                    commit_info.clone()
+                    commit_info.clone(),
+                    false,
                 ));
                 assert_eq!(state.next_counterparty_revoke_num, 0);
                 assert_eq!(state.next_counterparty_commit_num, 1);
@@ -1733,7 +1736,8 @@ mod tests {
                         state,
                         3,
                         make_test_pubkey(0x14),
-                        commit_info.clone()
+                        commit_info.clone(),
+                        false,
                     ),
                     "policy-commitment-previous-revoked",
                     "set_next_counterparty_commit_num: invalid progression: 1 to 3"
@@ -1754,7 +1758,8 @@ mod tests {
                     state,
                     2,
                     make_test_pubkey(0x12),
-                    commit_info.clone()
+                    commit_info.clone(),
+                    false,
                 ));
                 assert_eq!(state.next_counterparty_revoke_num, 0);
                 assert_eq!(state.next_counterparty_commit_num, 2);
@@ -1767,7 +1772,8 @@ mod tests {
                     state,
                     2,
                     make_test_pubkey(0x12),
-                    commit_info.clone()
+                    commit_info.clone(),
+                    false,
                 ));
                 assert_eq!(state.next_counterparty_revoke_num, 0);
                 assert_eq!(state.next_counterparty_commit_num, 2);
@@ -1778,7 +1784,8 @@ mod tests {
                         state,
                         1,
                         make_test_pubkey(0x10),
-                        commit_info.clone()
+                        commit_info.clone(),
+                        false,
                     ),
                     "policy-commitment-previous-revoked",
                     "set_next_counterparty_commit_num: invalid progression: 2 to 1"
@@ -1821,7 +1828,8 @@ mod tests {
                         state,
                         2,
                         make_test_pubkey(0x12),
-                        commit_info.clone()
+                        commit_info.clone(),
+                        false,
                     ),
                     "policy-commitment-previous-revoked",
                     "set_next_counterparty_commit_num: 2 too small relative to \
@@ -1835,7 +1843,8 @@ mod tests {
                         state,
                         4,
                         make_test_pubkey(0x16),
-                        commit_info.clone()
+                        commit_info.clone(),
+                        false,
                     ),
                     "policy-commitment-previous-revoked",
                     "set_next_counterparty_commit_num: invalid progression: 2 to 4"
@@ -1864,7 +1873,8 @@ mod tests {
                     state,
                     3,
                     make_test_pubkey(0x14),
-                    commit_info.clone()
+                    commit_info.clone(),
+                    false,
                 ));
                 // commit 0: revoked
                 // commit 1: unrevoked <- next_revoke
@@ -1878,7 +1888,8 @@ mod tests {
                     state,
                     3,
                     make_test_pubkey(0x14),
-                    commit_info.clone()
+                    commit_info.clone(),
+                    false,
                 ));
                 assert_eq!(state.next_counterparty_commit_num, 3);
 
@@ -1902,7 +1913,8 @@ mod tests {
                         state,
                         2,
                         make_test_pubkey(0x12),
-                        commit_info.clone()
+                        commit_info.clone(),
+                        false,
                     ),
                     "policy-commitment-previous-revoked",
                     "set_next_counterparty_commit_num: 2 too small relative to \
@@ -1946,7 +1958,8 @@ mod tests {
                         state,
                         3,
                         make_test_pubkey(0x14),
-                        commit_info.clone()
+                        commit_info.clone(),
+                        false,
                     ),
                     "policy-commitment-previous-revoked",
                     "set_next_counterparty_commit_num: 3 too small relative to \
@@ -1960,7 +1973,8 @@ mod tests {
                         state,
                         5,
                         make_test_pubkey(0x18),
-                        commit_info.clone()
+                        commit_info.clone(),
+                        false,
                     ),
                     "policy-commitment-previous-revoked",
                     "set_next_counterparty_commit_num: invalid progression: 3 to 5"
@@ -1972,7 +1986,8 @@ mod tests {
                     state,
                     4,
                     make_test_pubkey(0x16),
-                    commit_info.clone()
+                    commit_info.clone(),
+                    false,
                 ));
                 // commit 2: unrevoked <- next_revoke
                 // commit 3: current

@@ -2669,7 +2669,8 @@ mod tests {
                 &mut state,
                 0,
                 point0.clone(),
-                commit_info.clone()
+                commit_info.clone(),
+                false,
             ),
             "policy-other",
             "set_next_counterparty_commit_num: can\'t set next to 0"
@@ -2687,7 +2688,8 @@ mod tests {
                 &mut state,
                 2,
                 point0.clone(),
-                commit_info.clone()
+                commit_info.clone(),
+                false,
             ),
             "policy-commitment-previous-revoked",
             "set_next_counterparty_commit_num: invalid progression: 0 to 2"
@@ -2695,7 +2697,7 @@ mod tests {
 
         // set point 0
         assert!(validator
-            .set_next_counterparty_commit_num(&mut state, 1, point0.clone(), commit_info.clone())
+            .set_next_counterparty_commit_num(&mut state, 1, point0.clone(), commit_info.clone(), false)
             .is_ok());
 
         // and now you can get it.
@@ -2704,7 +2706,7 @@ mod tests {
         // you can set it again to the same thing (retry)
         // policy-v2-commitment-retry-same
         assert!(validator
-            .set_next_counterparty_commit_num(&mut state, 1, point0.clone(), commit_info.clone())
+            .set_next_counterparty_commit_num(&mut state, 1, point0.clone(), commit_info.clone(), false)
             .is_ok());
         assert_eq!(state.next_counterparty_commit_num, 1);
 
@@ -2718,7 +2720,8 @@ mod tests {
                 &mut state,
                 3,
                 point1.clone(),
-                commit_info.clone()
+                commit_info.clone(),
+                false,
             ),
             "policy-commitment-previous-revoked",
             "set_next_counterparty_commit_num: \
@@ -2728,7 +2731,7 @@ mod tests {
 
         // set point 1
         assert!(validator
-            .set_next_counterparty_commit_num(&mut state, 2, point1.clone(), commit_info.clone())
+            .set_next_counterparty_commit_num(&mut state, 2, point1.clone(), commit_info.clone(), false)
             .is_ok());
         assert_eq!(state.next_counterparty_commit_num, 2);
 
@@ -2747,7 +2750,8 @@ mod tests {
                 &mut state,
                 4,
                 point1.clone(),
-                commit_info.clone()
+                commit_info.clone(),
+                false,
             ),
             "policy-commitment-previous-revoked",
             "set_next_counterparty_commit_num: invalid progression: 2 to 4"
@@ -2759,7 +2763,7 @@ mod tests {
         // set point 2
         let point2 = make_test_pubkey(0x20);
         assert!(validator
-            .set_next_counterparty_commit_num(&mut state, 3, point2.clone(), commit_info.clone())
+            .set_next_counterparty_commit_num(&mut state, 3, point2.clone(), commit_info.clone(), false)
             .is_ok());
         assert_eq!(state.next_counterparty_commit_num, 3);
 
