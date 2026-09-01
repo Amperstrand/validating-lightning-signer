@@ -384,67 +384,22 @@ mod tests {
     // Class C rails (RED today — the fix contract)
     // ------------------------------------------------------------------
 
-    /// C: a payment FORWARDED through a mid-splice channel — CLN batches
-    /// the outgoing HTLC onto the splice commitment before the incoming
-    /// leg's channel commits, so at SignRemoteCommitmentTx time the
-    /// payment hash has no record and this channel's summaries read
-    /// incoming 0 / outgoing 10k sat (live: route_by_old_scid, "0 + 0 <
-    /// 10000000"). Strict must accept it inside the splice window (the
-    /// incoming leg lives on another channel and settles when it
-    /// commits); permissive already downgrades it to a warning.
+    /// C RECLASSIFIED (the #94 control evidence): the route_by_old_scid
+    /// strict failure is NOT a splice-window gap — the rejection fired
+    /// on the ORIGIN channel with NO splice on that node, for a
+    /// record-less invoice-less payment (the sendpay shape: sendpay
+    /// carries only the hash, so max_to_invoice is 0; records are
+    /// created by apply_payments only AFTER a successful validate).
+    /// Upstream strict mode rejects first-sight uninvoiced outgoing
+    /// DELIBERATELY (node::tests::invoice_test: "fails with strict
+    /// validator, but only initially") — this rail pins that the splice
+    /// window does NOT relax it, and the permissive default (the
+    /// deployment posture, 12/12 x7 soaks) signs it.
     #[test]
-    fn strict_class_c_midwindow_forwarded_htlc_signs() {
+    fn strict_class_c_first_sight_uninvoiced_rejected_even_mid_window() {
         let node_ctx = test_node_ctx(1);
         let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
         let _splice_tx = open_splice_window(&node_ctx, &mut chan_ctx, 1_100_000);
-        let channel_id = chan_ctx.channel_id.clone();
-
-        strict_enable_balance(&node_ctx.node);
-
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            chan.enforcement_state
-                .set_next_counterparty_commit_num_for_testing(1, make_test_pubkey(0x10));
-            // holder current on the CURRENT funding: our balance = view
-            // 1_100_000 - to_c 50_000 = 1_050_000 < after-side 1_090_000,
-            // so the excess-delta layer passes and the verdict is the
-            // balance rule's (the live rejection site)
-            chan.enforcement_state.current_holder_commit_info = Some(crate::tx::tx::CommitmentInfo2::new(
-                true, 1_050_000, 50_000, vec![], vec![], 3755,
-            ));
-            chan.enforcement_state.holder_commitment_funding =
-                Some(chan.setup.funding_outpoint);
-
-            let received = vec![forwarded_htlc()];
-            let (tx, witscripts) = view_counterparty_commitment_forwarded(
-                chan,
-                &chan.setup.clone(),
-                1,
-                3755,
-                1_086_245,
-                0,
-                received.clone(),
-            );
-            chan.sign_counterparty_commitment_tx(
-                &tx,
-                &witscripts,
-                &make_test_pubkey(REMOTE_POINT_NDX),
-                1,
-                3755,
-                vec![],
-                received,
-            )
-            .map(|_| ())
-        })
-        .expect("strict must sign the mid-window forwarded HTLC (incoming leg pending elsewhere)");
-    }
-
-    /// C guardrail: the SAME unknown-payment outgoing HTLC on a PLAIN
-    /// channel (no splice window) must STAY rejected — the carve-out is
-    /// scoped to the splice window.
-    #[test]
-    fn strict_class_c_plain_channel_forwarded_htlc_still_rejected() {
-        let node_ctx = test_node_ctx(1);
-        let chan_ctx = fund_test_channel(&node_ctx, 1_100_000);
         let channel_id = chan_ctx.channel_id.clone();
 
         strict_enable_balance(&node_ctx.node);
@@ -479,11 +434,10 @@ mod tests {
             )
             .map(|_| ())
         });
-        let err =
-            result.expect_err("plain-channel unknown-payment outgoing HTLC must stay rejected");
+        let err = result.expect_err("upstream strict contract: first-sight uninvoiced is rejected");
         assert!(
             err.message().contains("unbalanced"),
-            "guardrail must reject via the balance rule, got: {}",
+            "boundary pin must reject via the balance rule, got: {}",
             err.message()
         );
     }

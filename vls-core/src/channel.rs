@@ -869,7 +869,6 @@ impl Channel {
             &outgoing_payment_summary,
             &delta,
             validator.clone(),
-            self.prev_setup.is_some(),
         )?;
 
         // Only advance the state if nothing goes wrong. The
@@ -1299,7 +1298,6 @@ impl Channel {
             &outgoing_payment_summary,
             &delta,
             validator.clone(),
-            self.prev_setup.is_some(),
         )?;
 
         if commitment_number == self.enforcement_state.next_holder_commit_num
@@ -2972,7 +2970,6 @@ impl Channel {
             &outgoing_payment_summary,
             &delta,
             validator.clone(),
-            self.prev_setup.is_some(),
         )?;
 
         // Only advance the state if nothing goes wrong. The
@@ -3233,7 +3230,6 @@ impl Channel {
             &outgoing_payment_summary,
             &delta,
             validator.clone(),
-            self.prev_setup.is_some(),
         )?;
         info!("#hang-probe: payments validated");
 
