@@ -1,4 +1,4 @@
-/* vls-trace/1 splice trace viewer — vanilla JS, no dependencies.
+/* lightning-trace/1 protocol trace viewer — vanilla JS, no dependencies.
  * Loads one or more .jsonl trace files (file picker works from file://;
  * ?trace=name.jsonl works when served), merges them by timestamp, and
  * renders the three-brain swimlane timeline with playback, state
@@ -6,7 +6,7 @@
  */
 "use strict";
 
-const SCHEMA = "vls-trace/1";
+const SCHEMAS = ["lightning-trace/1", "vls-trace/1"]; // legacy tag accepted on read
 const state = {
   events: [],        // merged, sorted, indexed
   filtered: [],      // indices into events
@@ -29,7 +29,7 @@ function parseJsonl(text, source) {
     let ev;
     try { ev = JSON.parse(t); } catch { bad++; continue; }
     if (!ev || typeof ev !== "object" || !ev.event || !ev.actor) { bad++; continue; }
-    if (ev.schema && ev.schema !== SCHEMA) { bad++; continue; }
+    if (ev.schema && !SCHEMAS.includes(ev.schema)) { bad++; continue; }
     if (!ev.seq) ev.seq = out.length; // partial-trace tolerance
     ev._src = source;
     out.push(ev);
@@ -185,20 +185,42 @@ function chipLabel(ev) {
   }
 }
 
+function laneOf(ev) { return ev.actor; }
+
 function renderLanes() {
   document.getElementById("cln-empty").classList.toggle("hidden",
     state.events.some((e) => e.actor === "cln"));
   for (const lane of ["driver", "cln", "vls"]) {
     const box = document.querySelector(`.lane[data-lane=${lane}] .events`);
-    box.querySelectorAll(".chip").forEach((n) => n.remove());
+    box.querySelectorAll(".chip,.subrow").forEach((n) => n.remove());
   }
   const frag = { driver: [], cln: [], vls: [] };
   for (const i of state.filtered) {
     const ev = state.events[i];
-    frag[ev.actor].push(chipNode(ev, i));
+    frag[laneOf(ev)].push(ev);
   }
   for (const lane of ["driver", "cln", "vls"]) {
-    document.querySelector(`.lane[data-lane=${lane}] .events`).append(...frag[lane]);
+    const box = document.querySelector(`.lane[data-lane=${lane}] .events`);
+    const instances = new Map();
+    for (const ev of frag[lane]) {
+      const inst = ev.actor_instance ?? "";
+      if (!instances.has(inst)) instances.set(inst, []);
+      instances.get(inst).push(ev);
+    }
+    // one sub-row per actor instance (l1/l2/…); unnamed events share ""
+    const instKeys = [...instances.keys()].sort();
+    for (const inst of instKeys) {
+      const row = document.createElement("div");
+      row.className = "subrow";
+      if (instKeys.length > 1 || (instKeys.length === 1 && inst)) {
+        const lab = document.createElement("span");
+        lab.className = "subrow-label";
+        lab.textContent = inst || "(no instance)";
+        row.appendChild(lab);
+      }
+      for (const ev of instances.get(inst)) row.appendChild(chipNode(ev, ev._i));
+      box.appendChild(row);
+    }
   }
   drawLinks();
 }
@@ -206,6 +228,9 @@ function renderLanes() {
 function chipNode(ev, i) {
   const chip = document.createElement("div");
   chip.className = `chip ${ev.actor}`;
+  if (ev.provenance === "expected") chip.classList.add("exp");
+  if (ev.level === "base") chip.classList.add("lvl-base");
+  if (ev.level === "extra") chip.classList.add("lvl-extra");
   chip.dataset.i = i;
   const res = ev.result;
   if (res) chip.classList.add(res.status === "rejected" || res.status === "fail" ? "reject" : "accept");
@@ -222,7 +247,7 @@ function chipNode(ev, i) {
   }
   const meta = document.createElement("span");
   meta.className = "meta";
-  meta.textContent = `seq ${ev.seq ?? "?"} · ${ev.correlation_id ?? ""}`;
+  meta.textContent = `${ev.actor}${ev.actor_instance ? ":" + ev.actor_instance : ""} · seq ${ev.seq ?? "?"}${ev.correlation_id ? " · " + ev.correlation_id : ""}`;
   chip.appendChild(meta);
   chip.addEventListener("click", () => select(i, true));
   return chip;
@@ -359,7 +384,7 @@ function renderBrains(i) {
     const msg = disagreementAt(i);
     if (msg) {
       dis.classList.remove("hidden");
-      dis.innerHTML = `<h4>DISAGREEMENT</h4>${escapeHtml(msg)}`;
+      dis.innerHTML = `<h4>DISAGREEMENT <span class="prov prov-derived">derived</span></h4>${escapeHtml(msg)}`;
     } else {
       dis.classList.add("hidden");
     }
@@ -459,7 +484,8 @@ function renderDetail(i) {
   panel.classList.remove("hidden");
   const res = ev.result ? ` · <span style="color:${ev.result.status === "rejected" || ev.result.status === "fail" ? "var(--reject)" : "var(--ok)"}">${escapeHtml(ev.result.status)}${ev.result.code ? ` ${escapeHtml(ev.result.code)}` : ""}${ev.result.message ? `: ${escapeHtml(ev.result.message)}` : ""}</span>` : "";
   document.getElementById("detail-header").innerHTML =
-    `<span class="seq">#${ev.seq ?? i}</span><b>${escapeHtml(ev.actor)} · ${escapeHtml(ev.event.type)}</b>` +
+    `<span class="seq">#${ev.seq ?? i}</span><b>${escapeHtml(ev.actor)}${ev.actor_instance ? ":" + escapeHtml(ev.actor_instance) : ""} · ${escapeHtml(ev.event.type)}</b>` +
+    `<span class="prov prov-${escapeHtml(ev.provenance ?? "?")}">${escapeHtml(ev.provenance ?? "?")}·${escapeHtml(ev.level ?? "?")}</span>` +
     `<span class="muted">mono ${ev.mono_us ?? "?"}µs${ev.correlation_id ? ` · corr ${escapeHtml(ev.correlation_id)}` : ""}${ev.channel_id ? ` · chan ${escapeHtml(ev.channel_id.slice(0, 12))}…` : ""}</span>${res}`;
   renderTab(activeTab(), i);
 }
@@ -548,10 +574,30 @@ function renderTab(tab, i) {
     } else {
       body.innerHTML = ev.artifacts.map((a, k) => `
         <div class="artifact-block">
-          <div class="kind">artifact ${k}: ${escapeHtml(a.kind)}</div>
+          <div class="kind">artifact ${k}: ${escapeHtml(a.kind)}${a.sha256 ? ` · sha256 ${escapeHtml(String(a.sha256).slice(0, 16))}…` : ""}</div>
           ${a.decoded ? kvTable(a.decoded) : '<span class="muted small">no decoded form</span>'}
-          <details><summary>raw (${a.raw.length} chars)</summary><pre class="raw">${escapeHtml(a.raw)}</pre></details>
+          ${a.raw ? `<details><summary>raw (${a.raw.length} chars)</summary><pre class="raw">${escapeHtml(a.raw)}</pre></details>`
+            : a.sha256 ? `<div class="raw-ref" data-sha="${escapeHtml(a.sha256)}" data-k="${k}">content-addressed — <a href="artifacts/sha256-${escapeHtml(a.sha256)}" target="_blank">open raw file</a> <button class="load-raw">load inline</button></div>`
+            : '<span class="muted small">(raw stripped at this trace level)</span>'}
         </div>`).join("");
+      for (const btn of body.querySelectorAll(".load-raw")) {
+        btn.addEventListener("click", async (e) => {
+          const holder = e.target.closest(".raw-ref");
+          try {
+            const r = await fetch(`artifacts/sha256-${holder.dataset.sha}`);
+            const text = await r.text();
+            const pre = document.createElement("details");
+            pre.innerHTML = `<summary>raw (${text.length} chars, fetched)</summary>`;
+            const p = document.createElement("pre");
+            p.className = "raw";
+            p.textContent = text;
+            pre.appendChild(p);
+            holder.replaceWith(pre);
+          } catch {
+            holder.append(" (fetch failed — file:// mode: open the run dir)");
+          }
+        });
+      }
     }
   }
 }
