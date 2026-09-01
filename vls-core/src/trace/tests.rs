@@ -287,8 +287,10 @@ fn legacy_vls_trace_lines_still_parse() {
 #[test]
 fn sink_stamps_provenance_and_level_from_payload() {
     let sink = TraceSink::in_memory("stamps");
-    let expect_line =
-        sink.render_line(TraceEvent::driver(EventPayload::Expect { expect: "x".into(), outcome: "ok".into() }));
+    let expect_line = sink.render_line(TraceEvent::driver(EventPayload::Expect {
+        expect: "x".into(),
+        outcome: "ok".into(),
+    }));
     let v: Value = serde_json::from_str(&expect_line).unwrap();
     assert_eq!(v["provenance"], "expected");
     assert_eq!(v["level"], "core");
@@ -302,7 +304,11 @@ fn sink_stamps_provenance_and_level_from_payload() {
     assert_eq!(v["level"], "base");
     // matches the Python table in contrib/protocol-trace/ptrace/schema.py
     for (payload, prov, level) in [
-        (EventPayload::Invariant { name: "n".into(), passed: true, detail: None }, "expected", "core"),
+        (
+            EventPayload::Invariant { name: "n".into(), passed: true, detail: None },
+            "expected",
+            "core",
+        ),
         (EventPayload::StateDeclared { state: "s".into(), invariants: None }, "expected", "core"),
         (
             EventPayload::ClnRequest { message: "m".into(), detail: None, source: "t".into() },

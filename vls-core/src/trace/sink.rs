@@ -41,7 +41,9 @@ fn configured_level() -> u8 {
 /// The actor instance label (from `VLS_TRACE_INSTANCE`, e.g. `l1`) —
 /// stamped on every event so multi-node farms merge into per-node lanes.
 pub fn instance() -> Option<String> {
-    INSTANCE.get_or_init(|| std::env::var("VLS_TRACE_INSTANCE").ok().filter(|s| !s.is_empty())).clone()
+    INSTANCE
+        .get_or_init(|| std::env::var("VLS_TRACE_INSTANCE").ok().filter(|s| !s.is_empty()))
+        .clone()
 }
 
 thread_local! {
@@ -73,8 +75,8 @@ pub fn enabled() -> bool {
 pub fn init_from_env() -> bool {
     let level = level_from_env();
     TRACE_LEVEL.store(if level == u8::MAX { 1 } else { level }, Ordering::Relaxed);
-    let on = std::env::var("VLS_TRACE_DIR").map(|d| !d.is_empty()).unwrap_or(false)
-        && level != u8::MAX;
+    let on =
+        std::env::var("VLS_TRACE_DIR").map(|d| !d.is_empty()).unwrap_or(false) && level != u8::MAX;
     ENABLED.store(on, Ordering::Relaxed);
     on
 }

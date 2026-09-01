@@ -24,12 +24,13 @@ pub(crate) fn expect_op(
 ) -> Result<(), ValidationError> {
     let ins = expect_next(iter)?;
     match ins {
-        Instruction::Op(o) =>
+        Instruction::Op(o) => {
             if o == op {
                 Ok(())
             } else {
                 Err(mismatch_error(format!("expected op {}, saw {}", op, o)))
-            },
+            }
+        }
         _ => Err(mismatch_error(format!("expected op, saw {:?}", ins))),
     }
 }

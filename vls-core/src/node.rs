@@ -1684,8 +1684,9 @@ impl Node {
         let slot_arc = self.get_channel(channel_id)?;
         let mut slot = slot_arc.lock().unwrap();
         match &mut *slot {
-            ChannelSlot::Stub(_) =>
-                Err(invalid_argument(format!("channel not ready: {}", &channel_id))),
+            ChannelSlot::Stub(_) => {
+                Err(invalid_argument(format!("channel not ready: {}", &channel_id)))
+            }
             ChannelSlot::Ready(chan) => f(chan),
         }
     }
@@ -3325,10 +3326,11 @@ fn find_channel_with_funding_outpoint(
     for (_, slot_arc) in channels_lock.iter() {
         let slot = slot_arc.lock().unwrap();
         match &*slot {
-            ChannelSlot::Ready(chan) =>
+            ChannelSlot::Ready(chan) => {
                 if chan.setup.funding_outpoint == *outpoint {
                     return Some(Arc::clone(slot_arc));
-                },
+                }
+            }
             ChannelSlot::Stub(_stub) => {
                 // ignore stubs ...
             }

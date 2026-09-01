@@ -796,7 +796,7 @@ impl Validator for SimpleValidator {
                         commitment_point
                     );
                 }
-                Some(prev) =>
+                Some(prev) => {
                     if *commitment_point != prev {
                         policy_err!(
                             self,
@@ -807,7 +807,8 @@ impl Validator for SimpleValidator {
                             prev,
                             commitment_point
                         );
-                    },
+                    }
+                }
             }
 
             // The CommitmentInfo2 must be the same as previously
@@ -977,7 +978,7 @@ impl Validator for SimpleValidator {
                     supplied_commit_point
                 );
             }
-            Some(prev) =>
+            Some(prev) => {
                 if supplied_commit_point != prev {
                     dbgvals!(state, revoke_num, commitment_secret);
                     policy_err!(
@@ -988,7 +989,8 @@ impl Validator for SimpleValidator {
                         supplied_commit_point,
                         prev
                     );
-                },
+                }
+            }
         }
 
         Ok(())
@@ -2697,7 +2699,13 @@ mod tests {
 
         // set point 0
         assert!(validator
-            .set_next_counterparty_commit_num(&mut state, 1, point0.clone(), commit_info.clone(), false)
+            .set_next_counterparty_commit_num(
+                &mut state,
+                1,
+                point0.clone(),
+                commit_info.clone(),
+                false
+            )
             .is_ok());
 
         // and now you can get it.
@@ -2706,7 +2714,13 @@ mod tests {
         // you can set it again to the same thing (retry)
         // policy-v2-commitment-retry-same
         assert!(validator
-            .set_next_counterparty_commit_num(&mut state, 1, point0.clone(), commit_info.clone(), false)
+            .set_next_counterparty_commit_num(
+                &mut state,
+                1,
+                point0.clone(),
+                commit_info.clone(),
+                false
+            )
             .is_ok());
         assert_eq!(state.next_counterparty_commit_num, 1);
 
@@ -2731,7 +2745,13 @@ mod tests {
 
         // set point 1
         assert!(validator
-            .set_next_counterparty_commit_num(&mut state, 2, point1.clone(), commit_info.clone(), false)
+            .set_next_counterparty_commit_num(
+                &mut state,
+                2,
+                point1.clone(),
+                commit_info.clone(),
+                false
+            )
             .is_ok());
         assert_eq!(state.next_counterparty_commit_num, 2);
 
@@ -2763,7 +2783,13 @@ mod tests {
         // set point 2
         let point2 = make_test_pubkey(0x20);
         assert!(validator
-            .set_next_counterparty_commit_num(&mut state, 3, point2.clone(), commit_info.clone(), false)
+            .set_next_counterparty_commit_num(
+                &mut state,
+                3,
+                point2.clone(),
+                commit_info.clone(),
+                false
+            )
             .is_ok());
         assert_eq!(state.next_counterparty_commit_num, 3);
 

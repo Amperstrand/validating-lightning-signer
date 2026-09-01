@@ -217,8 +217,9 @@ impl MultiSigner {
         let slot_arc = self.get_channel(&node_id, &channel_id)?;
         let mut slot = slot_arc.lock().unwrap();
         match &mut *slot {
-            ChannelSlot::Stub(_) =>
-                Err(invalid_argument(format!("channel not ready: {}", &channel_id))),
+            ChannelSlot::Stub(_) => {
+                Err(invalid_argument(format!("channel not ready: {}", &channel_id)))
+            }
             ChannelSlot::Ready(chan) => f(chan),
         }
     }

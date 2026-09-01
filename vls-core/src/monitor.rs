@@ -433,48 +433,52 @@ funding spend {} creates the current funding (splice): not tracking as close",
             if !is_splice_spend {
                 // closing tx
                 assert_eq!(closing_tx.input.len(), 1);
-            let provider = self.commitment_point_provider;
-            let parameters = provider.get_transaction_parameters();
+                let provider = self.commitment_point_provider;
+                let parameters = provider.get_transaction_parameters();
 
-            // check that the closing tx is a commitment tx, otherwise it was a mutual close
-            let commitment_number_opt = decode_commitment_number(&closing_tx, &parameters);
-            if let Some(commitment_number) = commitment_number_opt {
-                let secp_ctx = Secp256k1::new();
-                info!("unilateral close {} at commitment {} confirmed", txid, commitment_number);
-                let holder_per_commitment = provider.get_holder_commitment_point(commitment_number);
-                let cp_per_commitment =
-                    provider.get_counterparty_commitment_point(commitment_number);
-                let (our_output_index, htlc_indices) = decode_commitment_tx(
-                    &closing_tx,
-                    &holder_per_commitment,
-                    &cp_per_commitment,
-                    &parameters,
-                    &secp_ctx,
-                );
-                let spendable_htlc_indices = if htlc_indices.is_empty() {
-                    Vec::new()
+                // check that the closing tx is a commitment tx, otherwise it was a mutual close
+                let commitment_number_opt = decode_commitment_number(&closing_tx, &parameters);
+                if let Some(commitment_number) = commitment_number_opt {
+                    let secp_ctx = Secp256k1::new();
+                    info!(
+                        "unilateral close {} at commitment {} confirmed",
+                        txid, commitment_number
+                    );
+                    let holder_per_commitment =
+                        provider.get_holder_commitment_point(commitment_number);
+                    let cp_per_commitment =
+                        provider.get_counterparty_commitment_point(commitment_number);
+                    let (our_output_index, htlc_indices) = decode_commitment_tx(
+                        &closing_tx,
+                        &holder_per_commitment,
+                        &cp_per_commitment,
+                        &parameters,
+                        &secp_ctx,
+                    );
+                    let spendable_htlc_indices = if htlc_indices.is_empty() {
+                        Vec::new()
+                    } else {
+                        provider.get_spendable_htlc_indices(&closing_tx, commitment_number).expect(
+                            "valid spendable HTLC indices for a decoded commitment transaction",
+                        )
+                    };
+                    debug!(
+                        "our_output_index: {:?}, htlc_indices: {:?}, spendable_htlc_indices: {:?}",
+                        our_output_index, htlc_indices, spendable_htlc_indices
+                    );
+                    decode_state.add_change(StateChange::UnilateralCloseConfirmed(
+                        txid,
+                        closing_tx.input[0].previous_output,
+                        our_output_index,
+                        spendable_htlc_indices,
+                    ));
                 } else {
-                    provider
-                        .get_spendable_htlc_indices(&closing_tx, commitment_number)
-                        .expect("valid spendable HTLC indices for a decoded commitment transaction")
-                };
-                debug!(
-                    "our_output_index: {:?}, htlc_indices: {:?}, spendable_htlc_indices: {:?}",
-                    our_output_index, htlc_indices, spendable_htlc_indices
-                );
-                decode_state.add_change(StateChange::UnilateralCloseConfirmed(
-                    txid,
-                    closing_tx.input[0].previous_output,
-                    our_output_index,
-                    spendable_htlc_indices,
-                ));
-            } else {
-                decode_state.add_change(StateChange::MutualCloseConfirmed(
-                    txid,
-                    closing_tx.input[0].previous_output,
-                ));
-                info!("mutual close {} confirmed", txid);
-            }
+                    decode_state.add_change(StateChange::MutualCloseConfirmed(
+                        txid,
+                        closing_tx.input[0].previous_output,
+                    ));
+                    info!("mutual close {} confirmed", txid);
+                }
             }
         }
 
@@ -2272,8 +2276,9 @@ mod tests {
                 state.our_output_swept_height = None;
 
                 match field {
-                    "funding_double_spent_height" =>
-                        state.funding_double_spent_height = Some(height),
+                    "funding_double_spent_height" => {
+                        state.funding_double_spent_height = Some(height)
+                    }
                     "mutual_closing_height" => state.mutual_closing_height = Some(height),
                     "closing_swept_height" => state.closing_swept_height = Some(height),
                     "our_output_swept_height" => state.our_output_swept_height = Some(height),

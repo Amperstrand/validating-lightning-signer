@@ -137,8 +137,6 @@ mod sync;
 #[cfg(test)]
 mod setup_channel_tests;
 #[cfg(test)]
-mod strict_mode_tests;
-#[cfg(test)]
 mod sign_counterparty_commitment_tests;
 #[cfg(test)]
 mod sign_counterparty_htlc_sweep_tests;
@@ -156,10 +154,12 @@ mod sign_mutual_close_tests;
 mod sign_onchain_tx_tests;
 #[cfg(test)]
 mod sign_splice_tests;
-#[cfg(test)]
-mod straggler_balance_tests;
 #[cfg(all(test, feature = "splice_trace"))]
 mod splice_scenario_tests;
+#[cfg(test)]
+mod straggler_balance_tests;
+#[cfg(test)]
+mod strict_mode_tests;
 #[cfg(test)]
 mod validate_counterparty_revocation_tests;
 #[cfg(test)]

@@ -46,14 +46,14 @@ mod tests {
     use lightning::ln::chan_utils::CommitmentTransaction;
     use lightning::types::payment::PaymentHash;
 
-    use crate::channel::{Channel, ChannelBase, ChannelSetup};
     use crate::chain::tracker::ChainListener;
+    use crate::channel::{Channel, ChannelBase, ChannelSetup};
     use crate::node::{Node, SpendType};
     use crate::policy::onchain_validator::OnchainValidatorFactory;
     use crate::policy::simple_validator::SimpleValidatorFactory;
-    use crate::util::INITIAL_COMMITMENT_NUMBER;
     use crate::util::test_utils::key::*;
     use crate::util::test_utils::*;
+    use crate::util::INITIAL_COMMITMENT_NUMBER;
 
     use std::sync::Arc;
 
@@ -140,14 +140,12 @@ mod tests {
     /// policy — validate_payment_balance is a no-op when
     /// `enforce_balance` is false, which is the default testnet posture.
     fn strict_enable_balance(node: &Arc<Node>) {
-        let mut policy = crate::policy::simple_validator::make_default_simple_policy(
-            bitcoin::Network::Testnet,
-        );
+        let mut policy =
+            crate::policy::simple_validator::make_default_simple_policy(bitcoin::Network::Testnet);
         policy.enforce_balance = true;
-        *node.validator_factory.lock().unwrap() =
-            Arc::new(crate::policy::simple_validator::SimpleValidatorFactory::new_with_policy(
-                policy,
-            ));
+        *node.validator_factory.lock().unwrap() = Arc::new(
+            crate::policy::simple_validator::SimpleValidatorFactory::new_with_policy(policy),
+        );
     }
 
     /// Install the OnchainValidator wrapper (strict filter inherited from
@@ -156,10 +154,9 @@ mod tests {
     /// The default test factory is bare SimpleValidator, which never
     /// runs the burial check.
     fn install_onchain_validator(node: &Arc<Node>) {
-        *node.validator_factory.lock().unwrap() =
-            Arc::new(OnchainValidatorFactory::new_with_simple_factory(
-                SimpleValidatorFactory::new(),
-            ));
+        *node.validator_factory.lock().unwrap() = Arc::new(
+            OnchainValidatorFactory::new_with_simple_factory(SimpleValidatorFactory::new()),
+        );
     }
 
     // ------------------------------------------------------------------
@@ -175,28 +172,30 @@ mod tests {
         let chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
         let channel_id = chan_ctx.channel_id.clone();
 
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
-                5,
-                make_test_pubkey(REMOTE_POINT_NDX),
-            );
-            chan.enforcement_state.set_next_counterparty_revoke_num_for_testing(4);
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
+                    5,
+                    make_test_pubkey(REMOTE_POINT_NDX),
+                );
+                chan.enforcement_state.set_next_counterparty_revoke_num_for_testing(4);
 
-            let view = chan.setup.clone();
-            let (tx, witscripts) =
-                view_counterparty_commitment(chan, &view, 5, 0, 890_000, 100_000);
-            chan.sign_counterparty_commitment_tx(
-                &tx,
-                &witscripts,
-                &make_test_pubkey(REMOTE_POINT_NDX),
-                5,
-                0,
-                vec![],
-                vec![],
-            )
-            .map(|_| ())
-        })
-        .expect("strict must sign the honest current-view commitment");
+                let view = chan.setup.clone();
+                let (tx, witscripts) =
+                    view_counterparty_commitment(chan, &view, 5, 0, 890_000, 100_000);
+                chan.sign_counterparty_commitment_tx(
+                    &tx,
+                    &witscripts,
+                    &make_test_pubkey(REMOTE_POINT_NDX),
+                    5,
+                    0,
+                    vec![],
+                    vec![],
+                )
+                .map(|_| ())
+            })
+            .expect("strict must sign the honest current-view commitment");
     }
 
     /// Window control: with a splice window OPEN, strict mode still
@@ -209,29 +208,31 @@ mod tests {
         let _splice_tx = open_splice_window(&node_ctx, &mut chan_ctx, 1_095_450);
         let channel_id = chan_ctx.channel_id.clone();
 
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            assert!(chan.prev_setup.is_some(), "splice window open");
-            chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
-                5,
-                make_test_pubkey(REMOTE_POINT_NDX),
-            );
-            chan.enforcement_state.set_next_counterparty_revoke_num_for_testing(4);
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                assert!(chan.prev_setup.is_some(), "splice window open");
+                chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
+                    5,
+                    make_test_pubkey(REMOTE_POINT_NDX),
+                );
+                chan.enforcement_state.set_next_counterparty_revoke_num_for_testing(4);
 
-            let view = chan.setup.clone();
-            let (tx, witscripts) =
-                view_counterparty_commitment(chan, &view, 5, 0, 985_000, 100_000);
-            chan.sign_counterparty_commitment_tx(
-                &tx,
-                &witscripts,
-                &make_test_pubkey(REMOTE_POINT_NDX),
-                5,
-                0,
-                vec![],
-                vec![],
-            )
-            .map(|_| ())
-        })
-        .expect("strict must sign the current-view commitment mid-window");
+                let view = chan.setup.clone();
+                let (tx, witscripts) =
+                    view_counterparty_commitment(chan, &view, 5, 0, 985_000, 100_000);
+                chan.sign_counterparty_commitment_tx(
+                    &tx,
+                    &witscripts,
+                    &make_test_pubkey(REMOTE_POINT_NDX),
+                    5,
+                    0,
+                    vec![],
+                    vec![],
+                )
+                .map(|_| ())
+            })
+            .expect("strict must sign the current-view commitment mid-window");
     }
 
     // ------------------------------------------------------------------
@@ -251,28 +252,32 @@ mod tests {
         let _splice_tx = open_splice_window(&node_ctx, &mut chan_ctx, 1_095_450);
         let channel_id = chan_ctx.channel_id.clone();
 
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            let view = chan.prev_setup.clone().expect("window open");
-            chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
-                5,
-                make_test_pubkey(REMOTE_POINT_NDX),
-            );
-            chan.enforcement_state.set_next_counterparty_revoke_num_for_testing(4);
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                let view = chan.prev_setup.clone().expect("window open");
+                chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
+                    5,
+                    make_test_pubkey(REMOTE_POINT_NDX),
+                );
+                chan.enforcement_state.set_next_counterparty_revoke_num_for_testing(4);
 
-            let (tx, witscripts) =
-                view_counterparty_commitment(chan, &view, 5, 0, 890_000, 100_000);
-            chan.sign_counterparty_commitment_tx(
-                &tx,
-                &witscripts,
-                &make_test_pubkey(REMOTE_POINT_NDX),
-                5,
-                0,
-                vec![],
-                vec![],
-            )
-            .map(|_| ())
-        })
-        .expect("strict must sign the retiring-view commitment (exact-match from the routed view)");
+                let (tx, witscripts) =
+                    view_counterparty_commitment(chan, &view, 5, 0, 890_000, 100_000);
+                chan.sign_counterparty_commitment_tx(
+                    &tx,
+                    &witscripts,
+                    &make_test_pubkey(REMOTE_POINT_NDX),
+                    5,
+                    0,
+                    vec![],
+                    vec![],
+                )
+                .map(|_| ())
+            })
+            .expect(
+                "strict must sign the retiring-view commitment (exact-match from the routed view)",
+            );
     }
 
     /// A guardrail: a MUTATED tx that keeps the retiring view's input
@@ -321,10 +326,7 @@ mod tests {
         // RETIRING-view tx must never be SIGNED, whatever the refusal
         // site (harness decode of mutated old-view txs is not stable
         // enough to pin one).
-        assert!(
-            result.is_err(),
-            "mutated retiring-view tx must stay rejected in strict mode"
-        );
+        assert!(result.is_err(), "mutated retiring-view tx must stay rejected in strict mode");
     }
 
     /// Same as `view_counterparty_commitment` but carrying holder-OFFERED
@@ -407,11 +409,10 @@ mod tests {
         let result = node_ctx.node.with_channel(&channel_id, |chan| {
             chan.enforcement_state
                 .set_next_counterparty_commit_num_for_testing(1, make_test_pubkey(0x10));
-            chan.enforcement_state.current_holder_commit_info = Some(crate::tx::tx::CommitmentInfo2::new(
-                true, 1_050_000, 50_000, vec![], vec![], 3755,
-            ));
-            chan.enforcement_state.holder_commitment_funding =
-                Some(chan.setup.funding_outpoint);
+            chan.enforcement_state.current_holder_commit_info = Some(
+                crate::tx::tx::CommitmentInfo2::new(true, 1_050_000, 50_000, vec![], vec![], 3755),
+            );
+            chan.enforcement_state.holder_commitment_funding = Some(chan.setup.funding_outpoint);
 
             let received = vec![forwarded_htlc()];
             let (tx, witscripts) = view_counterparty_commitment_forwarded(
@@ -460,7 +461,9 @@ mod tests {
         fn get_counterparty_commitment_point(&self, _n: u64) -> Option<PublicKey> {
             unimplemented!("not on the mutual-close path")
         }
-        fn get_transaction_parameters(&self) -> lightning::ln::chan_utils::ChannelTransactionParameters {
+        fn get_transaction_parameters(
+            &self,
+        ) -> lightning::ln::chan_utils::ChannelTransactionParameters {
             self.parameters.clone()
         }
         fn get_spendable_htlc_indices(
@@ -506,15 +509,17 @@ mod tests {
         );
         let channel_id = chan_ctx.channel_id.clone();
 
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            let monitor = chan.monitor.as_monitor(Box::new(RailProvider {
-                parameters: chan.make_channel_parameters(),
-            }));
-            monitor.on_add_block(&[], &BlockHash::all_zeros());
-            monitor.on_add_block(&[funding_tx.clone()], &BlockHash::all_zeros());
-            Ok(())
-        })
-        .expect("confirm F0");
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                let monitor = chan.monitor.as_monitor(Box::new(RailProvider {
+                    parameters: chan.make_channel_parameters(),
+                }));
+                monitor.on_add_block(&[], &BlockHash::all_zeros());
+                monitor.on_add_block(&[funding_tx.clone()], &BlockHash::all_zeros());
+                Ok(())
+            })
+            .expect("confirm F0");
 
         let splice_tx = open_splice_window(&node_ctx, &mut chan_ctx, 900_000);
         let new_outpoint = chan_ctx.setup.funding_outpoint;
@@ -524,26 +529,30 @@ mod tests {
         // Confirm the splice tx and bury it (OnchainPolicy
         // min_funding_depth is 1 in the unit default; prod is 6 — the
         // shape is depth-dependent, the mechanism is not).
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            let monitor = chan.monitor.as_monitor(Box::new(RailProvider {
-                parameters: chan.make_channel_parameters(),
-            }));
-            monitor.on_add_block(&[splice_tx.clone()], &BlockHash::all_zeros());
-            monitor.on_add_block(&[], &BlockHash::all_zeros());
-            Ok(())
-        })
-        .expect("feed blocks");
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                let monitor = chan.monitor.as_monitor(Box::new(RailProvider {
+                    parameters: chan.make_channel_parameters(),
+                }));
+                monitor.on_add_block(&[splice_tx.clone()], &BlockHash::all_zeros());
+                monitor.on_add_block(&[], &BlockHash::all_zeros());
+                Ok(())
+            })
+            .expect("feed blocks");
 
         // funding_locked closes the splice window — the live ordering
         // at burial (both flip together; the live error fired exactly
         // here).
-        node_ctx.node
+        node_ctx
+            .node
             .with_channel(&channel_id, |chan| {
                 chan.confirm_funding_locked(&new_outpoint).map(|_| ())
             })
             .expect("funding locked");
 
-        let chain_state = node_ctx.node
+        let chain_state = node_ctx
+            .node
             .with_channel(&channel_id, |chan| Ok(chan.get_chain_state()))
             .expect("chain state");
         assert!(
@@ -551,24 +560,28 @@ mod tests {
             "window must be closed at funding_locked (the live rejection shape)"
         );
 
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            chan.enforcement_state
-                .set_next_counterparty_commit_num_for_testing(1, make_test_pubkey(REMOTE_POINT_NDX));
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
+                    1,
+                    make_test_pubkey(REMOTE_POINT_NDX),
+                );
 
-            let (tx, witscripts) =
-                view_counterparty_commitment(chan, &chan.setup.clone(), 1, 0, 790_000, 100_000);
-            chan.sign_counterparty_commitment_tx(
-                &tx,
-                &witscripts,
-                &make_test_pubkey(REMOTE_POINT_NDX),
-                1,
-                0,
-                vec![],
-                vec![],
-            )
-            .map(|_| ())
-        })
-        .expect("strict must sign the new funding's commitment 1 after splice-out burial");
+                let (tx, witscripts) =
+                    view_counterparty_commitment(chan, &chan.setup.clone(), 1, 0, 790_000, 100_000);
+                chan.sign_counterparty_commitment_tx(
+                    &tx,
+                    &witscripts,
+                    &make_test_pubkey(REMOTE_POINT_NDX),
+                    1,
+                    0,
+                    vec![],
+                    vec![],
+                )
+                .map(|_| ())
+            })
+            .expect("strict must sign the new funding's commitment 1 after splice-out burial");
     }
 
     // ------------------------------------------------------------------
@@ -590,29 +603,31 @@ mod tests {
         let _splice_tx = open_splice_window(&node_ctx, &mut chan_ctx, 1_100_000);
         let channel_id = chan_ctx.channel_id.clone();
 
-        node_ctx.node.with_channel(&channel_id, |chan| {
-            // the live pair: commitment 1 already validated on the OLD
-            // funding (next=2, its tag on the old outpoint), one revoke
-            // processed (revoke=1)
-            chan.enforcement_state
-                .set_next_counterparty_commit_num_for_testing(2, make_test_pubkey(0x10));
-            chan.enforcement_state.set_next_counterparty_revoke_num_for_testing(1);
-            chan.enforcement_state.counterparty_commitment_funding = Some(old_outpoint);
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                // the live pair: commitment 1 already validated on the OLD
+                // funding (next=2, its tag on the old outpoint), one revoke
+                // processed (revoke=1)
+                chan.enforcement_state
+                    .set_next_counterparty_commit_num_for_testing(2, make_test_pubkey(0x10));
+                chan.enforcement_state.set_next_counterparty_revoke_num_for_testing(1);
+                chan.enforcement_state.counterparty_commitment_funding = Some(old_outpoint);
 
-            let (tx, witscripts) =
-                view_counterparty_commitment(chan, &chan.setup.clone(), 1, 3755, 1_084_473, 0);
-            chan.sign_counterparty_commitment_tx(
-                &tx,
-                &witscripts,
-                &make_test_pubkey(REMOTE_POINT_NDX),
-                1,
-                3755,
-                vec![],
-                vec![],
-            )
-            .map(|_| ())
-        })
-        .expect("strict must accept the post-splice same-number re-sign on the new funding");
+                let (tx, witscripts) =
+                    view_counterparty_commitment(chan, &chan.setup.clone(), 1, 3755, 1_084_473, 0);
+                chan.sign_counterparty_commitment_tx(
+                    &tx,
+                    &witscripts,
+                    &make_test_pubkey(REMOTE_POINT_NDX),
+                    1,
+                    3755,
+                    vec![],
+                    vec![],
+                )
+                .map(|_| ())
+            })
+            .expect("strict must accept the post-splice same-number re-sign on the new funding");
     }
 
     /// D guardrail: the SAME counter pair on a PLAIN channel (no
@@ -642,7 +657,8 @@ mod tests {
             )
             .map(|_| ())
         });
-        let err = result.expect_err("plain-channel num=2/revoke=1 must stay rejected in strict mode");
+        let err =
+            result.expect_err("plain-channel num=2/revoke=1 must stay rejected in strict mode");
         assert!(
             err.message().contains("too small relative to next_counterparty_revoke_num"),
             "guardrail must reject via the numbering gate, got: {}",

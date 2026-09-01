@@ -260,16 +260,29 @@ impl EventPayload {
     pub fn trace_level(&self) -> u8 {
         use EventPayload::*;
         match self {
-            ScenarioStart { .. } | ScenarioEnd { .. } | Step { .. } | Inject { .. }
-            | Expect { .. } | Invariant { .. } | StateDeclared { .. }
-            | TransitionDeclared { .. } | ClnRequest { .. } | ClnResponse { .. }
-            | ClnEvent { .. } | SetupChannel { .. } | SpliceSetup { .. }
-            | SignSpliceTx { .. } | ValidateHolderCommitment { .. }
-            | SignCounterpartyCommitment { .. } | FundingLocked { .. } | Restored { .. } => {
-                LEVEL_CORE
-            }
-            ClnState { .. } | FundingViewResolved { .. } | MonitorUpdate { .. }
-            | Persisted { .. } | SnapshotCheckpoint { .. } => LEVEL_BASE,
+            ScenarioStart { .. }
+            | ScenarioEnd { .. }
+            | Step { .. }
+            | Inject { .. }
+            | Expect { .. }
+            | Invariant { .. }
+            | StateDeclared { .. }
+            | TransitionDeclared { .. }
+            | ClnRequest { .. }
+            | ClnResponse { .. }
+            | ClnEvent { .. }
+            | SetupChannel { .. }
+            | SpliceSetup { .. }
+            | SignSpliceTx { .. }
+            | ValidateHolderCommitment { .. }
+            | SignCounterpartyCommitment { .. }
+            | FundingLocked { .. }
+            | Restored { .. } => LEVEL_CORE,
+            ClnState { .. }
+            | FundingViewResolved { .. }
+            | MonitorUpdate { .. }
+            | Persisted { .. }
+            | SnapshotCheckpoint { .. } => LEVEL_BASE,
         }
     }
 
@@ -279,8 +292,9 @@ impl EventPayload {
     pub fn provenance(&self) -> &'static str {
         use EventPayload::*;
         match self {
-            Expect { .. } | Invariant { .. } | StateDeclared { .. }
-            | TransitionDeclared { .. } => PROVENANCE_EXPECTED,
+            Expect { .. } | Invariant { .. } | StateDeclared { .. } | TransitionDeclared { .. } => {
+                PROVENANCE_EXPECTED
+            }
             _ => PROVENANCE_OBSERVED,
         }
     }

@@ -369,13 +369,15 @@ impl<L: ChainListener> ChainTracker<L> {
             true,
         )?;
         match proof.proof {
-            ProofType::Filter(_, spv_proof) =>
-                self.notify_listeners_remove(Some(spv_proof.txs.as_slice()), tip_block_hash),
-            ProofType::Block(b) =>
+            ProofType::Filter(_, spv_proof) => {
+                self.notify_listeners_remove(Some(spv_proof.txs.as_slice()), tip_block_hash)
+            }
+            ProofType::Block(b) => {
                 return Err(error_invalid_proof!(
                     "non-streamed block not supported {}",
                     b.block_hash()
-                )),
+                ))
+            }
             ProofType::ExternalBlock() => self.notify_listeners_remove(None, tip_block_hash),
         };
 
@@ -480,13 +482,15 @@ impl<L: ChainListener> ChainTracker<L> {
             false,
         )?;
         match proof.proof {
-            ProofType::Filter(_, spv_proof) =>
-                self.notify_listeners_add(Some(spv_proof.txs.as_slice()), message_block_hash),
-            ProofType::Block(b) =>
+            ProofType::Filter(_, spv_proof) => {
+                self.notify_listeners_add(Some(spv_proof.txs.as_slice()), message_block_hash)
+            }
+            ProofType::Block(b) => {
                 return Err(error_invalid_proof!(
                     "non-streamed block not supported {}",
                     b.block_hash()
-                )),
+                ))
+            }
             ProofType::ExternalBlock() => self.notify_listeners_add(None, message_block_hash),
         };
 
