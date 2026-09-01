@@ -114,6 +114,11 @@ def extract_artifacts(events: List[Dict], out_dir: str) -> int:
                     if not os.path.exists(path):
                         with open(path, "w") as fh:
                             fh.write(raw)
+                    # extensionless twin: the viewer's stable fetch path
+                    twin = os.path.join(arts_dir, "sha256-%s" % h)
+                    if not os.path.exists(twin):
+                        with open(twin, "w") as fh:
+                            fh.write(raw)
                     seen[h] = path
                     count += 1
                 if len(raw) > _INLINE_RAW_LIMIT:
