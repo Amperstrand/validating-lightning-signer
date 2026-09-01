@@ -25,7 +25,7 @@ fn envelope_roundtrips_with_schema() {
         message: Some("splice input value is not the channel value".into()),
     });
     let j = serde_json::to_string(&ev).unwrap();
-    assert!(j.contains("\"vls-trace/1\""), "schema tag present");
+    assert!(j.contains("\"lightning-trace/1\""), "schema tag present");
     assert!(j.contains("\"sign_splice_tx\""), "tagged type present");
     let back: TraceEvent = serde_json::from_str(&j).unwrap();
     assert_eq!(back.actor, Actor::Vls);
@@ -38,7 +38,7 @@ fn unknown_future_event_type_still_deserializes_as_value() {
     // envelope consumer that reads fields generically (the viewer's
     // parse path). The typed enum rejects it; the value-level parse
     // must succeed and expose the type string.
-    let j = r#"{"schema":"vls-trace/1","run_id":"r","scenario_id":"s","seq":1,
+    let j = r#"{"schema":"lightning-trace/1","run_id":"r","scenario_id":"s","seq":1,
         "actor":"vls","event":{"type":"some_future_event","x":42}}"#;
     let v: Value = serde_json::from_str(j).unwrap();
     assert_eq!(v["event"]["type"], "some_future_event");
@@ -232,9 +232,9 @@ fn snapshots_and_artifacts_never_contain_secret_keys() {
 #[test]
 fn canonical_events_strip_volatile_fields() {
     let lines = vec![
-        r#"{"schema":"vls-trace/1","run_id":"r1","scenario_id":"s","seq":1,"actor":"driver","actor_seq":1,"ts_us":1,"mono_us":1,"event":{"type":"step","name":"a"}}"#.into(),
+        r#"{"schema":"lightning-trace/1","run_id":"r1","scenario_id":"s","seq":1,"actor":"driver","actor_seq":1,"ts_us":1,"mono_us":1,"event":{"type":"step","name":"a"}}"#.into(),
         "not json at all".into(),
-        r#"{"schema":"vls-trace/1","run_id":"r1","scenario_id":"s","seq":2,"actor":"vls","actor_seq":1,"ts_us":2,"mono_us":2,"event":{"type":"monitor_update","what":"x"}}"#.into(),
+        r#"{"schema":"lightning-trace/1","run_id":"r1","scenario_id":"s","seq":2,"actor":"vls","actor_seq":1,"ts_us":2,"mono_us":2,"event":{"type":"monitor_update","what":"x"}}"#.into(),
     ];
     let canonical = crate::util::test_utils::scenario::canonical_events(&lines);
     assert_eq!(canonical.len(), 2, "malformed line skipped");
@@ -250,14 +250,14 @@ fn canonical_events_strip_volatile_fields() {
 #[test]
 fn assert_wellformed_catches_bad_actor_seq() {
     let good = vec![
-        r#"{"schema":"vls-trace/1","seq":1,"actor":"driver","actor_seq":1,"event":{"type":"step","name":"a"}}"#.into(),
-        r#"{"schema":"vls-trace/1","seq":2,"actor":"vls","actor_seq":1,"event":{"type":"monitor_update","what":"x"}}"#.into(),
-        r#"{"schema":"vls-trace/1","seq":3,"actor":"driver","actor_seq":2,"event":{"type":"step","name":"b"}}"#.into(),
+        r#"{"schema":"lightning-trace/1","seq":1,"actor":"driver","actor_seq":1,"provenance":"observed","level":"core","event":{"type":"step","name":"a"}}"#.to_string(),
+        r#"{"schema":"lightning-trace/1","seq":2,"actor":"vls","actor_seq":1,"provenance":"observed","level":"base","event":{"type":"monitor_update","what":"x"}}"#.to_string(),
+        r#"{"schema":"lightning-trace/1","seq":3,"actor":"driver","actor_seq":2,"provenance":"observed","level":"core","event":{"type":"step","name":"b"}}"#.to_string(),
     ];
     crate::util::test_utils::scenario::assert_wellformed(&good);
     let bad = vec![
-        r#"{"schema":"vls-trace/1","seq":1,"actor":"driver","actor_seq":2,"event":{"type":"step","name":"a"}}"#.into(),
-        r#"{"schema":"vls-trace/1","seq":2,"actor":"driver","actor_seq":1,"event":{"type":"step","name":"b"}}"#.into(),
+        r#"{"schema":"lightning-trace/1","seq":1,"actor":"driver","actor_seq":2,"provenance":"observed","level":"core","event":{"type":"step","name":"a"}}"#.to_string(),
+        r#"{"schema":"lightning-trace/1","seq":2,"actor":"driver","actor_seq":1,"provenance":"observed","level":"core","event":{"type":"step","name":"b"}}"#.to_string(),
     ];
     let result = std::panic::catch_unwind(|| {
         crate::util::test_utils::scenario::assert_wellformed(&bad);
@@ -267,7 +267,129 @@ fn assert_wellformed_catches_bad_actor_seq() {
 
 #[test]
 fn schema_tag_is_stable() {
-    assert_eq!(SCHEMA, "vls-trace/1");
+    assert_eq!(SCHEMA, "lightning-trace/1");
     let ev = TraceEvent::driver(EventPayload::ScenarioStart { declared_states: vec![] });
     assert_eq!(ev.schema, SCHEMA);
+}
+
+#[test]
+fn legacy_vls_trace_lines_still_parse() {
+    // Open-world backward compatibility: pre-rename lines must still
+    // deserialize (serde defaults cover the new fields).
+    let j = r#"{"schema":"vls-trace/1","run_id":"r","scenario_id":"s","seq":1,
+        "actor":"vls","actor_seq":1,"ts_us":1,"event":{"type":"monitor_update","what":"x"}}"#;
+    let ev: TraceEvent = serde_json::from_str(j).expect("legacy line parses");
+    assert_eq!(ev.provenance, None);
+    assert_eq!(ev.level, None);
+    assert_eq!(ev.actor_instance, None);
+}
+
+#[test]
+fn sink_stamps_provenance_and_level_from_payload() {
+    let sink = TraceSink::in_memory("stamps");
+    let expect_line =
+        sink.render_line(TraceEvent::driver(EventPayload::Expect { expect: "x".into(), outcome: "ok".into() }));
+    let v: Value = serde_json::from_str(&expect_line).unwrap();
+    assert_eq!(v["provenance"], "expected");
+    assert_eq!(v["level"], "core");
+    let state_line = sink.render_line(TraceEvent::cln(EventPayload::ClnState {
+        current_funding: None,
+        detail: None,
+        source: "test".into(),
+    }));
+    let v: Value = serde_json::from_str(&state_line).unwrap();
+    assert_eq!(v["provenance"], "observed");
+    assert_eq!(v["level"], "base");
+    // matches the Python table in contrib/protocol-trace/ptrace/schema.py
+    for (payload, prov, level) in [
+        (EventPayload::Invariant { name: "n".into(), passed: true, detail: None }, "expected", "core"),
+        (EventPayload::StateDeclared { state: "s".into(), invariants: None }, "expected", "core"),
+        (
+            EventPayload::ClnRequest { message: "m".into(), detail: None, source: "t".into() },
+            "observed",
+            "core",
+        ),
+        (EventPayload::Restored { detail: None }, "observed", "core"),
+        (EventPayload::SnapshotCheckpoint { label: "l".into(), step: 1 }, "observed", "base"),
+    ] {
+        let line = sink.render_line(TraceEvent::vls(payload));
+        let v: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["provenance"], prov, "provenance mismatch");
+        assert_eq!(v["level"], level, "level mismatch");
+    }
+}
+
+#[test]
+fn level_filtering_drops_attachments_and_events() {
+    use super::event::{LEVEL_BASE, LEVEL_CORE, LEVEL_EXTRA};
+    use super::sink::filter_to_level;
+    use super::snapshot::{ChainSummary, ChannelSnapshot, EnforcementSummary};
+    let snap = ChannelSnapshot {
+        channel_id: "aa".into(),
+        eras: vec![],
+        enforcement: EnforcementSummary {
+            next_holder_commit_num: 0,
+            next_counterparty_commit_num: 0,
+            next_counterparty_revoke_num: 0,
+            holder_commitment_funding: None,
+            counterparty_commitment_funding: None,
+            prev_funding_commitment: None,
+            channel_closed: false,
+        },
+        chain: ChainSummary {
+            splice_pending: false,
+            funding_locked_outpoint: None,
+            watched_txids: vec![],
+            funding_depth: 0,
+            funding_double_spent_depth: 0,
+            closing_depth: 0,
+            monitor_funding_outpoint: None,
+        },
+    };
+    let ev = || {
+        TraceEvent::vls(EventPayload::SignSpliceTx {
+            txid: "t".into(),
+            input_index: 0,
+            input_outpoint: "o".into(),
+            era: Some("A".into()),
+            remote_funding_key: "02".into(),
+            input_amount_sat: None,
+        })
+        .before(Some(snap.clone()))
+        .after(Some(snap.clone()))
+        .artifacts(vec![crate::trace::TraceArtifact {
+            kind: "tx".into(),
+            raw: "deadbeef".into(),
+            decoded: None,
+        }])
+    };
+    let core = filter_to_level(ev(), LEVEL_CORE).unwrap();
+    assert!(core.before.is_none() && core.after.is_none() && core.artifacts.is_empty());
+    let base = filter_to_level(ev(), LEVEL_BASE).unwrap();
+    assert!(base.after.is_some());
+    assert_eq!(base.artifacts[0].raw, "");
+    let extra = filter_to_level(ev(), LEVEL_EXTRA).unwrap();
+    assert_eq!(extra.artifacts[0].raw, "deadbeef");
+    let dropped = filter_to_level(
+        TraceEvent::cln(EventPayload::ClnState {
+            current_funding: None,
+            detail: None,
+            source: "t".into(),
+        }),
+        LEVEL_CORE,
+    );
+    assert!(dropped.is_none());
+}
+
+#[test]
+fn actor_instance_stamp_comes_from_env() {
+    // in_memory sinks stamp whatever instance() resolves to; without
+    // the env it is None (the common unit-test shape).
+    let sink = TraceSink::in_memory("inst");
+    let line = sink.render_line(TraceEvent::vls(EventPayload::Persisted { detail: None }));
+    let v: Value = serde_json::from_str(&line).unwrap();
+    match std::env::var("VLS_TRACE_INSTANCE") {
+        Ok(inst) if !inst.is_empty() => assert_eq!(v["actor_instance"], inst),
+        _ => assert!(v.get("actor_instance").map_or(true, |x| x.is_null())),
+    }
 }

@@ -244,9 +244,10 @@ pub fn assert_wellformed(lines: &[String]) {
     for (i, l) in lines.iter().enumerate() {
         let v: Value =
             serde_json::from_str(l).unwrap_or_else(|e| panic!("line {i} unparseable: {e}\n{l}"));
-        assert_eq!(v["schema"], "vls-trace/1", "line {i} schema mismatch");
+        assert_eq!(v["schema"], crate::trace::SCHEMA, "line {i} schema mismatch");
         assert!(v["seq"].is_u64(), "line {i} missing seq");
         assert!(v["actor"].is_string(), "line {i} missing actor");
+        assert!(v["provenance"].is_string(), "line {i} missing provenance stamp");
     }
     // actor_seq strictly increasing per actor
     use std::collections::HashMap;

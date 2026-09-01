@@ -17,10 +17,31 @@ use super::event::TraceEvent;
 use crate::prelude::{String, Vec};
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
+static TRACE_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+static INSTANCE: OnceLock<Option<String>> = OnceLock::new();
 static CURRENT: OnceLock<Mutex<Option<Arc<TraceSink>>>> = OnceLock::new();
 
 fn current_slot() -> &'static Mutex<Option<Arc<TraceSink>>> {
     CURRENT.get_or_init(|| Mutex::new(None))
+}
+
+fn level_from_env() -> u8 {
+    match std::env::var("VLS_TRACE_LEVEL").unwrap_or_default().to_lowercase().as_str() {
+        "off" => u8::MAX,
+        "core" => 0,
+        "base" => 1,
+        _ => 1, // extra and anything unrecognized: base
+    }
+}
+
+fn configured_level() -> u8 {
+    TRACE_LEVEL.load(Ordering::Relaxed)
+}
+
+/// The actor instance label (from `VLS_TRACE_INSTANCE`, e.g. `l1`) —
+/// stamped on every event so multi-node farms merge into per-node lanes.
+pub fn instance() -> Option<String> {
+    INSTANCE.get_or_init(|| std::env::var("VLS_TRACE_INSTANCE").ok().filter(|s| !s.is_empty())).clone()
 }
 
 thread_local! {
@@ -46,10 +67,14 @@ pub fn enabled() -> bool {
     }
 }
 
-/// Decide from the environment whether this process traces at all.
-/// Called once by the first `TraceSink::install` (or explicitly).
+/// Decide from the environment whether this process traces at all,
+/// and at which level. Called once by the first `TraceSink::install`
+/// (or explicitly). `VLS_TRACE_LEVEL=off` disables tracing outright.
 pub fn init_from_env() -> bool {
-    let on = std::env::var("VLS_TRACE_DIR").map(|d| !d.is_empty()).unwrap_or(false);
+    let level = level_from_env();
+    TRACE_LEVEL.store(if level == u8::MAX { 1 } else { level }, Ordering::Relaxed);
+    let on = std::env::var("VLS_TRACE_DIR").map(|d| !d.is_empty()).unwrap_or(false)
+        && level != u8::MAX;
     ENABLED.store(on, Ordering::Relaxed);
     on
 }
@@ -244,7 +269,9 @@ impl TraceSink {
         }
     }
 
-    /// Render the event to a JSONL line (assigning seq/actor_seq/ts).
+    /// Render the event to a JSONL line (assigning seq/actor_seq/ts +
+    /// the provenance/level/instance stamps). Does NOT level-filter —
+    /// see [`TraceSink::emit_local`].
     pub fn render_line(&self, mut ev: TraceEvent) -> String {
         let correlation = ev.correlation_id.clone().or_else(correlation);
         let mut inner = self.inner.lock().unwrap();
@@ -261,21 +288,56 @@ impl TraceSink {
             Some(unix_us(inner.start_system) + inner.start_instant.elapsed().as_micros() as u64);
         ev.mono_us = Some(inner.start_instant.elapsed().as_micros() as u64);
         ev.correlation_id = correlation;
+        ev.provenance = Some(ev.event.provenance().to_string());
+        ev.level = Some(ev.event.level_name().to_string());
+        ev.actor_instance = instance();
         serde_json::to_string(&ev).unwrap_or_else(|_| {
             inner.dropped_lines += 1;
             format!("{{\"schema\":\"{}\",\"unserializable_event\":true}}", super::event::SCHEMA)
         })
     }
 
-    /// Emit one event into this sink. Flushes per line: teardown paths
-    /// (harness pkills, crashes) must not lose already-emitted events.
+    /// Emit one event into this sink, honoring the configured trace
+    /// level: payloads above the level are dropped; at core the
+    /// before/after snapshots and artifacts are stripped; at base
+    /// artifact raw bytes are stripped (decoded forms stay). Flushes
+    /// per line: teardown paths (harness pkills, crashes) must not
+    /// lose already-emitted events.
     pub fn emit_local(&self, ev: TraceEvent) {
+        let ev = filter_to_level(ev, configured_level());
+        let ev = match ev {
+            Some(ev) => ev,
+            None => return,
+        };
         let line = self.render_line(ev);
         if let Ok(mut inner) = self.inner.lock() {
             let _ = writeln!(inner.writer, "{line}");
             let _ = inner.writer.flush();
         }
     }
+}
+
+/// Apply the level policy to an event: `None` = drop the event.
+pub(crate) fn filter_to_level(mut ev: TraceEvent, level: u8) -> Option<TraceEvent> {
+    use super::event::{LEVEL_BASE, LEVEL_EXTRA};
+    if ev.event.trace_level() > level {
+        return None;
+    }
+    if level < LEVEL_BASE {
+        ev.before = None;
+        ev.after = None;
+        ev.artifacts = Vec::new();
+    } else if level < LEVEL_EXTRA {
+        ev.artifacts = ev
+            .artifacts
+            .into_iter()
+            .map(|mut a| {
+                a.raw = String::new();
+                a
+            })
+            .collect();
+    }
+    Some(ev)
 }
 
 impl Drop for TraceSink {

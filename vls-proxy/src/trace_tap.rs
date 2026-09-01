@@ -3,7 +3,7 @@
 //! The remote_hsmd proxy sees every hsmd message CLN sends and every
 //! reply VLS returns — the least invasive place to capture the CLN
 //! perspective without patching CLN itself. Events use the canonical
-//! `vls-trace/1` schema (actor `cln`, source `proxy-tap`) so they merge
+//! `lightning-trace/1` schema (actor `cln`, source `proxy-tap`) so they merge
 //! with VLS/driver traces in the visualizer.
 //!
 //! Enable at runtime with `VLS_TRACE_DIR` (the sink is installed lazily

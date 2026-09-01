@@ -1,4 +1,4 @@
-//! Trace event envelope and typed payloads for `vls-trace/1`.
+//! Trace event envelope and typed payloads for `lightning-trace/1`.
 // Serialized-data schema: names are the API; schema docs in docs/splice-trace.md.
 #![allow(missing_docs)]
 
@@ -9,7 +9,24 @@ use super::artifact::TraceArtifact;
 use super::snapshot::ChannelSnapshot;
 
 /// The canonical schema tag. Bump on incompatible envelope changes.
-pub const SCHEMA: &str = "vls-trace/1";
+/// (Renamed from `vls-trace/1` when the model grew provenance/level/
+/// actor-instance semantics — consumers accept both tags on read.)
+pub const SCHEMA: &str = "lightning-trace/1";
+
+/// Trace importance, qlog-style: `0` core (small, CI-safe semantic
+/// events), `1` base (state snapshots + decoded diagnostics),
+/// `2` extra (raw bytes). Numeric for cheap comparison; the string
+/// names are what serialize.
+pub const LEVEL_CORE: u8 = 0;
+pub const LEVEL_BASE: u8 = 1;
+pub const LEVEL_EXTRA: u8 = 2;
+
+/// Event provenance — WHO is testifying. Assigned from the payload
+/// type by the sink, never by the emitter, so an implementation
+/// cannot mislabel inference as observation. `derived` is
+/// consumer-only (viewer/renderer); no emitter path produces it.
+pub const PROVENANCE_OBSERVED: &str = "observed";
+pub const PROVENANCE_EXPECTED: &str = "expected";
 
 /// Who observed the event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,9 +253,51 @@ pub enum EventPayload {
     },
 }
 
-/// The `vls-trace/1` envelope. `seq`, `actor_seq`, `ts_us`, `mono_us`
-/// and `era` labels are assigned by the [`crate::sink::TraceSink`] at
-/// emission time — emitters only fill semantic fields.
+impl EventPayload {
+    /// Importance level (see `LEVEL_*`): core = semantic narrative,
+    /// base = snapshots/diagnostics. No payload is inherently extra —
+    /// raw artifacts are gated by the sink's configured level.
+    pub fn trace_level(&self) -> u8 {
+        use EventPayload::*;
+        match self {
+            ScenarioStart { .. } | ScenarioEnd { .. } | Step { .. } | Inject { .. }
+            | Expect { .. } | Invariant { .. } | StateDeclared { .. }
+            | TransitionDeclared { .. } | ClnRequest { .. } | ClnResponse { .. }
+            | ClnEvent { .. } | SetupChannel { .. } | SpliceSetup { .. }
+            | SignSpliceTx { .. } | ValidateHolderCommitment { .. }
+            | SignCounterpartyCommitment { .. } | FundingLocked { .. } | Restored { .. } => {
+                LEVEL_CORE
+            }
+            ClnState { .. } | FundingViewResolved { .. } | MonitorUpdate { .. }
+            | Persisted { .. } | SnapshotCheckpoint { .. } => LEVEL_BASE,
+        }
+    }
+
+    /// Provenance label for this payload kind. Driver assertions and
+    /// declared models are `expected`; every implementation emission
+    /// is `observed` testimony.
+    pub fn provenance(&self) -> &'static str {
+        use EventPayload::*;
+        match self {
+            Expect { .. } | Invariant { .. } | StateDeclared { .. }
+            | TransitionDeclared { .. } => PROVENANCE_EXPECTED,
+            _ => PROVENANCE_OBSERVED,
+        }
+    }
+
+    pub fn level_name(&self) -> &'static str {
+        match self.trace_level() {
+            LEVEL_CORE => "core",
+            LEVEL_BASE => "base",
+            _ => "extra",
+        }
+    }
+}
+
+/// The `lightning-trace/1` envelope. `seq`, `actor_seq`, `ts_us`,
+/// `mono_us`, `provenance`, `level` and `actor_instance` are assigned
+/// by the [`crate::sink::TraceSink`] at emission time — emitters only
+/// fill semantic fields.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TraceEvent {
     pub schema: String,
@@ -247,12 +306,25 @@ pub struct TraceEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
     pub actor: Actor,
+    /// Which node of this actor's kind emitted (e.g. `l1`, `l2`) —
+    /// assigned by the sink from `VLS_TRACE_INSTANCE` so live farms
+    /// with one file per process still merge into per-node lanes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_instance: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor_seq: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ts_us: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mono_us: Option<u64>,
+    /// `observed` | `expected` (`derived` is consumer-only) — stamped
+    /// by the sink from the payload type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+    /// `core` | `base` | `extra` — stamped by the sink from the
+    /// payload type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -277,9 +349,12 @@ impl TraceEvent {
             scenario_id: String::new(),
             seq: None,
             actor,
+            actor_instance: None,
             actor_seq: None,
             ts_us: None,
             mono_us: None,
+            provenance: None,
+            level: None,
             correlation_id: None,
             channel_id: None,
             event: payload,

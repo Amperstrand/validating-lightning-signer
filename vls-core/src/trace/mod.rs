@@ -1,4 +1,4 @@
-//! Canonical splice/state-machine trace model (`vls-trace/1`).
+//! Canonical splice/state-machine trace model (`lightning-trace/1`).
 //!
 //! One JSONL envelope per event, emitted by three actors
 //! ([`Actor::Driver`], [`Actor::Cln`], [`Actor::Vls`]) into a single
