@@ -159,6 +159,17 @@ aggregate machine from the trace itself — no hand-written diagram that can
 drift from test behavior. Each `invariant()` call is also an assertion, so
 the declared model is enforced, not just narrated.
 
+## Findings the tracer surfaced
+
+See `docs/splice-trace-findings.md` — four divergences audited against
+the pinned BOLTs and CLN source, headlined by **F1: remote funding key
+rotation cannot splice through VLS** (spec-designed-in via per-splice
+`funding_pubkey`s; CLN rotates its channel key only at mutual
+`splice_locked` while requesting the signature — which spends the old
+era's outpoint — with the still-old key). The scenario
+`funding_key_rotation` pins it as `DIVERGENCE_EXPOSED`; its refusal
+assert flips deliberately if the check becomes era-aware.
+
 ## Non-goals / boundaries
 
 * The tracer does **not** redesign signer behavior. Where the logical model

@@ -377,10 +377,15 @@ fn scenario_reconnect_retransmit_straggler() {
     sc.finish("passed");
 }
 
-/// Scenario 4: remote funding key rotation A/KA → B/KB. Exposes that
-/// sign_splice_tx's remote-key check is against the CURRENT setup's
-/// key for ALL eras — a deliberate microscope on a logical/implementation
-/// divergence (the trace shows era A carrying key KA while only KB signs).
+/// Scenario 4: remote funding key rotation A/KA → B/KB. AUDITED
+/// (docs/splice-trace-findings.md F1, spec + CLN source): the key check
+/// against the CURRENT setup breaks rotation — CLN rotates its
+/// channel-level remote key only at mutual splice_locked (channeld.c:499)
+/// while requesting the splice signature (which spends era A, whose
+/// redeemscript needs KA) BEFORE that, with the still-unrotated KA. The
+/// spec designs rotation in (splice_init/splice_ack carry per-splice
+/// funding_pubkeys). This scenario pins the divergence; the refusal
+/// assert flips deliberately when the check becomes era-aware.
 #[test]
 fn scenario_funding_key_rotation() {
     let mut sc = ScenarioRunner::with_states(
@@ -461,8 +466,9 @@ fn scenario_funding_key_rotation() {
     sc.state(
         "DIVERGENCE_EXPOSED",
         json!({
-            "finding": "sign_splice_tx checks remote_funding_key against setup (current era) for every input era",
-            "logical_model": "era A signs with KA; the funding_redeemscript for A's outpoint is built from KA",
+            "finding": "F1 (docs/splice-trace-findings.md): key check is era-blind and CLN requests with the pre-rotation key — rotation cannot splice through VLS",
+            "spec": "BOLTs 1528972 splice_init/splice_ack carry per-splice funding_pubkeys (rotation designed in)",
+            "cln": "channeld.c:499 rotates channel->funding_pubkey[REMOTE] only at mutual splice_locked; sign_splice_tx call sites (3903, 4649) pass the channel-level key",
             "trace_evidence": "era A snapshot carries remote_funding_key=KA while only KB passes the check",
         }),
     );
@@ -682,6 +688,129 @@ fn scenario_persistence_restart_two_eras() {
     let accepted = raw_validate(&node_ctx, &channel_id, &straggler_ctx, &scsig, &shsigs).is_ok();
     sc.expect("post-restart straggler accepted", accepted);
     assert!(accepted, "restored signer must accept the old-funding straggler");
+
+    sc.finish("passed");
+}
+
+/// Scenario: same commitment number + different info must be rejected
+/// (the retransmit-vs-reshuffle discriminator). The retransmit contract
+/// (identical re-validation while pending ⇒ same slots, no advance) is
+/// pinned elsewhere; this is the negative rail.
+#[test]
+fn scenario_same_number_different_info_rejected() {
+    let mut sc = ScenarioRunner::with_states(
+        "same_number_different_info_rejected",
+        &["A_LOCKED", "SAME_NUM_ACCEPTED", "SAME_NUM_RESHUFFLE_REJECTED"],
+    );
+
+    let node_ctx = test_node_ctx(1);
+    let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+    let channel_id = chan_ctx.channel_id.clone();
+    let old_setup = chan_ctx.setup.clone();
+    sc.state("A_LOCKED", json!({"eras_live": ["A"], "current": "A"}));
+
+    // Splice A → B first (the interesting window).
+    let _s1 = sc.step("splice A -> B");
+    let mut tx_ctx = TestFundingTxContext::new();
+    tx_ctx.inputs.push(TxIn {
+        previous_output: old_setup.funding_outpoint,
+        script_sig: bitcoin::ScriptBuf::new(),
+        sequence: bitcoin::Sequence::MAX,
+        witness: bitcoin::Witness::default(),
+    });
+    chan_ctx.setup.channel_value_sat += 95_450;
+    let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+    let splice_tx = tx_ctx.to_tx();
+    let new_outpoint = OutPoint { txid: splice_tx.compute_txid(), vout };
+    assert!(funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none());
+    sc.state("SAME_NUM_ACCEPTED", json!({"eras_live": ["A", "B"], "current": "B"}));
+
+    // A commitment on B, number 1, validated through the FULL path —
+    // the numbering advance is the discriminator's fuel (raw_validate
+    // deliberately does not advance it, and the same-number rejection
+    // fires on commit_num < next_holder_commit_num).
+    let _s2 = sc.step("commitment #1 on B validates (numbering advances)");
+    sc.cln_sends("commitment_signed", Some(json!({"funding": "B", "num": 1, "to_b": 1_090_000})));
+    let mut ctx1 =
+        channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 1_090_000, 0, vec![], vec![]);
+    let (sig1, hsigs1) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx1);
+    validate_holder_commitment(&node_ctx, &chan_ctx, &ctx1, &sig1, &hsigs1)
+        .expect("first commitment validates");
+    sc.expect("commitment #1 accepted", true);
+
+    // Same number, DIFFERENT info (to_b changed) — rejected by the
+    // old-commitment-number policy: a reshuffle is not a retransmit.
+    let _s3 = sc.step("same number, different info refused");
+    sc.cln_sends("commitment_signed", Some(json!({"funding": "B", "num": 1, "to_b": 1_080_000, "reshuffle": true})));
+    let mut ctx1b =
+        channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 1_080_000, 0, vec![], vec![]);
+    let (sig1b, hsigs1b) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx1b);
+    let refused = validate_holder_commitment(&node_ctx, &chan_ctx, &ctx1b, &sig1b, &hsigs1b).is_err();
+    sc.expect("same-number reshuffle rejected", refused);
+    assert!(refused, "same commitment number with different info must be rejected");
+    sc.transition("SAME_NUM_ACCEPTED", "SAME_NUM_RESHUFFLE_REJECTED", "reject reshuffle");
+    let _ = new_outpoint;
+
+    sc.finish("passed");
+}
+
+/// Scenario: stale/foreign funding_locked (spec: the splice_locked
+/// receiver MUST warn+disconnect or error+fail — VLS's signer-side
+/// rejection is defense in depth; pinned here).
+#[test]
+fn scenario_stale_foreign_funding_locked() {
+    let mut sc =
+        ScenarioRunner::with_states("stale_foreign_funding_locked", &["A_LOCKED", "AB_PENDING", "BAD_LOCK_REFUSED"]);
+
+    let node_ctx = test_node_ctx(1);
+    let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+    let channel_id = chan_ctx.channel_id.clone();
+    let old_setup = chan_ctx.setup.clone();
+    sc.state("A_LOCKED", json!({"eras_live": ["A"], "current": "A"}));
+
+    // Splice A → B.
+    let _s1 = sc.step("splice A -> B");
+    let mut tx_ctx = TestFundingTxContext::new();
+    tx_ctx.inputs.push(TxIn {
+        previous_output: old_setup.funding_outpoint,
+        script_sig: bitcoin::ScriptBuf::new(),
+        sequence: bitcoin::Sequence::MAX,
+        witness: bitcoin::Witness::default(),
+    });
+    chan_ctx.setup.channel_value_sat += 100_000;
+    let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+    let splice_tx = tx_ctx.to_tx();
+    assert!(funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none());
+    let new_outpoint = chan_ctx.setup.funding_outpoint;
+    sc.state("AB_PENDING", json!({"eras_live": ["A", "B"], "current": "B"}));
+
+    // Stale lock: era A's outpoint while B is current — refused.
+    let _s2 = sc.step("stale splice_locked for era A refused");
+    sc.cln_sends("lock_outpoint", Some(json!({"funding": "A", "stale": true})));
+    let stale_err = node_ctx
+        .node
+        .confirm_funding_lock(&channel_id, &old_setup.funding_outpoint)
+        .expect_err("stale funding_locked must be refused");
+    sc.expect("stale lock refused (era-blind lockout is a current-funding gate)", true);
+    sc.cln_receives("lock_outpoint_reply", Some(json!({"code": format!("{:?}", stale_err.code())})));
+
+    // Foreign lock: an outpoint from neither era — refused.
+    let _s3 = sc.step("foreign splice_locked refused");
+    let mut foreign = new_outpoint;
+    foreign.vout += 7;
+    sc.cln_sends("lock_outpoint", Some(json!({"funding": "foreign", "outpoint": foreign.to_string()})));
+    node_ctx
+        .node
+        .confirm_funding_lock(&channel_id, &foreign)
+        .expect_err("foreign funding_locked must be refused");
+    sc.expect("foreign lock refused", true);
+
+    // The real lock still works afterwards.
+    let _s4 = sc.step("correct lock for B accepted");
+    sc.cln_sends("lock_outpoint", Some(json!({"funding": "B"})));
+    node_ctx.node.confirm_funding_lock(&channel_id, &new_outpoint).expect("lock B");
+    sc.transition("AB_PENDING", "BAD_LOCK_REFUSED", "refusals then real lock");
+    sc.expect("correct lock accepted after refusals", true);
 
     sc.finish("passed");
 }
