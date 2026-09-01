@@ -225,6 +225,17 @@ impl SpliceChannelFuzz {
 
     fn attempt_swap(&mut self, vout: u8, value: u64) {
         let mut setup = make_test_channel_setup();
+        // Every splice era carries a UNIQUE funding outpoint (a real
+        // splice funds a NEW tx). The factory's fixed txid made
+        // same-vout eras collide, and crash-ea2b01b6 rode exactly that:
+        // an old era's idempotent funding_locked Ok matched the new
+        // era's colliding outpoint -> the harness inferred current-locked
+        // while the splice snapshot was open -> false invariant-5 panic
+        // on a state the protocol cannot reach.
+        let mut txid_bytes = [2u8; 32];
+        txid_bytes[..8].copy_from_slice(&(self.fundings.len() as u64).to_be_bytes());
+        setup.funding_outpoint.txid =
+            bitcoin::hash_types::Txid::from_slice(&txid_bytes).expect("era txid");
         setup.funding_outpoint.vout = vout as u32;
         setup.channel_value_sat = value;
         let prev_current = self
