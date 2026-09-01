@@ -2121,21 +2121,33 @@ impl Channel {
         remote_funding_key: &PublicKey,
         input_amount_sat: Option<u64>,
     ) -> Result<Signature, Status> {
-        if *remote_funding_key != self.setup.counterparty_points.funding_pubkey {
-            return Err(Status::invalid_argument("remote funding key mismatch"));
-        }
+        // BOLT #2: `funding_pubkey` is the public key in the 2-of-2 multisig script of
+        // BOLT #2: the funding transaction output.
+        // BOLT #2: MUST send at least one `tx_add_output`, which contains the new
+        // BOLT #2: channel's funding output based on the `funding_pubkey`s from
+        // BOLT #2: `splice_init` and `splice_ack`.
+        // BOLT #2: The splice transaction must spend the current channel funding output.
+        //
+        // The funding view an input spends decides which 2-of-2 it belongs to:
+        // keys are per-splice (splice_init/splice_ack carry fresh funding_pubkeys),
+        // and every splice in a window spends the ORIGINAL funding output — so an
+        // old-era input is signed against the ERA's remote key, not the current
+        // setup's (F1, docs/splice-trace-findings.md: CLN rotates its channel-level
+        // remote key only at mutual splice_locked, requesting the pre-rotation key
+        // against the old era's outpoint — the era-blind check refused exactly
+        // that, breaking spec-designed rotation).
         let input = tx
             .input
             .get(input_index as usize)
             .ok_or_else(|| Status::invalid_argument("splice input index out of range"))?;
-        let channel_value_sat = if input.previous_output == self.setup.funding_outpoint {
-            self.setup.channel_value_sat
+        let view = if input.previous_output == self.setup.funding_outpoint {
+            &self.setup
         } else if let Some(ref prev_setup) = self.prev_setup {
             if input.previous_output == prev_setup.funding_outpoint {
-                prev_setup.channel_value_sat
+                prev_setup
             } else if let Some(ref pp) = self.prev_prev_setup {
                 if input.previous_output == pp.funding_outpoint {
-                    pp.channel_value_sat
+                    pp
                 } else {
                     return Err(Status::invalid_argument(
                         "splice input is not the channel funding outpoint",
@@ -2151,6 +2163,10 @@ impl Channel {
                 "splice input is not the channel funding outpoint",
             ));
         };
+        if *remote_funding_key != view.counterparty_points.funding_pubkey {
+            return Err(Status::invalid_argument("remote funding key mismatch"));
+        }
+        let channel_value_sat = view.channel_value_sat;
         let input_amount_sat = input_amount_sat.unwrap_or(channel_value_sat);
         if input_amount_sat != channel_value_sat {
             return Err(Status::invalid_argument("splice input value is not the channel value"));

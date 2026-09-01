@@ -452,29 +452,37 @@ fn scenario_funding_key_rotation() {
     // setup's key — KA is refused even for the A-era input. The trace
     // records both the refusal and era A's own remote key (KA) — the
     // logical-vs-implementation divergence the tracer exists to show.
-    let _s3 = sc.step("SignSpliceTx spending A with KA (era key)");
+    // Sign the OLD funding A with its OWN era key KA — the F1 fix:
+    // accepted. The input spends era A's outpoint; its 2-of-2 is
+    // (holder, KA); CLN carries the pre-rotation key until mutual
+    // splice_locked, so this is exactly the request the live peer makes.
+    let _s3 = sc.step("SignSpliceTx spending A with KA (era key — F1 fixed)");
     let tx_a = splice_tx_spending(setup_a.funding_outpoint);
     let ka_result = node_ctx.node.with_channel(&channel_id, |chan| {
         chan.sign_splice_tx(&tx_a, 0, &key_a, Some(setup_a.channel_value_sat))
     });
-    let ka_refused = matches!(&ka_result, Err(e) if e.code() == Code::InvalidArgument);
-    sc.expect(
-        "sign A with KA — current implementation refuses (key check is era-blind)",
-        ka_refused,
-    );
-    sc.transition("AB_PENDING_KB", "DIVERGENCE_EXPOSED", "era-blind key check");
+    let ka_accepted = ka_result.is_ok();
+    sc.expect("sign A with KA accepted (era-aware check)", ka_accepted);
+    assert!(ka_accepted, "F1 regression: era-A signing with era-A key refused");
+
+    // The negative rail: era A's input with the WRONG era's key (KB) is
+    // still refused — era-aware means the key must match the spent view.
+    let kb_result = node_ctx.node.with_channel(&channel_id, |chan| {
+        chan.sign_splice_tx(&tx_a, 0, &key_b, Some(setup_a.channel_value_sat))
+    });
+    let kb_refused = matches!(&kb_result, Err(e) if e.code() == Code::InvalidArgument);
+    sc.expect("sign A with KB (wrong era key) refused", kb_refused);
+    assert!(kb_refused, "era-aware check must still refuse the wrong era's key");
+
+    sc.transition("AB_PENDING_KB", "ERA_AWARE_KEY_CHECK", "F1 fix");
     sc.state(
-        "DIVERGENCE_EXPOSED",
+        "ERA_AWARE_KEY_CHECK",
         json!({
-            "finding": "F1 (docs/splice-trace-findings.md): key check is era-blind and CLN requests with the pre-rotation key — rotation cannot splice through VLS",
-            "spec": "BOLTs 1528972 splice_init/splice_ack carry per-splice funding_pubkeys (rotation designed in)",
-            "cln": "channeld.c:499 rotates channel->funding_pubkey[REMOTE] only at mutual splice_locked; sign_splice_tx call sites (3903, 4649) pass the channel-level key",
-            "trace_evidence": "era A snapshot carries remote_funding_key=KA while only KB passes the check",
+            "fixed": "F1 (docs/splice-trace-findings.md): the remote-key check resolves the funding view by the input outpoint and requires the ERA's key",
+            "spec": "BOLTs 1528972 splice_init/splice_ack carry per-splice funding_pubkeys (rotation designed in); every window splice spends the original funding output",
+            "cln": "channeld.c:499 rotates channel->funding_pubkey[REMOTE] only at mutual splice_locked; sign_splice_tx call sites (3903, 4649) pass the channel-level (pre-rotation) key",
+            "negative_rail": "wrong-era key on a spent view stays refused",
         }),
-    );
-    assert!(
-        ka_refused,
-        "if this starts passing, the key check became era-aware — update this scenario"
     );
 
     sc.finish("passed");
