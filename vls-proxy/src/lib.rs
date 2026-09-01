@@ -6,6 +6,8 @@ pub mod connection;
 pub mod grpc;
 pub mod nodefront;
 pub mod portfront;
+#[cfg(feature = "splice_trace")]
+pub mod trace_tap;
 
 #[macro_use]
 #[allow(unused_macros)]

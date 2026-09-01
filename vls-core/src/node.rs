@@ -1409,6 +1409,26 @@ impl Node {
                     };
 
                     channel.restore_payments();
+                    #[cfg(feature = "splice_trace")]
+                    if crate::trace::enabled() {
+                        let chan_hex = hex::encode(channel_id0.as_slice());
+                        if let Some(pp) = &channel.prev_prev_setup {
+                            crate::trace::sink::label_for(&chan_hex, &pp.funding_outpoint);
+                        }
+                        if let Some(pv) = &channel.prev_setup {
+                            crate::trace::sink::label_for(&chan_hex, &pv.funding_outpoint);
+                        }
+                        crate::trace::sink::label_for(&chan_hex, &channel.setup.funding_outpoint);
+                        crate::trace::emit(
+                            crate::trace::TraceEvent::vls(crate::trace::EventPayload::Restored {
+                                detail: Some(serde_json::json!({
+                                    "note": "funding_locked marker is not persisted; restored as None",
+                                })),
+                            })
+                            .channel_hex(channel_id0.as_slice())
+                            .after(Some(crate::trace::snapshot_channel(&channel))),
+                        );
+                    }
                     let slot = Arc::new(Mutex::new(ChannelSlot::Ready(channel)));
                     let provider = Box::new(ChannelCommitmentPointProvider::new(slot.clone()));
                     let monitor = monitor_base.as_monitor(provider);
@@ -1968,6 +1988,35 @@ impl Node {
                     return Ok(c.clone());
                 }
                 if !c.is_splice_compatible(&setup) {
+                    #[cfg(feature = "splice_trace")]
+                    if crate::trace::enabled() {
+                        crate::trace::emit(
+                            crate::trace::TraceEvent::vls(
+                                crate::trace::EventPayload::SpliceSetup {
+                                    from_outpoint: c.setup.funding_outpoint.to_string(),
+                                    to_outpoint: setup.funding_outpoint.to_string(),
+                                    value_sat: setup.channel_value_sat,
+                                    push_msat: setup.push_value_msat,
+                                    remote_funding_key: setup
+                                        .counterparty_points
+                                        .funding_pubkey
+                                        .to_string(),
+                                    prev_chain_depth: if c.prev_prev_setup.is_some() {
+                                        2
+                                    } else {
+                                        1
+                                    },
+                                },
+                            )
+                            .channel_hex(channel_id0.as_slice())
+                            .before(crate::trace::snap_opt(c))
+                            .result(crate::trace::TraceResult {
+                                status: "rejected".into(),
+                                code: Some("InvalidArgument".into()),
+                                message: Some("incompatible splice setup".into()),
+                            }),
+                        );
+                    }
                     return Err(invalid_argument(format!(
                         "incompatible splice setup for channel {}",
                         channel_id0
@@ -1991,6 +2040,8 @@ impl Node {
                     )));
                 }
                 let old_funding_outpoint = c.setup.funding_outpoint;
+                #[cfg(feature = "splice_trace")]
+                let __trace_before = crate::trace::snap_opt(c);
                 let mut spliced = c.clone();
                 // R10.4/F1: snapshot the retiring funding's commitment
                 // state BEFORE the new funding's flow rebuilds the
@@ -2035,6 +2086,41 @@ impl Node {
                 self.persister
                     .update_channel(&self.get_id(), &spliced)
                     .map_err(|_| internal_error("persist failed"))?;
+                #[cfg(feature = "splice_trace")]
+                if crate::trace::enabled() {
+                    {
+                        let chan_hex = hex::encode(channel_id0.as_slice());
+                        crate::trace::sink::label_for(&chan_hex, &old_funding_outpoint);
+                        crate::trace::sink::label_for(&chan_hex, &setup.funding_outpoint);
+                    }
+                    crate::trace::emit(
+                        crate::trace::TraceEvent::vls(crate::trace::EventPayload::SpliceSetup {
+                            from_outpoint: old_funding_outpoint.to_string(),
+                            to_outpoint: setup.funding_outpoint.to_string(),
+                            value_sat: setup.channel_value_sat,
+                            push_msat: setup.push_value_msat,
+                            remote_funding_key: setup
+                                .counterparty_points
+                                .funding_pubkey
+                                .to_string(),
+                            prev_chain_depth: if spliced.prev_prev_setup.is_some() { 2 } else { 1 },
+                        })
+                        .channel_hex(channel_id0.as_slice())
+                        .before(__trace_before)
+                        .after(crate::trace::snap_opt(&spliced))
+                        .result(crate::trace::TraceResult::ok()),
+                    );
+                    crate::trace::emit(
+                        crate::trace::TraceEvent::vls(crate::trace::EventPayload::MonitorUpdate {
+                            what: "tracker_listener_swap".into(),
+                            detail: Some(serde_json::json!({
+                                "removed": old_funding_outpoint.txid.to_string(),
+                                "added": setup.funding_outpoint.txid.to_string(),
+                            })),
+                        })
+                        .channel_hex(channel_id0.as_slice()),
+                    );
+                }
                 return Ok(spliced);
             }
         }
@@ -2135,6 +2221,24 @@ impl Node {
         self.persister
             .update_channel(&self.get_id(), &chan)
             .map_err(|_| internal_error("persist failed"))?;
+        #[cfg(feature = "splice_trace")]
+        if crate::trace::enabled() {
+            crate::trace::sink::label_for(
+                &hex::encode(chan.id0.as_slice()),
+                &chan.setup.funding_outpoint,
+            );
+            crate::trace::emit(
+                crate::trace::TraceEvent::vls(crate::trace::EventPayload::SetupChannel {
+                    outpoint: chan.setup.funding_outpoint.to_string(),
+                    value_sat: chan.setup.channel_value_sat,
+                    push_msat: chan.setup.push_value_msat,
+                    remote_funding_key: chan.setup.counterparty_points.funding_pubkey.to_string(),
+                })
+                .channel_hex(chan.id0.as_slice())
+                .after(crate::trace::snap_opt(&chan))
+                .result(crate::trace::TraceResult::ok()),
+            );
+        }
 
         Ok(chan)
     }

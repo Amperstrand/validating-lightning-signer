@@ -16,6 +16,8 @@ grpc = ["tokio", "tonic", "async-stream", "url", "backon"]
 main = ["clap", "ctrlc"]
 log_pretty_print = ["vls-core/log_pretty_print", "vls-frontend/log_pretty_print", "vls-protocol-signer/log_pretty_print"]
 debug = ["vls-core/debug", "vls-protocol-signer/debug"]
+# live CLN↔VLS boundary tap for splice tracing (see docs/splice-trace.md)
+splice_trace = ["vls-core/splice_trace"]
 system-test = ["serde_json", "tempfile", "vls-core/test_utils"]
 heapmon_requests = []
 developer = ["vls-protocol/developer", "vls-protocol-signer/developer", "vls-protocol-client/developer"]

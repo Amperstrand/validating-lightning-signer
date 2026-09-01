@@ -1,6 +1,8 @@
 pub mod htlc;
 pub mod invoice;
 pub mod key;
+#[cfg(feature = "splice_trace")]
+pub mod scenario;
 
 use std::time::{Duration, SystemTime};
 

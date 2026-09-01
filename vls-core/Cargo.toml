@@ -44,6 +44,10 @@ txoo-source = ["txoo/source"]
 # For stress-testing
 shuttle = ["dep:shuttle"]
 
+# Structured splice tracing: JSONL events + browser visualizer.
+# Off by default — zero cost in production builds.
+splice_trace = ["std", "dep:serde_json"]
+
 [lib]
 name = "lightning_signer"
 path = "src/lib.rs"
@@ -81,6 +85,8 @@ hashbrown = "0.13.2"
 ahash = { version = "0.8.7", default-features = false }
 
 itertools = { version = "0.10", default-features = false }
+
+serde_json = { workspace = true, optional = true, features = ["std"] }
 
 [dependencies.serde_bolt]
 version = "0.5.2"
@@ -137,7 +143,7 @@ features = ["serde", "bitcoinconsensus", "rand-std"]
 
 # fake dependency to turn on the test_utils feature when testing
 [dev-dependencies.vls-core]
-features = ["test_utils"]
+features = ["test_utils", "splice_trace"]
 path = "."
 
 [lints.rust]

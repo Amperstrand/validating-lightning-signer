@@ -2087,6 +2087,40 @@ impl Channel {
         remote_funding_key: &PublicKey,
         input_amount_sat: Option<u64>,
     ) -> Result<Signature, Status> {
+        let __trace_before = trace_before!(self);
+        let __result =
+            self.sign_splice_tx_inner(tx, input_index, remote_funding_key, input_amount_sat);
+        trace_op!(
+            self,
+            crate::trace::EventPayload::SignSpliceTx {
+                txid: tx.compute_txid().to_string(),
+                input_index,
+                input_outpoint: tx
+                    .input
+                    .get(input_index as usize)
+                    .map(|i| i.previous_output.to_string())
+                    .unwrap_or_default(),
+                era: crate::trace::sink::era_of_tx(self, tx).map(|(_, l)| l),
+                remote_funding_key: remote_funding_key.to_string(),
+                input_amount_sat,
+            },
+            if crate::trace::enabled() {
+                vec![crate::trace::artifact_tx(tx, self.network())]
+            } else {
+                vec![]
+            },
+            __result
+        );
+        __result
+    }
+
+    fn sign_splice_tx_inner(
+        &self,
+        tx: &Transaction,
+        input_index: u32,
+        remote_funding_key: &PublicKey,
+        input_amount_sat: Option<u64>,
+    ) -> Result<Signature, Status> {
         if *remote_funding_key != self.setup.counterparty_points.funding_pubkey {
             return Err(Status::invalid_argument("remote funding key mismatch"));
         }
@@ -2142,6 +2176,36 @@ impl Channel {
     /// the previous one while a splice is in flight. A commitment
     /// spending neither is not ours.
     pub fn setup_for_tx(&self, tx: &Transaction) -> Result<ChannelSetup, Status> {
+        let __result = self.setup_for_tx_inner(tx);
+        trace_op!(
+            self,
+            crate::trace::EventPayload::FundingViewResolved {
+                txid: tx.compute_txid().to_string(),
+                resolved_outpoint: match &__result {
+                    Ok(v) => v.funding_outpoint.to_string(),
+                    Err(_) => String::new(),
+                },
+                era: match &__result {
+                    Ok(v) => crate::trace::sink::era_of_tx(self, tx)
+                        .map(|(_, label)| label)
+                        .or_else(|| {
+                            crate::trace::sink::label_for(
+                                &hex::encode(self.id0.as_slice()),
+                                &v.funding_outpoint,
+                            )
+                            .into()
+                        }),
+                    Err(_) => None,
+                },
+                matched: crate::trace::sink::era_of_tx(self, tx).is_some(),
+            },
+            vec![],
+            __result
+        );
+        __result
+    }
+
+    fn setup_for_tx_inner(&self, tx: &Transaction) -> Result<ChannelSetup, Status> {
         for input in &tx.input {
             if input.previous_output == self.setup.funding_outpoint {
                 return Ok(self.setup.clone());
@@ -2187,6 +2251,31 @@ impl Channel {
     /// Record the funding lock (CLN's hsmd_lock_outpoint after mutual
     /// splice_locked). Idempotent; must match the current funding.
     pub fn confirm_funding_locked(&mut self, outpoint: &OutPoint) -> Result<(), Status> {
+        let __trace_before = trace_before!(self);
+        let __result = self.confirm_funding_locked_inner(outpoint);
+        trace_op!(
+            self,
+            crate::trace::EventPayload::FundingLocked {
+                outpoint: outpoint.to_string(),
+                era: crate::trace::sink::label_for(&hex::encode(self.id0.as_slice()), outpoint)
+                    .into(),
+                retired: match &__trace_before {
+                    Some(snap) => snap
+                        .eras
+                        .iter()
+                        .filter(|e| e.lifecycle == "previous" || e.lifecycle == "prev_prev")
+                        .map(|e| e.label.clone())
+                        .collect(),
+                    None => vec![],
+                },
+            },
+            vec![],
+            __result
+        );
+        __result
+    }
+
+    fn confirm_funding_locked_inner(&mut self, outpoint: &OutPoint) -> Result<(), Status> {
         if self.funding_locked == Some(*outpoint) {
             return Ok(());
         }
@@ -2752,6 +2841,50 @@ impl Channel {
         offered_htlcs: Vec<HTLCInfo2>,
         received_htlcs: Vec<HTLCInfo2>,
     ) -> Result<Signature, Status> {
+        let __trace_before = trace_before!(self);
+        let __trace_htlc_count = offered_htlcs.len() + received_htlcs.len();
+        let __result = self.sign_counterparty_commitment_tx_inner(
+            tx,
+            output_witscripts,
+            remote_per_commitment_point,
+            commitment_number,
+            feerate_per_kw,
+            offered_htlcs,
+            received_htlcs,
+        );
+        trace_op!(
+            self,
+            crate::trace::EventPayload::SignCounterpartyCommitment {
+                commitment_number,
+                feerate_per_kw,
+                funding_outpoint: crate::trace::sink::era_of_tx(self, tx)
+                    .map(|(o, _)| o)
+                    .unwrap_or_default(),
+                era: crate::trace::sink::era_of_tx(self, tx).map(|(_, l)| l),
+                to_holder_sat: None,
+                to_counterparty_sat: None,
+                htlc_count: __trace_htlc_count,
+            },
+            if crate::trace::enabled() {
+                vec![crate::trace::artifact_tx(tx, self.network())]
+            } else {
+                vec![]
+            },
+            __result
+        );
+        __result
+    }
+
+    fn sign_counterparty_commitment_tx_inner(
+        &mut self,
+        tx: &Transaction,
+        output_witscripts: &[Vec<u8>],
+        remote_per_commitment_point: &PublicKey,
+        commitment_number: u64,
+        feerate_per_kw: u32,
+        offered_htlcs: Vec<HTLCInfo2>,
+        received_htlcs: Vec<HTLCInfo2>,
+    ) -> Result<Signature, Status> {
         if tx.output.len() != output_witscripts.len() {
             return Err(invalid_argument("len(tx.output) != len(witscripts)"));
         }
@@ -3152,6 +3285,52 @@ impl Channel {
     // BOLT #2: MUST send an `error` and fail the channel.
     // REF the view-parameterized dispatch (setup_for_tx routes by the tx's funding input)
     pub fn validate_holder_commitment_tx(
+        &mut self,
+        tx: &Transaction,
+        output_witscripts: &[Vec<u8>],
+        commitment_number: u64,
+        feerate_per_kw: u32,
+        offered_htlcs: Vec<HTLCInfo2>,
+        received_htlcs: Vec<HTLCInfo2>,
+        counterparty_commit_sig: &Signature,
+        counterparty_htlc_sigs: &[Signature],
+    ) -> Result<(), Status> {
+        let __trace_before = trace_before!(self);
+        let __trace_htlc_count = offered_htlcs.len() + received_htlcs.len();
+        let __result = self.validate_holder_commitment_tx_inner(
+            tx,
+            output_witscripts,
+            commitment_number,
+            feerate_per_kw,
+            offered_htlcs,
+            received_htlcs,
+            counterparty_commit_sig,
+            counterparty_htlc_sigs,
+        );
+        trace_op!(
+            self,
+            crate::trace::EventPayload::ValidateHolderCommitment {
+                commitment_number,
+                feerate_per_kw,
+                funding_outpoint: crate::trace::sink::era_of_tx(self, tx)
+                    .map(|(o, _)| o)
+                    .unwrap_or_default(),
+                era: crate::trace::sink::era_of_tx(self, tx).map(|(_, l)| l),
+                to_holder_sat: None,
+                to_counterparty_sat: None,
+                htlc_count: __trace_htlc_count,
+            },
+            if crate::trace::enabled() {
+                vec![crate::trace::artifact_tx(tx, self.network())]
+            } else {
+                vec![]
+            },
+            __result
+        );
+        __result
+    }
+
+    fn validate_holder_commitment_tx_inner(
         &mut self,
         tx: &Transaction,
         output_witscripts: &[Vec<u8>],
