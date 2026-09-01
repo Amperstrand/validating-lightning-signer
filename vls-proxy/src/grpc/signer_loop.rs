@@ -389,6 +389,8 @@ impl<C: 'static + Client> SignerLoop<C> {
     }
 
     fn handle_message(&mut self, message: Vec<u8>, is_oneway: bool) -> Result<Vec<u8>> {
+        #[cfg(feature = "splice_trace")]
+        let __tapped = crate::trace_tap::tap_request(&message, &self.log_prefix);
         let result = (|| {
             info!(
                 "read loop {}: request {}{}",
@@ -429,6 +431,8 @@ impl<C: 'static + Client> SignerLoop<C> {
             error!("read loop {}: signer retry failed: {:?}", self.log_prefix, e);
             e
         })?;
+        #[cfg(feature = "splice_trace")]
+        crate::trace_tap::tap_response(__tapped, &self.log_prefix, &result);
         Ok(result)
     }
 

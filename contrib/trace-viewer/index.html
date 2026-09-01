@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VLS splice trace viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="topbar">
+  <h1>vls-trace/1 · splice state-machine viewer</h1>
+  <div id="load-controls">
+    <label class="filelabel">open trace file(s)
+      <input type="file" id="file-input" multiple accept=".jsonl,.ndjson,text/plain">
+    </label>
+    <span id="load-status" class="muted">no trace loaded</span>
+  </div>
+</header>
+
+<div id="infobar" class="hidden">
+  <span id="trace-meta"></span>
+  <span id="parse-warnings" class="warn hidden"></span>
+</div>
+
+<div id="controls">
+  <button id="btn-prev" title="←">⏮ prev</button>
+  <button id="btn-next" title="→">next ⏭</button>
+  <select id="jump-step"><option value="">jump to step…</option></select>
+  <span class="spacer"></span>
+  <label><input type="checkbox" data-actor="driver" checked> DRIVER</label>
+  <label><input type="checkbox" data-actor="cln" checked> CLN</label>
+  <label><input type="checkbox" data-actor="vls" checked> VLS</label>
+  <input type="text" id="type-filter" placeholder="filter event type…">
+  <label class="toggle"><input type="checkbox" id="only-rejects"> rejects only</label>
+  <label class="toggle"><input type="checkbox" id="only-transitions"> state transitions only</label>
+  <label class="toggle"><input type="checkbox" id="only-disagreements"> disagreements only</label>
+  <span class="spacer"></span>
+  <span id="position" class="muted"></span>
+</div>
+
+<main id="layout">
+  <section id="timeline-panel">
+    <div id="lanes">
+      <div class="lane" data-lane="driver"><h2>TEST DRIVER</h2><div class="events"></div></div>
+      <div class="lane" data-lane="cln"><h2>CLN</h2><div class="events"><div id="cln-empty" class="muted small">no CLN observations in this trace — the lane renders empty by design (missing-side tolerance)</div></div></div>
+      <div class="lane" data-lane="vls"><h2>VLS</h2><div class="events"></div></div>
+    </div>
+    <svg id="link-overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+  </section>
+
+  <aside id="side">
+    <div id="brains">
+      <h2>brains @ selected point</h2>
+      <div class="brain" id="brain-driver"><h3>DRIVER EXPECTATION</h3><div class="body">—</div></div>
+      <div class="brain" id="brain-cln"><h3>CLN BRAIN</h3><div class="body">—</div></div>
+      <div class="brain" id="brain-vls"><h3>VLS BRAIN</h3><div class="body">—</div></div>
+      <div id="disagreement" class="hidden"></div>
+    </div>
+    <div id="era-panel">
+      <h2>funding eras</h2>
+      <div id="era-graph"></div>
+      <div class="small muted">click an era to filter the timeline</div>
+    </div>
+    <div id="machine-panel">
+      <h2>declared state machine</h2>
+      <div id="machine-graph" class="small">no declared states in trace</div>
+    </div>
+  </aside>
+</main>
+
+<section id="detail-panel" class="hidden">
+  <div id="detail-header"></div>
+  <div id="detail-tabs">
+    <button data-tab="fields" class="active">fields</button>
+    <button data-tab="diff">before → after</button>
+    <button data-tab="artifacts">artifacts</button>
+    <button data-tab="raw">raw JSON</button>
+  </div>
+  <div id="detail-body"></div>
+</section>
+
+<footer id="foot" class="muted small">
+  keyboard: ←/→ step · esc clear selection · schema vls-trace/1 · docs: docs/splice-trace.md
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
