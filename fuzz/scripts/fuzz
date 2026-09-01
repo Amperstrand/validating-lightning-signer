@@ -4,3 +4,13 @@
 # since we don't have unsafe code and we are mostly looking for panics
 
 cargo fuzz run -j 16 -s none channel -- -timeout=1
+
+# R12.2 splice-aware harness: seeded from the three deterministic seed
+# sequences (cargo run --bin gen-splice-seeds writes
+# corpus/splice_channel/seed_*, round-trip asserted). The splice
+# actions run heavier than the channel ones, hence -timeout=10.
+# Campaign record 2026-09-01 (#96): clean 40min/1.33M-exec run on the
+# quiet VM, 0 oom/0 timeout/0 crash after the era-unique-txid harness
+# fix (5e566f5) — the pre-fix invariant-5 crash input is banked at
+# fuzz/regression/splice_channel/ and replays clean.
+cargo fuzz run -j 16 -s none splice_channel -- -timeout=10
