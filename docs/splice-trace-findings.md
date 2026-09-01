@@ -102,3 +102,46 @@ that window validates against the baseline only. Known, visible in every trace d
 - The spec's completion diagram IS the tracer's era model: one commitment set per
   live funding ("Nodes keep track of multiple commitment transactions (one for the
   current funding transaction and one for each splice transaction)").
+
+---
+
+## F5 — the dev-box rbf/commit_crash "load stalls" are ONE named mechanism: era-B value rejections in a retry loop (2026-09-01, first corpus forensics)
+
+**What the trace proved** (first traced 12/12 ladder, dev box, run dirs
+`test-artifacts/trace-corpus/20260901-192332/` in the playground):
+the two chronic non-green splice tests share an identical, now-captured
+signature —
+
+- `test_splice_rbf` (rc=124, reaped at 420s): **14 consecutive**
+  `validate_holder_commitment` rejections, every one
+  `"commitment totals exceed the funding value"` (InvalidArgument),
+  era **B**, commitment **num 1**, on `vls:l1`; onset at seq 131
+  immediately after a HEALTHY validation (seq 128, accepted) — l1 was
+  mid-flow, not wedged from the start.
+- `test_commit_crash_splice` (rc=1, convergence TimeoutError): **12**
+  rejections, same message, same shape.
+
+The loop pattern in the tail — `validate(reject) → funding_view_resolved
+×2 → validate(reject)` — is the proxy's terminal-error retry cycle
+(the known decoded behavior: terminal error → empty reply →
+TransportTransient → re-send) re-presenting the same commitment
+indefinitely while channeld waits and the test times out. The trace
+shows the signer never crashes and every funding-view resolution keeps
+succeeding: the stall is one deterministic rejection × retry loop.
+
+**Relation to known classes**: same message family as the
+disconnect-tier era-mixing underflow (fixed at 2a588b44 via the
+era-aware resolvers + claimable_balances per-era valuation) but on a
+DIFFERENT path — the rbf A→B→C supersession window and the
+commit-crash restart window, era-B commitments valued against a view
+that rejects them. NOT the strict94 class-A "recomposed tx mismatch"
+(different check). This is a live behavioral finding on
+`inr2-splice-dev`, deliberately NOT fixed here: the observability
+deliverable captures it; the behavioral correction stays separable
+(the value-check arithmetic on the supersession/restart paths).
+
+**Debug acceleration**: this decode took ONE command against the run
+dirs. The same signature cost multi-day farm forensics in the
+pre-tracer era (STATE.md 2026-08-31 IV/V). The corpus entry point:
+`trace.jsonl` per run + `trace.llm.md`; filter
+`validate_holder_commitment + rejected` (one checkbox in the viewer).
