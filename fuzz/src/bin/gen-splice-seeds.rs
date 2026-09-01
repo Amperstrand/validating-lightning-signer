@@ -139,6 +139,26 @@ fn seeds() -> Vec<(&'static str, Vec<SpliceAction>)> {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 {
+        if args[1] == "--decode" {
+            // Triage mode: decode any corpus/crash artifact back into
+            // its action sequence (crash bytes are exactly this format).
+            for path in &args[2..] {
+                let bytes = std::fs::read(path).expect("read artifact");
+                let actions =
+                    <Vec<SpliceAction> as Arbitrary>::arbitrary_take_rest(Unstructured::new(&bytes))
+                        .unwrap_or_else(|e| panic!("{path}: not a splice_channel input: {e}"));
+                println!("{path}: {} actions", actions.len());
+                for (i, a) in actions.iter().enumerate() {
+                    println!("  {i:3}: {a:?}");
+                }
+            }
+            return;
+        }
+        eprintln!("usage: gen-splice-seeds [--decode FILE...]");
+        std::process::exit(64);
+    }
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("corpus/splice_channel");
     std::fs::create_dir_all(&dir).expect("create corpus dir");
     for (name, actions) in seeds() {
