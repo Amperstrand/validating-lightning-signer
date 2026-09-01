@@ -143,10 +143,12 @@ lightningd → wrapper → vlsd/proxy:
 Artifacts: one `cln-tap-<pid>.jsonl` per proxy (real hsmd boundary
 traffic, source `proxy-tap`) and one `vls-<pid>.jsonl` per vlsd (real
 signer events with era labels). Merge them in the viewer:
-`?trace=cln-tap-X.jsonl,vls-Y.jsonl` (see docs/splice-trace-live.png —
-era A locked at 1M sat, era B current at 1.1M sat from the live
-splice-in). No driver lane in live runs yet — the pytest driver would
-emit it (schema-ready).
+`?trace=driver-*.jsonl,cln-tap-X.jsonl,vls-Y.jsonl` for the full
+three-brain live view (docs/splice-trace-live.png — era A locked at
+1M sat, era B current at 1.1M sat; docs/splice-trace-three-brain.png —
+DRIVER/CLN/VLS lanes all populated from three separate processes,
+merged by timestamp). The DRIVER lane loads automatically via the
+splice-dev pytest plugin (env-gated; also emits per-test invariants).
 
 Viewer layout reference: `docs/splice-trace-viewer.png` (RBF A→B→C
 scenario, supersession event selected, before→after diff open).
