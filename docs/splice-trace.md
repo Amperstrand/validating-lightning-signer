@@ -126,14 +126,27 @@ http://localhost:8799/index.html?trace=rbf_a_b_c.jsonl
 The viewer also works fully offline: open `contrib/trace-viewer/index.html`
 directly and pick a `.jsonl` file via the file chooser (no server needed).
 
-Live CLN runs: build the proxy with `--features splice_trace` and set
-`VLS_TRACE_DIR` in the vls-proxy/vlsd environment — the boundary tap
-(`vls-proxy/src/trace_tap.rs`) writes a `proxy-cln-tap.jsonl` (or
-`VLS_TRACE_SCENARIO`-named file) alongside the vlsd trace; open both in
-the viewer (`?trace=a.jsonl,b.jsonl` or pick both files) for the merged
-three-lane view. In the splice-dev harness that means building
-`remote_hsmd_socket` with the feature and exporting `VLS_TRACE_DIR` in
-`splice-dev/bin/vls-proxy-wrapper.sh`.
+Live CLN runs (PROVEN 2026-09-01, gate green in 45s with 110 events
+across 4 files): build the traced binaries once —
+
+    cargo build -p vlsd --features splice_trace
+    cargo build -p vls-proxy --features grpc,main,developer,splice_trace --bin remote_hsmd_socket
+
+(the `developer` feature is mandatory in the splice-dev harness — pyln
+sends hsmd_dev_preinit and a proxy without it dies at the handshake) —
+then run the gate with the env set; it inherits through pytest →
+lightningd → wrapper → vlsd/proxy:
+
+    VLS_TRACE_DIR=$(pwd)/target/splice-traces-live \
+      bash splice-dev/run-cln-splicing.sh "tests/test_splicing.py::test_splice"
+
+Artifacts: one `cln-tap-<pid>.jsonl` per proxy (real hsmd boundary
+traffic, source `proxy-tap`) and one `vls-<pid>.jsonl` per vlsd (real
+signer events with era labels). Merge them in the viewer:
+`?trace=cln-tap-X.jsonl,vls-Y.jsonl` (see docs/splice-trace-live.png —
+era A locked at 1M sat, era B current at 1.1M sat from the live
+splice-in). No driver lane in live runs yet — the pytest driver would
+emit it (schema-ready).
 
 Viewer layout reference: `docs/splice-trace-viewer.png` (RBF A→B→C
 scenario, supersession event selected, before→after diff open).
