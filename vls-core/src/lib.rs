@@ -30,6 +30,10 @@ pub mod chain;
 /// Various utilities
 #[macro_use]
 pub mod util;
+/// Canonical splice/state-machine tracing (feature `splice_trace`;
+/// the macros are always defined — no-ops without the feature)
+#[macro_use]
+pub mod trace;
 /// Channel
 #[macro_use]
 pub mod channel;

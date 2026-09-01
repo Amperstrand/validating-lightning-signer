@@ -956,9 +956,12 @@ impl ChainMonitorBase {
         self.get_state().diagnostic(is_closed)
     }
 
-    // Add this getter method
-    fn get_state(&self) -> MutexGuard<'_, State> {
+    pub(crate) fn get_state(&self) -> MutexGuard<'_, State> {
         self.state.lock().expect("lock")
+    }
+
+    pub(crate) fn watched_funding_txids(&self) -> Vec<Txid> {
+        self.get_state().funding_txids.clone()
     }
 }
 
