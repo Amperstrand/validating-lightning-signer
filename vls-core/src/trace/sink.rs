@@ -276,12 +276,27 @@ impl Drop for TraceSink {
     }
 }
 
-/// Emit an event into the process's current sink (no-op when none).
+/// Emit an event into the process's current sink. When the environment
+/// opted in but no sink was installed yet (a long-running binary like
+/// vlsd), installs a per-process default first — filenames carry the
+/// pid so one trace dir can hold several concurrent processes (the
+/// per-node vlsd farm shape); `VLS_TRACE_SCENARIO` overrides the name.
 pub fn emit(ev: TraceEvent) {
-    let sink = current_slot().lock().unwrap().clone();
-    if let Some(sink) = sink {
-        sink.emit_local(ev);
+    let mut cur = current_slot().lock().unwrap();
+    if cur.is_none() {
+        if !enabled() && !init_from_env() {
+            return;
+        }
+        let name = std::env::var("VLS_TRACE_SCENARIO")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("vls-{}", std::process::id()));
+        *cur = TraceSink::install(&name);
+        if cur.is_none() {
+            return;
+        }
     }
+    cur.as_ref().unwrap().emit_local(ev);
 }
 
 /// Convenience for instrumented code: capture the before-snapshot iff

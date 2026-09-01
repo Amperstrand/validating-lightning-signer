@@ -31,9 +31,13 @@ fn tap_enabled() -> bool {
     // the viewer merges it with the vlsd-side and driver-side traces).
     static INSTALL: std::sync::Once = std::sync::Once::new();
     INSTALL.call_once(|| {
-        lightning_signer::trace::TraceSink::install(
-            &std::env::var("VLS_TRACE_SCENARIO").unwrap_or_else(|_| "proxy-cln-tap".into()),
-        );
+        // per-process name: the farm runs one proxy per lightningd node
+        // in a shared VLS_TRACE_DIR — fixed names would clobber
+        let name = std::env::var("VLS_TRACE_SCENARIO")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("cln-tap-{}", std::process::id()));
+        lightning_signer::trace::TraceSink::install(&name);
     });
     true
 }

@@ -21,6 +21,7 @@ log_pretty_print = ["vls-core/log_pretty_print"]
 debug_node_state = []
 debug = ["vls-core/debug", "debug_node_state"]
 developer = ["vls-protocol/developer"]
+splice_trace = ["vls-core/splice_trace"]
 
 [dependencies]
 vls-core = { path = "../vls-core", version = "0.15.0-rc.1", default-features = false }

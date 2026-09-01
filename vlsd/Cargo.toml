@@ -16,6 +16,7 @@ grpc = ["tokio", "tokio-stream", "tonic", "prost", "async-stream", "url"]
 main = ["clap", "toml", "ctrlc", "fern"]
 log_pretty_print = ["vls-core/log_pretty_print", "vls-frontend/log_pretty_print", "vls-protocol-signer/log_pretty_print", "vls-util/log_pretty_print"]
 heapmon_requests = []
+splice_trace = ["vls-protocol-signer/splice_trace"]
 
 [dependencies]
 vls-core = { path = "../vls-core", version = "0.15.0-rc.1", features = ["use_backtrace"] }
