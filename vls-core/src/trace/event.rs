@@ -222,6 +222,13 @@ pub enum EventPayload {
         #[serde(skip_serializing_if = "Option::is_none")]
         detail: Option<Value>,
     },
+    /// State checkpoint after a fuzz/invariant step (the same snapshot
+    /// model the deterministic scenarios observe).
+    SnapshotCheckpoint {
+        /// what produced the checkpoint (action name, invariant id…)
+        label: String,
+        step: u64,
+    },
     /// Signer restored from persistence (restart scenario leg).
     Restored {
         #[serde(skip_serializing_if = "Option::is_none")]

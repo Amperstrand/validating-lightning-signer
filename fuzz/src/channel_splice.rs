@@ -84,9 +84,10 @@ impl SpliceChannelFuzz {
     }
 
     pub fn run(&mut self, data: Vec<SpliceAction>) {
-        for action in data {
+        for (step, action) in data.into_iter().enumerate() {
             #[cfg(feature = "debug")]
             println!("{:?}", action);
+            let __label = format!("{:?}", action);
             match action {
                 SpliceAction::SetupChannelSplice {
                     funding_outpoint_idx,
@@ -199,6 +200,26 @@ impl SpliceChannelFuzz {
                 }
             }
             self.check_invariants();
+            // The trace checkpoint: fuzz and deterministic tests observe
+            // the SAME snapshot model — a fuzzer-found panic carries its
+            // full state history in JSONL (viewable like any scenario).
+            #[cfg(feature = "splice_trace")]
+            if lightning_signer::trace::enabled() {
+                let label = __label.clone();
+                let _ = self.node.with_channel(&self.channel_id, |chan| {
+                    lightning_signer::trace::emit(
+                        lightning_signer::trace::TraceEvent::vls(
+                            lightning_signer::trace::EventPayload::SnapshotCheckpoint {
+                                label,
+                                step: step as u64,
+                            },
+                        )
+                        .channel_hex(chan.id0.as_slice())
+                        .after(Some(lightning_signer::trace::snapshot_channel(chan))),
+                    );
+                    Ok(())
+                });
+            }
         }
     }
 
