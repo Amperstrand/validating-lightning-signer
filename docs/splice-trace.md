@@ -236,8 +236,13 @@ less <run-dir>/trace.llm.md
 The three-brain live view is proven: `docs/splice-trace-three-brain.png`
 (DRIVER/CLN/VLS lanes all populated from three separate processes — pytest
 plugin + proxy taps + vlsd — merged by timestamp; first proof 2026-09-01,
-gate green in 42s, 113 events across 5 files), and
-`docs/splice-trace-live.png` (era A locked at 1M sat, era B current at
+gate green in 42s, 113 events across 5 files),
+`docs/splice-trace-framework-live.png` (the full framework: per-instance
+sub-lanes cln:l1/cln:l2/vls:l1/vls:l2, provenance badges, the sign_splice_tx
+event selected with all three brains populated — driver step, CLN
+"current funding A / sent SignSpliceTx (proxy-tap)", VLS "A [locked] …
+nums holder 1 cp 1 revoke 0 / tags holder→A cp→A / chain locked depth=6"),
+and `docs/splice-trace-live.png` (era A locked at 1M sat, era B current at
 1.1M sat from the live splice-in). Viewer layout reference:
 `docs/splice-trace-viewer.png` (RBF A→B→C scenario, supersession event
 selected, before→after diff open).

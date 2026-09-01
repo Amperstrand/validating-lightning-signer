@@ -83,7 +83,10 @@ def _detail_lines(detail: Optional[Dict]) -> List[str]:
 def render(events: List[Dict], manifest: Optional[Dict] = None) -> str:
     """Render events to markdown. Deterministic for a fixed input list."""
     lines: List[str] = []
-    scenario_ids = sorted({str(e.get("scenario_id")) for e in events if e.get("scenario_id")})
+    if manifest and manifest.get("scenario_ids"):
+        scenario_ids = [str(s) for s in manifest["scenario_ids"]]
+    else:
+        scenario_ids = sorted({str(e.get("scenario_id")) for e in events if e.get("scenario_id")})
     header = "# lightning-trace/1 — %s (%d events)" % (
         ", ".join(scenario_ids) or "<no-scenario>", len(events)
     )

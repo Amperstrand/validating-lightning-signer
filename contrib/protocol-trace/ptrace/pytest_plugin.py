@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 
 from .schema import TraceWriter
@@ -112,13 +113,16 @@ def _install_pyln_hooks(trace_dir: str) -> None:
     orig_init = pyln_utils.LightningNode.__init__
     orig_restart = pyln_utils.LightningNode.restart
 
+    # LightningRpc.__getattr__ fabricates an RPC wrapper for any unknown
+    # attribute name (getattr-with-default therefore NEVER returns the
+    # default) — instance caches must read __dict__ directly.
     def _instance_of(rpc_self):
-        return getattr(rpc_self, "_ptrace_instance", None)
+        return rpc_self.__dict__.get("_ptrace_instance")
 
     def _observer_for(rpc_self):
         from .cln_observer import ClnObserver
 
-        obs = getattr(rpc_self, "_ptrace_observer", None)
+        obs = rpc_self.__dict__.get("_ptrace_observer")
         if obs is None:
             obs = ClnObserver(_writer, _instance_of(rpc_self))
             rpc_self._ptrace_observer = obs
@@ -129,6 +133,8 @@ def _install_pyln_hooks(trace_dir: str) -> None:
         try:
             ldir = str(getattr(self, "lightning_dir", ""))
             instance = os.path.basename(ldir.rstrip("/")) or None
+            if instance:
+                instance = re.sub(r"^lightning-(\d+)$", r"l\1", instance)
             self.rpc._ptrace_instance = instance
             _register_node(instance, ldir, os.getpid())
         except Exception:
@@ -230,11 +236,6 @@ def pytest_runtest_logstart(nodeid, location):
         _writer.emit({"type": "scenario_start", "declared_states": [], "_nodeid": nodeid})
 
 
-def pytest_runtest_logfinish(nodeid, outcome):
-    if _writer is not None:
-        _writer.emit({"type": "scenario_end", "outcome": outcome, "_nodeid": nodeid})
-
-
 def pytest_runtest_logreport(report):
     if _writer is None or report.when != "call":
         return
@@ -245,6 +246,9 @@ def pytest_runtest_logreport(report):
         {"type": "invariant", "name": report.nodeid,
          "passed": report.passed, "detail": detail},
         correlation_id=report.nodeid,
+    )
+    _writer.emit(
+        {"type": "scenario_end", "outcome": report.outcome, "_nodeid": report.nodeid},
     )
 
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from typing import Dict, List, Optional
@@ -179,7 +180,16 @@ def assemble(
                 node_map = json.load(fh).get("nodes", {})
         except ValueError:
             node_map = {}
-    scenario_ids = sorted({str(ev.get("scenario_id")) for ev in events if ev.get("scenario_id")})
+    # process-file names (vls-<pid>, cln-tap-<pid>) are lane identities,
+    # not scenario ids — keep only meaningful scenario labels
+    scenario_ids = sorted(
+        {
+            str(ev.get("scenario_id"))
+            for ev in events
+            if ev.get("scenario_id")
+            and not re.match(r"^(vls|cln-tap|driver)-\d+$", str(ev.get("scenario_id")))
+        }
+    )
     schemas = sorted({str(ev.get("schema")) for ev in events if ev.get("schema")})
     level_counts: Dict[str, int] = {}
     actor_counts: Dict[str, int] = {}
