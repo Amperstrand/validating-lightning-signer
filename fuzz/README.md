@@ -34,3 +34,13 @@ You can reproduce the crash with:
 or
 
 * `cargo run --features debug,repro --bin channel-afl < ARTIFACT`
+
+## Running the seed/regression tests (2026-09-01, earned by a false-alarm issue)
+
+`cargo test` in this crate MUST carry the fuzzing cfg — the tests use
+dummy signatures and the sig checks are `#[cfg(fuzzing)]`-skipped:
+
+    RUSTFLAGS="--cfg=fuzzing" cargo test
+
+Without it, channel.rs tests fail "commit sig verify failed" — that is
+the invocation, not a regression (issue #102's false alarm).
