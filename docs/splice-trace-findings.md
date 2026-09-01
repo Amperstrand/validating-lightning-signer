@@ -145,3 +145,40 @@ dirs. The same signature cost multi-day farm forensics in the
 pre-tracer era (STATE.md 2026-08-31 IV/V). The corpus entry point:
 `trace.jsonl` per run + `trace.llm.md`; filter
 `validate_holder_commitment + rejected` (one checkbox in the viewer).
+
+---
+
+## F5 addendum (2026-09-01, later same evening) — the mechanism side is named; the unit rail lives with #106
+
+The banked vlsd log (splice-farm-logs-317777, node 69110b18, retained by
+the gate's 24h policy) pins the exact request sequence entering the rbf
+retry loop — and proves the incoming commitment FITS its own view
+(validate-diag req 81: `view=B view_value=894199 fee=3755 to_b=889319` —
+893,074 total ≤ 894,199), so the rejection is a **state-valuation
+underflow on the currents side**, not a bad transaction:
+
+1. sign A num-1 (claimable-diag2: cur=None/None)
+2. sign B num-1 (cur_cp_total=995_120 — A-scale)
+3. validate A num-1 (to_b=995_120, ACCEPTED — stores A-scale holder
+   currents)
+4. validate B num-1 → "commitment totals exceed the funding value",
+   forever (the proxy retry loop = the stall)
+
+Leading hypothesis (unproven at unit level as of this addendum): the
+A-scale holder currents (995,120) stored by step 3 get valued against
+B's 894,199 view — i.e. the validate-tail's funding tag does not route
+the way the sign-tail's does (the 2a588b44 fix covered the sign tail;
+the validate tail on this path is the suspect).
+
+**Coordination**: the #106 fix session independently reproduced the
+commit_crash manifestation at unit level (rail `scenario_commit_crash_
+b_validate_post_restart`, commit 853053f5, built directly on this
+corpus's live decode — same numbers) and owns the behavioral fix; their
+next step is a traced gate at `--log-level=debug` for the claimable-diag
+side identification. An rbf-variant pin (no restart: splice-in window +
+the interleaved A re-validation) was drafted and PARKED at
+`/tmp/opencode/f5-rbf-pin.rs` (6-arg sign_cp_helper, ready to append)
+when their mid-flight edits landed in the same file — it belongs with
+their rail once the tree is at a clean boundary. F5's rbf and
+commit_crash manifestations are ONE mechanism (this file, F5 body);
+the fix should flip both.
