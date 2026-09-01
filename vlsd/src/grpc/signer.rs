@@ -546,6 +546,18 @@ async fn send_response(
     request_id: u64,
     response: Result<SignerResponse, Error>,
 ) -> bool {
+    // latency ladder (issue #100): VLS_DELAY_MS injects a fixed delay
+    // before every signer reply. Deterministic attribution for the
+    // load-induced stall class — a gate that stalls at N ms of
+    // injected delay but passes at 0 is latency-caused, not
+    // policy-caused. Unset/0 = off.
+    let delay_ms = std::env::var("VLS_DELAY_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    if delay_ms > 0 {
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+    }
     match response {
         Ok(response) => {
             let res = sender.send(response).await;
