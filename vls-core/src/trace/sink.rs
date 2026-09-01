@@ -290,21 +290,25 @@ impl Drop for TraceSink {
 /// pid so one trace dir can hold several concurrent processes (the
 /// per-node vlsd farm shape); `VLS_TRACE_SCENARIO` overrides the name.
 pub fn emit(ev: TraceEvent) {
-    let mut cur = current_slot().lock().unwrap();
-    if cur.is_none() {
-        if !enabled() && !init_from_env() {
+    if current_slot().lock().unwrap().is_none() {
+        // install WITHOUT holding the slot mutex — install() locks it
+        // too, and std Mutex is not reentrant (the first live gate
+        // wedged vlsd's handler thread exactly here)
+        if !enabled() {
             return;
         }
         let name = std::env::var("VLS_TRACE_SCENARIO")
             .ok()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| format!("vls-{}", std::process::id()));
-        *cur = TraceSink::install(&name);
-        if cur.is_none() {
+        if TraceSink::install(&name).is_none() {
             return;
         }
     }
-    cur.as_ref().unwrap().emit_local(ev);
+    let sink = current_slot().lock().unwrap().clone();
+    if let Some(sink) = sink {
+        sink.emit_local(ev);
+    }
 }
 
 /// Convenience for instrumented code: capture the before-snapshot iff
