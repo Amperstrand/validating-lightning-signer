@@ -1,6 +1,7 @@
 use arbitrary::Arbitrary;
 use lightning_signer::bitcoin;
 use lightning_signer::bitcoin::bip32::DerivationPath;
+use lightning_signer::bitcoin::hashes::Hash;
 use lightning_signer::bitcoin::blockdata::locktime::absolute::LockTime;
 use lightning_signer::bitcoin::blockdata::transaction::{OutPoint, Transaction, TxIn};
 use lightning_signer::bitcoin::blockdata::witness::Witness;
