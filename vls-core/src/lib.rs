@@ -133,6 +133,8 @@ mod sync;
 #[cfg(test)]
 mod setup_channel_tests;
 #[cfg(test)]
+mod strict_mode_tests;
+#[cfg(test)]
 mod sign_counterparty_commitment_tests;
 #[cfg(test)]
 mod sign_counterparty_htlc_sweep_tests;
