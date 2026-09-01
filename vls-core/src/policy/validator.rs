@@ -310,13 +310,19 @@ pub trait Validator {
         num: u64,
         current_point: PublicKey,
         current_commitment_info: CommitmentInfo2,
+        funding_changed: bool,
     ) -> Result<(), ValidationError> {
         if num == 0 {
             policy_err!(self, "policy-other", "can't set next to 0");
         }
 
         // The initial commitment is special, it can advance even though next_revoke is 0.
-        let delta = if num == 1 { 1 } else { 2 };
+        // A funding change (BOLTs #1160 splice semantics: the first
+        // commitment_signed after a splice re-uses the pre-splice
+        // number) starts a new numbering epoch — the new funding's
+        // first commitment is num==1-shaped for this gate, evaluated
+        // against the channel-global revoke counter.
+        let delta = if num == 1 || funding_changed { 1 } else { 2 };
 
         // Ensure that next_commit is ok relative to next_revoke
         if num < estate.next_counterparty_revoke_num + delta {

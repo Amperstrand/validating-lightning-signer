@@ -869,14 +869,22 @@ impl Channel {
             &outgoing_payment_summary,
             &delta,
             validator.clone(),
+            self.prev_setup.is_some(),
         )?;
 
-        // Only advance the state if nothing goes wrong.
+        // Only advance the state if nothing goes wrong. The
+        // funding_changed flag gives the numbering gate its splice
+        // epoch context (BOLTs #1160 same-number re-sign).
+        let funding_changed = self
+            .enforcement_state
+            .counterparty_commitment_funding
+            .map_or(false, |f| f != self.setup.funding_outpoint);
         validator.set_next_counterparty_commit_num(
             &mut self.enforcement_state,
             commitment_number + 1,
             *remote_per_commitment_point,
             info2.clone(),
+            funding_changed,
         )?;
         self.enforcement_state.counterparty_commitment_funding = Some(self.setup.funding_outpoint);
 
@@ -1003,7 +1011,34 @@ impl Channel {
         to_counterparty_value_sat: u64,
         htlcs: Vec<HTLCOutputInCommitment>,
     ) -> CommitmentTransaction {
-        let channel_parameters = self.make_channel_parameters();
+        self.make_counterparty_commitment_tx_with_setup(
+            &self.setup,
+            remote_per_commitment_point,
+            commitment_number,
+            feerate_per_kw,
+            to_holder_value_sat,
+            to_counterparty_value_sat,
+            htlcs,
+        )
+    }
+
+    /// View-routed recomposition (the #85/#94 class-A design: exact-match
+    /// recomposition from the tx's OWN funding view). During a splice
+    /// window the host may legitimately re-present a commitment for the
+    /// retiring funding (RBF-superseded candidate, reestablish re-sign,
+    /// pre-crash view) — the recomposition must build from that view or
+    /// a spec-legal tx mismatches and strict mode rejects it.
+    pub fn make_counterparty_commitment_tx_with_setup(
+        &self,
+        setup: &ChannelSetup,
+        remote_per_commitment_point: &PublicKey,
+        commitment_number: u64,
+        feerate_per_kw: u32,
+        to_holder_value_sat: u64,
+        to_counterparty_value_sat: u64,
+        htlcs: Vec<HTLCOutputInCommitment>,
+    ) -> CommitmentTransaction {
+        let channel_parameters = self.make_channel_parameters_with_setup(setup);
         let parameters = channel_parameters.as_counterparty_broadcastable();
         CommitmentTransaction::new(
             INITIAL_COMMITMENT_NUMBER - commitment_number,
@@ -1264,6 +1299,7 @@ impl Channel {
             &outgoing_payment_summary,
             &delta,
             validator.clone(),
+            self.prev_setup.is_some(),
         )?;
 
         if commitment_number == self.enforcement_state.next_holder_commit_num
@@ -2814,7 +2850,14 @@ impl Channel {
 
         let htlcs = Self::htlcs_info2_to_oic(&info2.offered_htlcs, &info2.received_htlcs);
 
-        let recomposed_tx = self.make_counterparty_commitment_tx(
+        // #85/#94 class-A fix: recompose from the tx's OWN funding view
+        // (diag_view, routed by the tx's input) — a retiring-funding
+        // commitment re-presented mid-window recomposes exactly and
+        // signs; a mutated tx still mismatches ITS OWN view's
+        // recomposition (the security line the input-check variant
+        // could not provide).
+        let recomposed_tx = self.make_counterparty_commitment_tx_with_setup(
+            &diag_view,
             remote_per_commitment_point,
             commitment_number,
             feerate_per_kw,
@@ -2906,7 +2949,7 @@ impl Channel {
         let trusted_tx = recomposed_tx.trust();
 
         let funding_pubkey = &self.keys.pubkeys(&self.secp_ctx).funding_pubkey;
-        let counterparty_funding_pubkey = &self.setup.counterparty_points.funding_pubkey;
+        let counterparty_funding_pubkey = &diag_view.counterparty_points.funding_pubkey;
         let channel_funding_redeemscript =
             make_funding_redeemscript(funding_pubkey, counterparty_funding_pubkey);
 
@@ -2915,7 +2958,7 @@ impl Channel {
             built_tx.sign_counterparty_commitment(
                 &self.keys.funding_key(None),
                 &channel_funding_redeemscript,
-                self.setup.channel_value_sat,
+                diag_view.channel_value_sat,
                 &self.secp_ctx,
             ),
             "sign_counterparty_commitment panic {} chantype={:?}",
@@ -2929,14 +2972,22 @@ impl Channel {
             &outgoing_payment_summary,
             &delta,
             validator.clone(),
+            self.prev_setup.is_some(),
         )?;
 
-        // Only advance the state if nothing goes wrong.
+        // Only advance the state if nothing goes wrong. The
+        // funding_changed flag gives the numbering gate its splice
+        // epoch context (BOLTs #1160 same-number re-sign).
+        let funding_changed = self
+            .enforcement_state
+            .counterparty_commitment_funding
+            .map_or(false, |f| f != diag_view.funding_outpoint);
         validator.set_next_counterparty_commit_num(
             &mut self.enforcement_state,
             commit_num + 1,
             point,
             info2.clone(),
+            funding_changed,
         )?;
         // Era-correct tag (see sign_counterparty_commitment_tx_phase2):
         // tag with the funding view the signed tx actually spends.
@@ -3182,6 +3233,7 @@ impl Channel {
             &outgoing_payment_summary,
             &delta,
             validator.clone(),
+            self.prev_setup.is_some(),
         )?;
         info!("#hang-probe: payments validated");
 

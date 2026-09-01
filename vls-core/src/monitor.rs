@@ -413,8 +413,26 @@ funding spent by multi-input tx (splice): not tracking as close"
         // complete handling of closing tx, if this was one
         if let Some(mut closing_tx) = decode_state.closing_tx.take() {
             closing_tx.lock_time = lock_time;
-            // closing tx
-            assert_eq!(closing_tx.input.len(), 1);
+            // A spend of the watched funding whose txid CREATES the
+            // current funding (funding_txids) is a splice, not a close —
+            // the single-input splice-out shape (the exiting funds are
+            // outputs, so the multi-input discriminator cannot fire;
+            // the retiring funding stays matched by the state's
+            // funding_outpoint until it confirms). Genuine closes and
+            // old-commitment breaches never carry our new funding.
+            let is_splice_spend = decode_state.state.funding_txids.contains(&txid);
+            if is_splice_spend {
+                info!(
+                    "        // BOLT #2: If any splice transaction reaches acceptable depth:
+        // BOLT #2: MUST send `splice_locked` with the `txid` of that transaction.
+        // REF a splice tx is its own funding's creator — not a close
+funding spend {} creates the current funding (splice): not tracking as close",
+                    txid
+                );
+            }
+            if !is_splice_spend {
+                // closing tx
+                assert_eq!(closing_tx.input.len(), 1);
             let provider = self.commitment_point_provider;
             let parameters = provider.get_transaction_parameters();
 
@@ -456,6 +474,7 @@ funding spent by multi-input tx (splice): not tracking as close"
                     closing_tx.input[0].previous_output,
                 ));
                 info!("mutual close {} confirmed", txid);
+            }
             }
         }
 

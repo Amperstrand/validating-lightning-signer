@@ -473,6 +473,7 @@ impl NodeState {
             outgoing_payment_summary,
             balance_delta,
             validator.clone(),
+            false,
         )?;
         self.apply_payments(
             channel_id,
@@ -499,6 +500,7 @@ impl NodeState {
         outgoing_payment_summary: &Map<PaymentHash, u64>,
         balance_delta: &BalanceDelta,
         validator: Arc<dyn Validator>,
+        splice_window: bool,
     ) -> Result<(), ValidationError> {
         let mut debug_on_return = scoped_debug_return!(self);
         debug!(
@@ -563,6 +565,25 @@ impl NodeState {
                         DebugBytes(&hash.0),
                         payment,
                         err,
+                    );
+                } else if splice_window
+                    && payment.is_none()
+                    && incoming_for_chan_sat == 0
+                    && outgoing_for_chan_sat > 0
+                {
+                    // A forwarded HTLC batched onto a splice commitment
+                    // (quiescence): the host may commit the outgoing leg
+                    // before the incoming leg's channel commits, so the
+                    // payment hash has no record yet and this channel's
+                    // summaries read incoming 0. Expected mid-window; the
+                    // incoming leg settles when its channel commits.
+                    // Scoped to the window — outside it the rule stands.
+                    warn!(
+                        "forwarded HTLC on splicing channel {} for hash {:?} \
+                         (incoming leg pending elsewhere): {:}",
+                        channel_id,
+                        DebugBytes(&hash.0),
+                        err
                     );
                 } else {
                     #[cfg(not(feature = "log_pretty_print"))]
@@ -5157,6 +5178,7 @@ mod tests {
             &vec![(hash1, 0), (hash2, 0), (hash3, 55)].into_iter().collect(),
             &Default::default(),
             validator,
+            false,
         );
 
         assert!(result.is_ok());
@@ -5207,6 +5229,7 @@ mod tests {
             &vec![(hash1, 0), (hash2, 80), (hash3, 55)].into_iter().collect(),
             &Default::default(),
             validator.clone(),
+            false,
         );
 
         assert!(result.is_err());
@@ -5265,6 +5288,7 @@ mod tests {
             &vec![(orig_hash1, 150)].into_iter().collect(),
             &Default::default(),
             validator.clone(),
+            false,
         );
 
         assert!(result.is_ok());

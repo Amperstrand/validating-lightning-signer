@@ -632,15 +632,18 @@ mod tests {
     fn strict_class_d_splice_same_number_resign_signs() {
         let node_ctx = test_node_ctx(1);
         let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+        let old_outpoint = chan_ctx.setup.funding_outpoint;
         let _splice_tx = open_splice_window(&node_ctx, &mut chan_ctx, 1_100_000);
         let channel_id = chan_ctx.channel_id.clone();
 
         node_ctx.node.with_channel(&channel_id, |chan| {
             // the live pair: commitment 1 already validated on the OLD
-            // funding (next=2), one revoke processed (revoke=1)
+            // funding (next=2, its tag on the old outpoint), one revoke
+            // processed (revoke=1)
             chan.enforcement_state
                 .set_next_counterparty_commit_num_for_testing(2, make_test_pubkey(0x10));
             chan.enforcement_state.set_next_counterparty_revoke_num_for_testing(1);
+            chan.enforcement_state.counterparty_commitment_funding = Some(old_outpoint);
 
             let (tx, witscripts) =
                 view_counterparty_commitment(chan, &chan.setup.clone(), 1, 3755, 1_084_473, 0);
