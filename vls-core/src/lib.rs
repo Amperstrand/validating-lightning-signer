@@ -156,6 +156,8 @@ mod sign_onchain_tx_tests;
 mod sign_splice_tests;
 #[cfg(test)]
 mod straggler_balance_tests;
+#[cfg(all(test, feature = "splice_trace"))]
+mod splice_scenario_tests;
 #[cfg(test)]
 mod validate_counterparty_revocation_tests;
 #[cfg(test)]
