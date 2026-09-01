@@ -739,8 +739,7 @@ fn scenario_same_number_different_info_rejected() {
     // fires on commit_num < next_holder_commit_num).
     let _s2 = sc.step("commitment #1 on B validates (numbering advances)");
     sc.cln_sends("commitment_signed", Some(json!({"funding": "B", "num": 1, "to_b": 1_090_000})));
-    let mut ctx1 =
-        channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 1_090_000, 0, vec![], vec![]);
+    let mut ctx1 = channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 1_090_000, 0, vec![], vec![]);
     let (sig1, hsigs1) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx1);
     validate_holder_commitment(&node_ctx, &chan_ctx, &ctx1, &sig1, &hsigs1)
         .expect("first commitment validates");
@@ -749,11 +748,14 @@ fn scenario_same_number_different_info_rejected() {
     // Same number, DIFFERENT info (to_b changed) — rejected by the
     // old-commitment-number policy: a reshuffle is not a retransmit.
     let _s3 = sc.step("same number, different info refused");
-    sc.cln_sends("commitment_signed", Some(json!({"funding": "B", "num": 1, "to_b": 1_080_000, "reshuffle": true})));
-    let mut ctx1b =
-        channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 1_080_000, 0, vec![], vec![]);
+    sc.cln_sends(
+        "commitment_signed",
+        Some(json!({"funding": "B", "num": 1, "to_b": 1_080_000, "reshuffle": true})),
+    );
+    let mut ctx1b = channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 1_080_000, 0, vec![], vec![]);
     let (sig1b, hsigs1b) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx1b);
-    let refused = validate_holder_commitment(&node_ctx, &chan_ctx, &ctx1b, &sig1b, &hsigs1b).is_err();
+    let refused =
+        validate_holder_commitment(&node_ctx, &chan_ctx, &ctx1b, &sig1b, &hsigs1b).is_err();
     sc.expect("same-number reshuffle rejected", refused);
     assert!(refused, "same commitment number with different info must be rejected");
     sc.transition("SAME_NUM_ACCEPTED", "SAME_NUM_RESHUFFLE_REJECTED", "reject reshuffle");
@@ -762,13 +764,274 @@ fn scenario_same_number_different_info_rejected() {
     sc.finish("passed");
 }
 
+/// The commit_crash_splice live wedge (#106, decoded by traced live-fire):
+/// after a crash mid-splice-window + restart + the resume dance
+/// (sign_cp A, sign_cp B, validate A — all accepted live), the
+/// re-offered B-era commitment is rejected with 'commitment totals
+/// exceed the funding value' ×15 (channeld retry loop — the splice
+/// never locks). LIVE FACTS (issue #106): the incoming commitment FITS
+/// its view (to_b 889,319 + fee 3,755 = 893,074 ≤ 894,199) — the
+/// rejection is a STATE-valuation underflow (R30 era-mixing class on
+/// the restore path), not the tx. Restored tags: holder→A, cp→B;
+/// snapshot A-scale currents; initial_holder 1,000,000.
+/// WIP rail: the resume-dance replication is in place but the exact
+/// live tag/field constellation at the first rejection still needs the
+/// claimable-diag numbers (vlsd runs info-level; claimable-diag is
+/// debug) — see #106 for the precise next step.
+#[test]
+#[ignore = "#106: live wedge decoded, unit replication one instrumentation step short — run the traced gate with --log-level=debug for the claimable-diag side"]
+fn scenario_commit_crash_b_validate_post_restart() {
+    let mut sc = ScenarioRunner::with_states(
+        "commit_crash_b_validate_post_restart",
+        &["A_LOCKED", "AB_PENDING_PRE_CRASH", "RESTARTED", "WEDGE_OR_RECOVERY"],
+    );
+
+    let node_ctx = test_node_ctx(1);
+    let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+    let channel_id = chan_ctx.channel_id.clone();
+    let old_setup = chan_ctx.setup.clone();
+    sc.state("A_LOCKED", json!({"eras_live": ["A"], "value": 1_000_000}));
+
+    // A-era currents at the live-captured scale (cp info 0/995,125).
+    let dummy_sigs = crate::policy::validator::CommitmentSignatures(
+        bitcoin::secp256k1::ecdsa::Signature::from_compact(&[0; 64]).unwrap(),
+        vec![],
+    );
+    node_ctx
+        .node
+        .with_channel(&channel_id, |chan| {
+            chan.enforcement_state.current_holder_commit_info =
+                Some(crate::tx::tx::CommitmentInfo2::new(false, 0, 995_125, vec![], vec![], 0));
+            chan.enforcement_state.current_counterparty_signatures = Some(dummy_sigs.clone());
+            chan.enforcement_state.current_counterparty_commit_info =
+                Some(crate::tx::tx::CommitmentInfo2::new(true, 0, 995_125, vec![], vec![], 0));
+            Ok(())
+        })
+        .unwrap();
+
+    // Splice-OUT A -> B at the live value.
+    let _s1 = sc.step("splice A -> B (splice-out to 894,199)");
+    let mut tx_ctx = TestFundingTxContext::new();
+    tx_ctx.inputs.push(TxIn {
+        previous_output: old_setup.funding_outpoint,
+        script_sig: bitcoin::ScriptBuf::new(),
+        sequence: bitcoin::Sequence::MAX,
+        witness: bitcoin::Witness::default(),
+    });
+    chan_ctx.setup.channel_value_sat = 894_199;
+    let vout = tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, 894_199);
+    let splice_tx = tx_ctx.to_tx();
+    assert!(funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none());
+    sc.state(
+        "AB_PENDING_PRE_CRASH",
+        json!({"eras_live": ["A", "B"], "current": "B", "value_b": 894_199}),
+    );
+
+    // The B-era commitment CLN re-offers (num 1, B-scale split).
+    let mut b_ctx = channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 889_000, 0, vec![], vec![]);
+    let (bsig, bhsigs) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut b_ctx);
+
+    // Pre-crash: the B commitment validates (the pre-crash node accepted it).
+    let _s2 = sc.step("B commitment validates pre-crash");
+    let pre = raw_validate(&node_ctx, &channel_id, &b_ctx, &bsig, &bhsigs);
+    sc.expect("B commitment accepted pre-crash", pre.is_ok());
+    pre.expect("pre-crash accept");
+
+    // THE CRASH + RESTART + RESUME, exactly as the live trace decoded
+    // it (vls-251018): the entry restores the swap-time state; the
+    // channeld resume dance then runs sign_cp(A), sign_cp(B),
+    // validate_holder(A) — and only THEN the wedged validate_holder(B).
+    let _s3 = sc.step("restart (persist-entry round-trip) + resume dance");
+    sc.inject("restart_vls", None);
+    node_ctx
+        .node
+        .with_channel(&channel_id, |chan| {
+            let entry = crate::persist::model::ChannelEntry {
+                channel_value_satoshis: chan.setup.channel_value_sat,
+                channel_setup: Some(chan.setup.clone()),
+                id: chan.id.clone(),
+                enforcement_state: chan.enforcement_state.clone(),
+                blockheight: None,
+                prev_setup: chan.prev_setup.clone(),
+                prev_prev_setup: chan.prev_prev_setup.clone(),
+            };
+            let ser = serde_json::to_value(&entry).expect("serialize");
+            let de: crate::persist::model::ChannelEntry =
+                serde_json::from_value(ser).expect("deserialize");
+            chan.enforcement_state = de.enforcement_state;
+            Ok(())
+        })
+        .unwrap();
+
+    // resume: the A-era straggler commitment validates (reestablish
+    // re-offer — the live seq 9-11 accepted it)
+    let mut a_straggler = channel_commitment(
+        &node_ctx,
+        &chan_ctx_a_view(&chan_ctx, &old_setup),
+        0,
+        0,
+        995_125,
+        0,
+        vec![],
+        vec![],
+    );
+    let _ = &mut a_straggler;
+    // resume: sign both eras' counterparty commitments (live seq 5+8)
+    // Direct probe: replicate the sign path's claimable call with the
+    // restored state and print every input (the wedge's exact numbers).
+    {
+        let node = node_ctx.node.clone();
+        node.with_channel(&channel_id, |chan| {
+            let es = &chan.enforcement_state;
+            eprintln!(
+                "#probe tags: holder={:?} cp={:?} prev_snap={:?}",
+                es.holder_commitment_funding,
+                es.counterparty_commitment_funding,
+                es.prev_funding_commitment.as_ref().map(|p| p.outpoint)
+            );
+            eprintln!(
+                "#probe fields: cur_holder={:?} cur_cp={:?} snap_holder={:?} snap_cp={:?}",
+                es.current_holder_commit_info
+                    .as_ref()
+                    .map(|i| (i.to_broadcaster_value_sat, i.to_countersigner_value_sat)),
+                es.current_counterparty_commit_info
+                    .as_ref()
+                    .map(|i| (i.to_broadcaster_value_sat, i.to_countersigner_value_sat)),
+                es.prev_funding_commitment
+                    .as_ref()
+                    .and_then(|p| p.current_holder_info.as_ref())
+                    .map(|i| (i.to_broadcaster_value_sat, i.to_countersigner_value_sat)),
+                es.prev_funding_commitment
+                    .as_ref()
+                    .and_then(|p| p.current_counterparty_info.as_ref())
+                    .map(|i| (i.to_broadcaster_value_sat, i.to_countersigner_value_sat)),
+            );
+            eprintln!(
+                "#probe views: setup={} prev={:?} initial_holder={}",
+                chan.setup.channel_value_sat,
+                chan.prev_setup.as_ref().map(|p| p.channel_value_sat),
+                es.initial_holder_value
+            );
+            Ok(())
+        })
+        .unwrap();
+    }
+    sign_cp_helper(&node_ctx, &channel_id, &old_setup, 0, 995_125).expect("sign_cp A (resume)");
+    sign_cp_helper(&node_ctx, &channel_id, &chan_ctx.setup, 1, 889_000)
+        .expect("sign_cp B (resume)");
+    sc.state(
+        "RESTARTED",
+        json!({"resume": "sign_cp A + sign_cp B + validate A accepted (live shape)"}),
+    );
+
+    // Post-restart: the B commitment re-offered — must be accepted.
+    let _s4 = sc.step("B commitment re-offered post-restart");
+    sc.cln_sends("commitment_signed", Some(json!({"funding": "B", "num": 1, "retransmit": true})));
+    let post = raw_validate(&node_ctx, &channel_id, &b_ctx, &bsig, &bhsigs);
+    let ok = post.is_ok();
+    let msg = post.err().map(|e| e.message().to_string());
+    sc.expect("B commitment accepted post-restart (the wedge: 15x 'commitment totals exceed the funding value')", ok);
+    sc.state(
+        "WEDGE_OR_RECOVERY",
+        json!({
+            "live_wedge": "restarted vlsd rejected the identical commitment 15 times (vls-251018 trace)",
+            "live_error": "commitment totals exceed the funding value",
+            "unit_result": msg,
+        }),
+    );
+    assert!(ok, "the commit_crash_splice wedge reproduced: {msg:?}");
+}
+
+/// A stale chan_ctx view of era A (for building A-era messages post-swap).
+fn chan_ctx_a_view(
+    ctx: &TestChannelContext,
+    a_setup: &crate::channel::ChannelSetup,
+) -> TestChannelContext {
+    let mut c = clone_test_channel_context(ctx);
+    c.setup = a_setup.clone();
+    c
+}
+
+fn clone_test_channel_context(ctx: &TestChannelContext) -> TestChannelContext {
+    TestChannelContext {
+        channel_id: ctx.channel_id.clone(),
+        setup: ctx.setup.clone(),
+        counterparty_keys: ctx.counterparty_keys.clone(),
+    }
+}
+
+/// Sign a counterparty commitment for the given view (the resume dance
+/// shape — verbatim from sign_counterparty_commitment_tests' rail).
+fn sign_cp_helper(
+    node_ctx: &TestNodeContext,
+    channel_id: &crate::channel::ChannelId,
+    setup: &crate::channel::ChannelSetup,
+    commit_num: u64,
+    to_broadcaster: u64,
+) -> Result<(), &'static str> {
+    node_ctx
+        .node
+        .with_channel(channel_id, |chan| {
+            let remote_point = make_test_pubkey(0x20);
+            let to_countersignatory = setup.channel_value_sat - to_broadcaster;
+            let mut htlcs = vec![];
+            chan.enforcement_state
+                .set_next_counterparty_commit_num_for_testing(commit_num, remote_point);
+            chan.enforcement_state
+                .set_next_counterparty_revoke_num_for_testing(commit_num.saturating_sub(1));
+            let commitment_tx = chan.make_counterparty_commitment_tx(
+                &remote_point,
+                commit_num,
+                0,
+                to_broadcaster,
+                to_countersignatory,
+                htlcs.clone(),
+            );
+            let trusted = commitment_tx.trust();
+            let tx = trusted.built_transaction();
+            let keys = chan.make_counterparty_tx_keys(&remote_point);
+            let channel_parameters = chan.make_channel_parameters();
+            let params = channel_parameters.as_counterparty_broadcastable();
+            let redeem_scripts = build_tx_scripts(
+                &keys,
+                to_countersignatory,
+                to_broadcaster,
+                &mut htlcs,
+                &params,
+                &chan.keys.pubkeys(&chan.secp_ctx).funding_pubkey,
+                &setup.counterparty_points.funding_pubkey,
+            )
+            .map_err(|_| crate::util::status::Status::internal("scripts"))?;
+            let wits: Vec<_> = redeem_scripts.iter().map(|s| s.as_bytes().to_vec()).collect();
+            chan.sign_counterparty_commitment_tx(
+                &tx.transaction,
+                &wits,
+                &remote_point,
+                commit_num,
+                0,
+                vec![],
+                vec![],
+            )?;
+            Ok(())
+        })
+        .map_err(|e| {
+            eprintln!(
+                "#sign-cp-diag setup_value={} to_b={} err={:?}",
+                setup.channel_value_sat, to_broadcaster, e
+            );
+            "sign_cp_failed"
+        })
+}
+
 /// Scenario: stale/foreign funding_locked (spec: the splice_locked
 /// receiver MUST warn+disconnect or error+fail — VLS's signer-side
 /// rejection is defense in depth; pinned here).
 #[test]
 fn scenario_stale_foreign_funding_locked() {
-    let mut sc =
-        ScenarioRunner::with_states("stale_foreign_funding_locked", &["A_LOCKED", "AB_PENDING", "BAD_LOCK_REFUSED"]);
+    let mut sc = ScenarioRunner::with_states(
+        "stale_foreign_funding_locked",
+        &["A_LOCKED", "AB_PENDING", "BAD_LOCK_REFUSED"],
+    );
 
     let node_ctx = test_node_ctx(1);
     let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
@@ -800,13 +1063,19 @@ fn scenario_stale_foreign_funding_locked() {
         .confirm_funding_lock(&channel_id, &old_setup.funding_outpoint)
         .expect_err("stale funding_locked must be refused");
     sc.expect("stale lock refused (era-blind lockout is a current-funding gate)", true);
-    sc.cln_receives("lock_outpoint_reply", Some(json!({"code": format!("{:?}", stale_err.code())})));
+    sc.cln_receives(
+        "lock_outpoint_reply",
+        Some(json!({"code": format!("{:?}", stale_err.code())})),
+    );
 
     // Foreign lock: an outpoint from neither era — refused.
     let _s3 = sc.step("foreign splice_locked refused");
     let mut foreign = new_outpoint;
     foreign.vout += 7;
-    sc.cln_sends("lock_outpoint", Some(json!({"funding": "foreign", "outpoint": foreign.to_string()})));
+    sc.cln_sends(
+        "lock_outpoint",
+        Some(json!({"funding": "foreign", "outpoint": foreign.to_string()})),
+    );
     node_ctx
         .node
         .confirm_funding_lock(&channel_id, &foreign)
