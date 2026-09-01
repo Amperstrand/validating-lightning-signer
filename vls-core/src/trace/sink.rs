@@ -27,11 +27,17 @@ thread_local! {
     static CORRELATION: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Is tracing enabled for this process? (cheap relaxed load; the answer
-/// is fixed for the process lifetime)
+/// Is tracing enabled for this process? (relaxed load after a one-time
+/// env probe — the first call may come from an instrumentation site
+/// that never reaches `emit()`, so the probe lives here, not in emit)
 pub fn enabled() -> bool {
     #[cfg(feature = "splice_trace")]
     {
+        static PROBE: OnceLock<()> = OnceLock::new();
+        if PROBE.get().is_none() {
+            let _ = PROBE.set(());
+            init_from_env();
+        }
         ENABLED.load(Ordering::Relaxed)
     }
     #[cfg(not(feature = "splice_trace"))]
@@ -261,11 +267,13 @@ impl TraceSink {
         })
     }
 
-    /// Emit one event into this sink.
+    /// Emit one event into this sink. Flushes per line: teardown paths
+    /// (harness pkills, crashes) must not lose already-emitted events.
     pub fn emit_local(&self, ev: TraceEvent) {
         let line = self.render_line(ev);
         if let Ok(mut inner) = self.inner.lock() {
             let _ = writeln!(inner.writer, "{line}");
+            let _ = inner.writer.flush();
         }
     }
 }
