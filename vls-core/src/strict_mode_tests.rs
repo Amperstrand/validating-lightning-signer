@@ -755,6 +755,37 @@ mod tests {
         );
     }
 
+    /// B-neg 4 (the commit-0 boundary): commitment 0 is the initial
+    /// commitment — no burial requirement applies to it. Pins
+    /// `commit_num > 0` against the mut94 `>=` survivor (0 >= 0 runs
+    /// the checks at commitment 0 → would reject this unconfirmed-
+    /// funding sign that the real code accepts).
+    #[test]
+    fn strict_class_b_neg_commit0_unburied_signs() {
+        let node_ctx = test_node_ctx(1);
+        let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+        let channel_id = chan_ctx.channel_id.clone();
+        install_onchain_validator(&node_ctx.node);
+
+        node_ctx.node.with_channel(&channel_id, |chan| {
+            chan.enforcement_state
+                .set_next_counterparty_commit_num_for_testing(0, make_test_pubkey(REMOTE_POINT_NDX));
+            let (tx, witscripts) =
+                view_counterparty_commitment(chan, &chan.setup.clone(), 0, 0, 999_000, 0);
+            chan.sign_counterparty_commitment_tx(
+                &tx,
+                &witscripts,
+                &make_test_pubkey(REMOTE_POINT_NDX),
+                0,
+                0,
+                vec![],
+                vec![],
+            )
+            .map(|_| ())
+        })
+        .expect("commitment 0 needs no burial — the checks must not run at the initial commitment");
+    }
+
     // ------------------------------------------------------------------
     // Class D rails (RED today — the fix contract)
     // ------------------------------------------------------------------
