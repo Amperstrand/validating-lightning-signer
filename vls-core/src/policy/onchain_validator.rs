@@ -419,15 +419,8 @@ mod burial_rails_tests {
         let sk = SecretKey::from_slice(&[7u8; 32]).expect("test key");
         let node_id = bitcoin::secp256k1::PublicKey::from_secret_key(&secp, &sk);
         OnchainValidator {
-            inner: SimpleValidatorFactory::new().make_validator(
-                Network::Testnet,
-                node_id,
-                None,
-            ),
-            policy: OnchainPolicy {
-                filter: Default::default(),
-                min_funding_depth: depth,
-            },
+            inner: SimpleValidatorFactory::new().make_validator(Network::Testnet, node_id, None),
+            policy: OnchainPolicy { filter: Default::default(), min_funding_depth: depth },
         }
     }
 
