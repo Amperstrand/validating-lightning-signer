@@ -182,3 +182,30 @@ when their mid-flight edits landed in the same file — it belongs with
 their rail once the tree is at a clean boundary. F5's rbf and
 commit_crash manifestations are ONE mechanism (this file, F5 body);
 the fix should flip both.
+
+---
+
+## F5 RESOLVED (2026-09-02, vls 827401dd) — two mechanisms, both fixed, both stalls GREEN live
+
+The corpus's F5 arc closed end-to-end: finding → mechanism → RED rails →
+fix → live proof.
+
+1. **The fresh-store tag** (channel.rs validate tail): fresh old-funding
+   commitments stored A-scale info tagged with the CHANNEL's current
+   funding → the next same-window validation underflowed at `cur_holder`.
+   Fixed to the routed view (the sign tail's 2a588b44 pattern).
+2. **The tag/currents interleave** (validator.rs `claimable_balances`):
+   the resume dance's alternating-era signs leave A-scale info in a
+   B-tagged slot (live probe `side=cur_cp ×15`); the currents side and
+   the new-tx fallbacks now treat cross-scale underflow as "no usable
+   before-state" per the R30 doctrine — never a rejection. Explicit new
+   transactions still hard-error.
+
+**Live proof**: `test_splice_rbf` rc=0 (32.8s, 37.2s — was rc=124 on
+every prior run of this branch) and `test_commit_crash_splice` rc=0
+(39.2s, zero rejections — was rc=1 with the 12× loop). Three RED→GREEN
+rails in the default suite (the restructured commit_crash rail, the
+cp-interleave rail, the rbf-window rail). Decode cost of the whole arc:
+one evening, instrumented by the trace corpus + one labeled probe —
+against the pre-tracer era where this signature cost multi-day farm
+forensics.
