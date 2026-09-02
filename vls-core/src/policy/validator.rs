@@ -1202,8 +1202,9 @@ impl EnforcementState {
     ) -> Result<BalanceDelta, Status> {
         fn flatten_or_err(o: Option<Option<u64>>) -> Result<Option<u64>, Status> {
             match o {
-                Some(None) =>
-                    Err(Status::invalid_argument("commitment totals exceed the funding value")),
+                Some(None) => {
+                    Err(Status::invalid_argument("commitment totals exceed the funding value"))
+                }
                 other => Ok(other.flatten()),
             }
         }
@@ -1291,9 +1292,14 @@ impl EnforcementState {
                 tx.claimable_balance(preimage_map, channel_setup.is_outbound, cur_value_sat)
             })
         } else {
-            flatten_or_err(cur_holder.as_ref().map(|tx| {
+            // Cross-scale currents (the tag/currents interleave of the
+            // resume dance — #106 residual): an underflow means the
+            // currents belong to another era's scale — no usable
+            // before-state for this funding, never a rejection (the
+            // documented R30 doctrine, now applied to both cur sides).
+            cur_holder.as_ref().and_then(|tx| {
                 tx.claimable_balance(preimage_map, channel_setup.is_outbound, cur_holder_value_sat)
-            }))?
+            })
         };
         // Our balance in the counterparty commitment tx
         let cur_cp_bal = if straggler_funding.is_some() {
@@ -1301,13 +1307,13 @@ impl EnforcementState {
                 tx.claimable_balance(preimage_map, channel_setup.is_outbound, cur_value_sat)
             })
         } else {
-            flatten_or_err(cur_counterparty.as_ref().map(|tx| {
+            cur_counterparty.as_ref().and_then(|tx| {
                 tx.claimable_balance(
                     preimage_map,
                     channel_setup.is_outbound,
                     cur_counterparty_value_sat,
                 )
-            }))?
+            })
         };
         // Our overall balance is the lower of the two
         let cur_bal_opt = min_opt(cur_holder_bal, cur_cp_bal);
@@ -1322,20 +1328,43 @@ impl EnforcementState {
         // checked_sub (new-era 1,099,000 vs the 1,000,000 view).
         let new_holder_fallback = self.holder_commit_info_for(&channel_setup.funding_outpoint);
         let new_cp_fallback = self.counterparty_commit_info_for(&channel_setup.funding_outpoint);
-        let new_holder_bal = flatten_or_err(new_holder_tx.or(new_holder_fallback).map(|tx| {
-            tx.claimable_balance(
-                preimage_map,
-                channel_setup.is_outbound,
-                channel_setup.channel_value_sat,
-            )
-        }))?;
-        let new_cp_bal = flatten_or_err(new_counterparty_tx.or(new_cp_fallback).map(|tx| {
-            tx.claimable_balance(
-                preimage_map,
-                channel_setup.is_outbound,
-                channel_setup.channel_value_sat,
-            )
-        }))?;
+        // An explicit new tx that overflows its view is a real violation
+        // (hard error); a FALLBACK overflow is cross-scale stored state
+        // (the #106 interleave) — absent, not rejected.
+        let new_holder_bal = if new_holder_tx.is_some() {
+            flatten_or_err(new_holder_tx.map(|tx| {
+                tx.claimable_balance(
+                    preimage_map,
+                    channel_setup.is_outbound,
+                    channel_setup.channel_value_sat,
+                )
+            }))?
+        } else {
+            new_holder_fallback.and_then(|tx| {
+                tx.claimable_balance(
+                    preimage_map,
+                    channel_setup.is_outbound,
+                    channel_setup.channel_value_sat,
+                )
+            })
+        };
+        let new_cp_bal = if new_counterparty_tx.is_some() {
+            flatten_or_err(new_counterparty_tx.map(|tx| {
+                tx.claimable_balance(
+                    preimage_map,
+                    channel_setup.is_outbound,
+                    channel_setup.channel_value_sat,
+                )
+            }))?
+        } else {
+            new_cp_fallback.and_then(|tx| {
+                tx.claimable_balance(
+                    preimage_map,
+                    channel_setup.is_outbound,
+                    channel_setup.channel_value_sat,
+                )
+            })
+        };
         let new_bal =
             min_opt(new_holder_bal, new_cp_bal).expect("already checked that we have a new tx");
 

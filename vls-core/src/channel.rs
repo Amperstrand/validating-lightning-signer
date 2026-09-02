@@ -3440,8 +3440,13 @@ impl Channel {
             if commitment_number == self.enforcement_state.next_holder_commit_num {
                 self.enforcement_state.next_holder_commit_info =
                     Some((info2, counterparty_signatures));
-                self.enforcement_state.holder_commitment_funding =
-                    Some(self.setup.funding_outpoint);
+                // Tag the ROUTED view, not the channel setup: a fresh
+                // old-funding commitment (the restart/rbf resume dance)
+                // stores old-era-scale info here — tagging it with the
+                // current setup makes the next same-window validation
+                // value it against the new funding and underflow (the
+                // #106 wedge; the sign tail got the same fix at 2a588b44).
+                self.enforcement_state.holder_commitment_funding = Some(view.funding_outpoint);
             } else {
                 // The old-funding straggler: store into the snapshot record —
                 // NOT the channel slot (the clobber would lose the new
@@ -3858,8 +3863,9 @@ impl Channel {
         for htlc in &htlcs {
             let can_spend = match (htlc.offered, is_counterparty_tx) {
                 // Counterparty offered or we received: needs preimage
-                (true, true) | (false, false) =>
-                    payments.get(&htlc.payment_hash).and_then(|p| p.preimage.as_ref()).is_some(),
+                (true, true) | (false, false) => {
+                    payments.get(&htlc.payment_hash).and_then(|p| p.preimage.as_ref()).is_some()
+                }
                 // We offered: spendable after timeout
                 (true, false) | (false, true) => true,
             };
@@ -4892,10 +4898,12 @@ mod tests {
 
                     // only some received HTLCs have known preimages
                     match idx {
-                        0 =>
-                            add_payment_with_preimage(&mut node_state.payments, hash_2, preimage_2),
-                        2 =>
-                            add_payment_with_preimage(&mut node_state.payments, hash_5, preimage_5),
+                        0 => {
+                            add_payment_with_preimage(&mut node_state.payments, hash_2, preimage_2)
+                        }
+                        2 => {
+                            add_payment_with_preimage(&mut node_state.payments, hash_5, preimage_5)
+                        }
                         _ => {}
                     }
                 }
