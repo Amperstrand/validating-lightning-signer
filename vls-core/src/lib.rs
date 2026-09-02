@@ -154,6 +154,8 @@ mod sign_mutual_close_tests;
 mod sign_onchain_tx_tests;
 #[cfg(test)]
 mod sign_splice_tests;
+#[cfg(test)]
+mod mutant_rails_tests;
 #[cfg(all(test, feature = "splice_trace"))]
 mod splice_scenario_tests;
 #[cfg(test)]

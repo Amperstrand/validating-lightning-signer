@@ -394,3 +394,79 @@ impl OnchainValidator {
         Ok(())
     }
 }
+// Burial rails (STATE.md XVIII follow-up) — appended to this file so
+// the private ensure_funding_buried_and_unspent is reachable. Kills:
+// onchain_validator.rs:372 `>`→`==0` (the gate must apply BEYOND the
+// initial commitment), :372 `&&`→`||` (the gate must NOT apply during
+// a splice window — the fork-local burial exemption), and
+// policy/mod.rs:113 `temporary_policy_error_with_filter` → Ok(())
+// (the temporary-error Err must actually surface).
+// Burial rails (STATE.md XVIII follow-up) — appended to this file so
+// the private ensure_funding_buried_and_unspent is reachable. Kills:
+// onchain_validator.rs:372 `>`→`==0` (the gate must apply BEYOND the
+// initial commitment), :372 `&&`→`||` (the gate must NOT apply during
+// a splice window — the fork-local burial exemption), and
+// policy/mod.rs:113 `temporary_policy_error_with_filter` → Ok(())
+// (the temporary-error Err must actually surface).
+#[cfg(test)]
+mod burial_rails_tests {
+    use super::*;
+    use crate::util::test_utils::make_test_chain_state;
+    use bitcoin::secp256k1::{Secp256k1, SecretKey};
+
+    fn validator_with_min_depth(depth: u16) -> OnchainValidator {
+        let secp = Secp256k1::signing_only();
+        let sk = SecretKey::from_slice(&[7u8; 32]).expect("test key");
+        let node_id = bitcoin::secp256k1::PublicKey::from_secret_key(&secp, &sk);
+        OnchainValidator {
+            inner: SimpleValidatorFactory::new().make_validator(
+                Network::Testnet,
+                node_id,
+                None,
+            ),
+            policy: OnchainPolicy {
+                filter: Default::default(),
+                min_funding_depth: depth,
+            },
+        }
+    }
+
+    #[test]
+    fn rail_burial_required_beyond_initial_commitment() {
+        let v = validator_with_min_depth(6);
+        let mut cstate = make_test_chain_state();
+        cstate.funding_depth = 0;
+        let res = v.ensure_funding_buried_and_unspent(1, &cstate);
+        assert!(
+            res.is_err(),
+            "commitment beyond #0 with unburied funding must be a temporary policy error"
+        );
+    }
+
+    #[test]
+    fn rail_burial_skipped_during_splice_window() {
+        let v = validator_with_min_depth(6);
+        let mut cstate = make_test_chain_state();
+        cstate.funding_depth = 0;
+        cstate.splice_pending = true;
+        let res = v.ensure_funding_buried_and_unspent(1, &cstate);
+        assert!(
+            res.is_ok(),
+            "the splice window exempts the current (unconfirmed) funding: {:?}",
+            res.err()
+        );
+    }
+
+    #[test]
+    fn rail_initial_commitment_skips_burial_gate() {
+        let v = validator_with_min_depth(6);
+        let mut cstate = make_test_chain_state();
+        cstate.funding_depth = 0;
+        let res = v.ensure_funding_buried_and_unspent(0, &cstate);
+        assert!(
+            res.is_ok(),
+            "commitment #0 is the initial funding — no burial requirement: {:?}",
+            res.err()
+        );
+    }
+}
