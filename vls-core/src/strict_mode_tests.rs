@@ -572,6 +572,190 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
+    // Class B negative rails — the mut94 campaign (2026-09-02) proved
+    // the positive rail is equivalent on ALL SIX survivors of
+    // ensure_funding_buried_and_unspent (body→Ok(()), `delete !`,
+    // `&&`→`||`, and the depth-boundary trio). These rows pin the
+    // rejection side.
+    // ------------------------------------------------------------------
+
+    /// B-neg 1: post-lock, UNBURIED new funding (depth 0) must get the
+    /// temporary not-buried rejection — the designed retry loop (the
+    /// quiet-VM 0ms rbf stall IS this temporary loop, not a policy
+    /// bug). Kills the body-gutting and `delete !` survivors.
+    #[test]
+    fn strict_class_b_neg_unburied_post_lock_rejects() {
+        let node_ctx = test_node_ctx(1);
+
+        let mut chan_ctx = test_chan_ctx(&node_ctx, 1, 1_000_000);
+        let mut ftx_ctx = TestFundingTxContext::new();
+        ftx_ctx.add_wallet_input(&node_ctx, SpendType::P2wpkh, 1, 3_000_000);
+        ftx_ctx.add_wallet_output(&node_ctx, SpendType::P2wpkh, 1, 1_999_000);
+        let fvout = ftx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, 1_000_000);
+        let funding_tx = ftx_ctx.to_tx();
+        assert!(
+            funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &funding_tx, fvout).is_none(),
+            "funding accepted"
+        );
+        let channel_id = chan_ctx.channel_id.clone();
+
+        node_ctx.node.with_channel(&channel_id, |chan| {
+            let monitor = chan.monitor.as_monitor(Box::new(RailProvider {
+                parameters: chan.make_channel_parameters(),
+            }));
+            monitor.on_add_block(&[], &BlockHash::all_zeros());
+            monitor.on_add_block(&[funding_tx.clone()], &BlockHash::all_zeros());
+            Ok(())
+        })
+        .expect("confirm F0");
+
+        let _splice_tx = open_splice_window(&node_ctx, &mut chan_ctx, 900_000);
+
+        // funding_locked closes the window while the splice output is
+        // still UNCONFIRMED (depth 0) — the pre-burial live shape.
+        node_ctx.node
+            .with_channel(&channel_id, |chan| {
+                chan.confirm_funding_locked(&chan_ctx.setup.funding_outpoint).map(|_| ())
+            })
+            .expect("funding locked");
+
+        install_onchain_validator(&node_ctx.node);
+
+        let result = node_ctx.node.with_channel(&channel_id, |chan| {
+            chan.enforcement_state
+                .set_next_counterparty_commit_num_for_testing(1, make_test_pubkey(REMOTE_POINT_NDX));
+            let (tx, witscripts) =
+                view_counterparty_commitment(chan, &chan.setup.clone(), 1, 0, 790_000, 100_000);
+            chan.sign_counterparty_commitment_tx(
+                &tx,
+                &witscripts,
+                &make_test_pubkey(REMOTE_POINT_NDX),
+                1,
+                0,
+                vec![],
+                vec![],
+            )
+        });
+        let err = result
+            .err()
+            .expect("unburied post-lock commitment must be temporarily rejected");
+        assert!(
+            err.message().contains("not buried"),
+            "expected the not-buried temporary rejection, got: {}",
+            err.message()
+        );
+    }
+
+    /// B-neg 2: DURING the splice window the unconfirmed splice output
+    /// IS the protocol's commit target — the burial check must not
+    /// fire (the fork's splice_pending carve-out). Kills `&&`→`||`
+    /// (which would run the checks in-window and reject at depth 0).
+    #[test]
+    fn strict_class_b_neg_in_window_unconfirmed_signs() {
+        let node_ctx = test_node_ctx(1);
+        let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+        let _splice_tx = open_splice_window(&node_ctx, &mut chan_ctx, 1_100_000);
+        let channel_id = chan_ctx.channel_id.clone();
+        install_onchain_validator(&node_ctx.node);
+
+        node_ctx.node.with_channel(&channel_id, |chan| {
+            chan.enforcement_state
+                .set_next_counterparty_commit_num_for_testing(1, make_test_pubkey(REMOTE_POINT_NDX));
+            let (tx, witscripts) =
+                view_counterparty_commitment(chan, &chan.setup.clone(), 1, 3755, 1_084_473, 0);
+            chan.sign_counterparty_commitment_tx(
+                &tx,
+                &witscripts,
+                &make_test_pubkey(REMOTE_POINT_NDX),
+                1,
+                3755,
+                vec![],
+                vec![],
+            )
+            .map(|_| ())
+        })
+        .expect("in-window commitment against the unconfirmed splice output must sign");
+    }
+
+    /// B-neg 3: a foreign (non-splice) spend of the funding classifies
+    /// as a close; once closing_depth > 0 the commitment must get the
+    /// "closed on-chain" policy rejection. Kills the `>`→`==` and
+    /// `>`→`<` boundary survivors (1==0 / 1<0 are false → they'd sign).
+    #[test]
+    fn strict_class_b_neg_closed_funding_rejects() {
+        let node_ctx = test_node_ctx(1);
+        let mut chan_ctx = test_chan_ctx(&node_ctx, 1, 1_000_000);
+        let mut ftx_ctx = TestFundingTxContext::new();
+        ftx_ctx.add_wallet_input(&node_ctx, SpendType::P2wpkh, 1, 3_000_000);
+        ftx_ctx.add_wallet_output(&node_ctx, SpendType::P2wpkh, 1, 1_999_000);
+        let fvout = ftx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, 1_000_000);
+        let funding_tx = ftx_ctx.to_tx();
+        assert!(
+            funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &funding_tx, fvout).is_none(),
+            "funding accepted"
+        );
+        let channel_id = chan_ctx.channel_id.clone();
+
+        node_ctx.node.with_channel(&channel_id, |chan| {
+            let monitor = chan.monitor.as_monitor(Box::new(RailProvider {
+                parameters: chan.make_channel_parameters(),
+            }));
+            monitor.on_add_block(&[], &BlockHash::all_zeros());
+            monitor.on_add_block(&[funding_tx.clone()], &BlockHash::all_zeros());
+            Ok(())
+        })
+        .expect("confirm F0");
+
+        // A FOREIGN single-input spend of the funding outpoint (not the
+        // channel's splice — no splice window was opened): the monitor
+        // classifies it as a close; one more block grows closing_depth.
+        let mut close_ctx = TestFundingTxContext::new();
+        close_ctx.inputs.push(bitcoin::TxIn {
+            previous_output: chan_ctx.setup.funding_outpoint,
+            script_sig: bitcoin::ScriptBuf::new(),
+            sequence: bitcoin::Sequence::MAX,
+            witness: bitcoin::Witness::default(),
+        });
+        close_ctx.add_wallet_output(&node_ctx, SpendType::P2wpkh, 1, 990_000);
+        let close_tx = close_ctx.to_tx();
+        node_ctx.node.with_channel(&channel_id, |chan| {
+            let monitor = chan.monitor.as_monitor(Box::new(RailProvider {
+                parameters: chan.make_channel_parameters(),
+            }));
+            monitor.on_add_block(&[close_tx], &BlockHash::all_zeros());
+            monitor.on_add_block(&[], &BlockHash::all_zeros());
+            Ok(())
+        })
+        .expect("feed close spend");
+
+        install_onchain_validator(&node_ctx.node);
+
+        let result = node_ctx.node.with_channel(&channel_id, |chan| {
+            chan.enforcement_state
+                .set_next_counterparty_commit_num_for_testing(1, make_test_pubkey(REMOTE_POINT_NDX));
+            let (tx, witscripts) =
+                view_counterparty_commitment(chan, &chan.setup.clone(), 1, 0, 790_000, 100_000);
+            chan.sign_counterparty_commitment_tx(
+                &tx,
+                &witscripts,
+                &make_test_pubkey(REMOTE_POINT_NDX),
+                1,
+                0,
+                vec![],
+                vec![],
+            )
+        });
+        let err = result
+            .err()
+            .expect("commitment on a closed funding must be rejected");
+        assert!(
+            err.message().contains("closed on-chain"),
+            "expected the closed-on-chain rejection, got: {}",
+            err.message()
+        );
+    }
+
+    // ------------------------------------------------------------------
     // Class D rails (RED today — the fix contract)
     // ------------------------------------------------------------------
 
