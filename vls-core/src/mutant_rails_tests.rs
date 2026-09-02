@@ -42,7 +42,10 @@ fn splice_tx_spending(old_outpoint: OutPoint) -> Transaction {
 
 /// The splice A → B dance through the setup path (funding B accepted,
 /// snapshot installed) — no signatures, no lock.
-fn splice_a_to_b(node_ctx: &crate::util::test_utils::TestNodeContext, chan_ctx: &mut crate::util::test_utils::TestChannelContext) -> OutPoint {
+pub(crate) fn splice_a_to_b(
+    node_ctx: &crate::util::test_utils::TestNodeContext,
+    chan_ctx: &mut crate::util::test_utils::TestChannelContext,
+) -> OutPoint {
     let old_setup = chan_ctx.setup.clone();
     let mut tx_ctx = TestFundingTxContext::new();
     tx_ctx.inputs.push(TxIn {
@@ -92,11 +95,7 @@ fn rail_monitor_watches_each_funding_era() {
         .node
         .with_channel(&channel_id, |chan| Ok(chan.monitor.watched_funding_txids()))
         .expect("watch read");
-    assert_eq!(
-        watched_a,
-        vec![outpoint_a.txid],
-        "the monitor must watch the opening funding txid"
-    );
+    assert_eq!(watched_a, vec![outpoint_a.txid], "the monitor must watch the opening funding txid");
 
     let outpoint_b = splice_a_to_b(&node_ctx, &mut chan_ctx);
     let watched_b = node_ctx
@@ -198,7 +197,15 @@ fn rail_phase2_splice_window_straggler_stores_exactly_once() {
     let (sig1b, hsig1b) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx1b);
     let res = node_ctx.node.with_channel(&channel_id, |chan| {
         chan.validate_holder_commitment_tx_phase2(
-            1, 3755, 1_091_695, 0, vec![], vec![], &sig1b, &hsig1b,
+            chan.setup.funding_outpoint,
+            1,
+            3755,
+            1_091_695,
+            0,
+            vec![],
+            vec![],
+            &sig1b,
+            &hsig1b,
         )
     });
     assert!(res.is_ok(), "the legit window re-sign must validate: {:?}", res.err());
@@ -212,7 +219,15 @@ fn rail_phase2_splice_window_straggler_stores_exactly_once() {
     let (sig3, hsig3) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx3);
     let _ = node_ctx.node.with_channel(&channel_id, |chan| {
         chan.validate_holder_commitment_tx_phase2(
-            3, 3755, 1_091_695, 0, vec![], vec![], &sig3, &hsig3,
+            chan.setup.funding_outpoint,
+            3,
+            3755,
+            1_091_695,
+            0,
+            vec![],
+            vec![],
+            &sig3,
+            &hsig3,
         )
     });
     assert_eq!(
@@ -240,10 +255,21 @@ fn rail_phase2_retry_same_accepted_twice() {
     // second one is the retransmission the era-aware resolver must accept.
     let mut ctx1 = channel_commitment(&node_ctx, &chan_ctx, 1, 3755, 996_245, 0, vec![], vec![]);
     let (sig1, hsig1) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx1);
-    let call = |node_ctx: &crate::util::test_utils::TestNodeContext, chan_ctx: &crate::util::test_utils::TestChannelContext, sig1: &bitcoin::secp256k1::ecdsa::Signature, hsig1: &Vec<bitcoin::secp256k1::ecdsa::Signature>| {
+    let call = |node_ctx: &crate::util::test_utils::TestNodeContext,
+                chan_ctx: &crate::util::test_utils::TestChannelContext,
+                sig1: &bitcoin::secp256k1::ecdsa::Signature,
+                hsig1: &Vec<bitcoin::secp256k1::ecdsa::Signature>| {
         node_ctx.node.with_channel(&chan_ctx.channel_id, |chan| {
             chan.validate_holder_commitment_tx_phase2(
-                1, 3755, 996_245, 0, vec![], vec![], sig1, hsig1,
+                chan.setup.funding_outpoint,
+                1,
+                3755,
+                996_245,
+                0,
+                vec![],
+                vec![],
+                sig1,
+                hsig1,
             )
         })
     };
@@ -308,10 +334,7 @@ fn rail_splice_lock_installs_push_split_baseline() {
     chan_ctx.setup.push_value_msat = 50_000_000;
     let outpoint_b = splice_a_to_b(&node_ctx, &mut chan_ctx);
 
-    node_ctx
-        .node
-        .confirm_funding_lock(&channel_id, &outpoint_b)
-        .expect("splice funding locked");
+    node_ctx.node.confirm_funding_lock(&channel_id, &outpoint_b).expect("splice funding locked");
 
     let info = node_ctx
         .node

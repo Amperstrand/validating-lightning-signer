@@ -863,7 +863,13 @@ impl EnforcementState {
         &self,
         view_outpoint: &OutPoint,
     ) -> Option<&CommitmentInfo2> {
-        if self.counterparty_commitment_funding.is_none_or(|f| f == *view_outpoint) {
+        // The channel slot is the read for its era only while it is
+        // POPULATED: snapshot_funding_for_splice takes it into the
+        // per-funding record at a splice swap, leaving a stale tag —
+        // a retiring-era retransmission must then read the snapshot.
+        if self.counterparty_commitment_funding.is_none_or(|f| f == *view_outpoint)
+            && self.current_counterparty_commit_info.is_some()
+        {
             self.current_counterparty_commit_info.as_ref()
         } else if let Some(prev) = self.prev_funding_commitment.as_ref() {
             if prev.outpoint == *view_outpoint {

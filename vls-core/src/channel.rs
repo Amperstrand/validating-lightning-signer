@@ -785,6 +785,7 @@ impl Channel {
     #[instrument(skip(self))]
     pub fn sign_counterparty_commitment_tx_phase2(
         &mut self,
+        funding_outpoint: OutPoint,
         remote_per_commitment_point: &PublicKey,
         commitment_number: u64,
         feerate_per_kw: u32,
@@ -793,9 +794,13 @@ impl Channel {
         offered_htlcs: Vec<HTLCInfo2>,
         received_htlcs: Vec<HTLCInfo2>,
     ) -> Result<(Signature, Vec<Signature>), Status> {
+        // Era token first: resolve the funding view this commitment
+        // belongs to BEFORE anything else — an unknown era aborts the
+        // splice with zero state mutation (issue #112).
+        let view = self.setup_for_outpoint(&funding_outpoint)?;
         // Since we didn't have the value at the real open, validate it now.
         let validator = self.validator();
-        validator.validate_channel_value(&self.setup)?;
+        validator.validate_channel_value(&view)?;
 
         let info2 = self.build_counterparty_commitment_info(
             to_holder_value_sat,
@@ -811,7 +816,7 @@ impl Channel {
             &*state,
             None,
             Some(&info2),
-            &self.setup,
+            &view,
             self.prev_setup.as_ref(),
         )?;
         let incoming_payment_summary =
@@ -821,7 +826,7 @@ impl Channel {
             &self.enforcement_state,
             commitment_number,
             &remote_per_commitment_point,
-            &self.setup,
+            &view,
             &self.get_chain_state(),
             &info2,
         )?;
@@ -833,7 +838,8 @@ impl Channel {
 
         // since we independently re-create the tx, this also performs the
         // policy-commitment-* controls
-        let commitment_tx = self.make_counterparty_commitment_tx(
+        let commitment_tx = self.make_counterparty_commitment_tx_with_setup(
+            &view,
             remote_per_commitment_point,
             commitment_number,
             feerate_per_kw,
@@ -842,7 +848,7 @@ impl Channel {
             htlcs,
         );
 
-        let channel_parameters = self.make_channel_parameters();
+        let channel_parameters = self.make_channel_parameters_with_setup(&view);
         #[cfg(not(fuzzing))]
         let (sig, htlc_sigs) = catch_panic!(
             self.keys.sign_counterparty_commitment(
@@ -877,7 +883,7 @@ impl Channel {
         let funding_changed = self
             .enforcement_state
             .counterparty_commitment_funding
-            .map_or(false, |f| f != self.setup.funding_outpoint);
+            .map_or(false, |f| f != view.funding_outpoint);
         validator.set_next_counterparty_commit_num(
             &mut self.enforcement_state,
             commitment_number + 1,
@@ -885,7 +891,7 @@ impl Channel {
             info2.clone(),
             funding_changed,
         )?;
-        self.enforcement_state.counterparty_commitment_funding = Some(self.setup.funding_outpoint);
+        self.enforcement_state.counterparty_commitment_funding = Some(view.funding_outpoint);
 
         state.apply_payments(
             &self.id0,
@@ -1201,6 +1207,7 @@ impl Channel {
     /// received.
     pub fn validate_holder_commitment_tx_phase2(
         &mut self,
+        funding_outpoint: OutPoint,
         commitment_number: u64,
         feerate_per_kw: u32,
         to_holder_value_sat: u64,
@@ -1210,6 +1217,10 @@ impl Channel {
         counterparty_commit_sig: &Signature,
         counterparty_htlc_sigs: &[Signature],
     ) -> Result<(), Status> {
+        // Era token first: resolve the funding view this commitment
+        // belongs to BEFORE anything else — an unknown era aborts the
+        // splice with zero state mutation (issue #112).
+        let view = self.setup_for_outpoint(&funding_outpoint)?;
         let per_commitment_point = &self.get_per_commitment_point(commitment_number)?;
         let info2 = self.build_holder_commitment_info(
             to_holder_value_sat,
@@ -1225,7 +1236,7 @@ impl Channel {
             &*state,
             Some(&info2),
             None,
-            &self.setup,
+            &view,
             self.prev_setup.as_ref(),
         )?;
 
@@ -1238,7 +1249,7 @@ impl Channel {
                 &self.enforcement_state,
                 commitment_number,
                 &per_commitment_point,
-                &self.setup,
+                &view,
                 &self.get_chain_state(),
                 &info2,
             )
@@ -1266,7 +1277,8 @@ impl Channel {
 
         let txkeys = self.make_holder_tx_keys(&per_commitment_point);
         // policy-commitment-*
-        let recomposed_tx = self.make_holder_commitment_tx(
+        let recomposed_tx = self.make_holder_commitment_tx_with_setup(
+            &view,
             commitment_number,
             &per_commitment_point,
             feerate_per_kw,
@@ -1278,7 +1290,7 @@ impl Channel {
         info!("#hang-probe: delta+payments validated");
         #[cfg(not(fuzzing))]
         self.check_holder_tx_signatures(
-            &self.setup,
+            &view,
             &per_commitment_point,
             &txkeys,
             feerate_per_kw,
@@ -1303,8 +1315,7 @@ impl Channel {
         if commitment_number == self.enforcement_state.next_holder_commit_num
             || (self.enforcement_state.prev_funding_commitment.is_some()
                 && commitment_number + 1 == self.enforcement_state.next_holder_commit_num
-                && self.enforcement_state.holder_commitment_funding
-                    != Some(self.setup.funding_outpoint))
+                && self.enforcement_state.holder_commitment_funding != Some(view.funding_outpoint))
         {
             let counterparty_signatures = CommitmentSignatures(
                 counterparty_commit_sig.clone(),
@@ -1313,8 +1324,7 @@ impl Channel {
             if commitment_number == self.enforcement_state.next_holder_commit_num {
                 self.enforcement_state.next_holder_commit_info =
                     Some((info2, counterparty_signatures));
-                self.enforcement_state.holder_commitment_funding =
-                    Some(self.setup.funding_outpoint);
+                self.enforcement_state.holder_commitment_funding = Some(view.funding_outpoint);
             } else {
                 // BOLT #2: MUST NOT respond with `revoke_and_ack`.
                 // REF BOLTs #1160 L1852 (splice commitments carry no revoke)
@@ -2244,6 +2254,44 @@ impl Channel {
         Ok(self.setup.clone())
     }
 
+    /// Era router for the value-based (`_phase2`) commitment forms:
+    /// resolve the caller's explicit funding token to its live view.
+    /// Mirrors [`Self::setup_for_tx`], anchored on the token instead of
+    /// a tx input — the phase2 protocol carries no transaction, so the
+    /// caller names the era the way the wire does.
+    /// REF BOLTs #1160 L3130 @1528972: `commitment_signed` MUST set
+    /// `funding_txid` to the funding transaction spent by this
+    /// commitment transaction.
+    ///
+    /// Unlike the tx router there is NO fallback: the tx path verifies
+    /// its values against a recomposition of the real tx, but phase2
+    /// values are unverifiable on their own — a silent fallthrough to
+    /// the current setup would mis-bind old-era values to the new
+    /// funding (the #106 wedge class). An unknown token is a
+    /// splice-abort-class rejection (issue #112).
+    pub fn setup_for_outpoint(&self, outpoint: &OutPoint) -> Result<ChannelSetup, Status> {
+        if *outpoint == self.setup.funding_outpoint {
+            return Ok(self.setup.clone());
+        }
+        if let Some(ref prev) = self.prev_setup {
+            if *outpoint == prev.funding_outpoint {
+                return Ok(prev.clone());
+            }
+        }
+        if let Some(ref pp) = self.prev_prev_setup {
+            if *outpoint == pp.funding_outpoint {
+                return Ok(pp.clone());
+            }
+        }
+        Err(Status::failed_precondition(format!(
+            "policy-splice-abort: funding era {} not found (current {}, prev {:?}, prev_prev {:?})",
+            outpoint,
+            self.setup.funding_outpoint,
+            self.prev_setup.as_ref().map(|s| s.funding_outpoint),
+            self.prev_prev_setup.as_ref().map(|s| s.funding_outpoint),
+        )))
+    }
+
     /// Splice compatibility (the funding7 `is_compatible` shape): only
     /// the funding identity and balance fields may differ; the
     /// counterparty funding key may rotate; unset shutdown scripts stay
@@ -2671,6 +2719,7 @@ impl Channel {
 
         // add an HTLC
         self.validate_holder_commitment_tx_phase2(
+            self.setup.funding_outpoint,
             commit_num,
             feerate,
             value_to_holder,

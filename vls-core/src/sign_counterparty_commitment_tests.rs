@@ -291,6 +291,7 @@ mod tests {
         let (signature, _) = node
             .with_channel(&channel_id, |chan| {
                 chan.sign_counterparty_commitment_tx_phase2(
+                    chan.setup.funding_outpoint,
                     &remote_percommitment_point,
                     commit_num,
                     0, // we are not looking at HTLCs yet
@@ -441,6 +442,7 @@ mod tests {
                 )?
             } else {
                 chan.sign_counterparty_commitment_tx_phase2(
+                    chan.setup.funding_outpoint,
                     &remote_percommitment_point,
                     commit_num,
                     feerate_per_kw,
@@ -907,6 +909,7 @@ mod tests {
                 )?
             } else {
                 chan.sign_counterparty_commitment_tx_phase2(
+                    chan.setup.funding_outpoint,
                     &remote_percommitment_point,
                     commit_num,
                     feerate_per_kw,
@@ -954,6 +957,7 @@ mod tests {
                 )?
             } else {
                 chan.sign_counterparty_commitment_tx_phase2(
+                    chan.setup.funding_outpoint,
                     &remote_percommitment_point,
                     commit_num,
                     feerate_per_kw,

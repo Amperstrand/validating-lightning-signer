@@ -814,13 +814,16 @@ impl Validator for SimpleValidator {
             // The CommitmentInfo2 must be the same as previously
             // (era-aware: a same-number retry against the RETIRING
             // funding's view reads the snapshot's copy — the channel
-            // fields may already hold the new funding's era)
-            let prev_commit_info =
-                if estate.counterparty_commitment_funding == Some(setup.funding_outpoint) {
-                    estate.get_previous_counterparty_commit_info(commit_num)
-                } else {
-                    estate.counterparty_commit_info_for(&setup.funding_outpoint).cloned()
-                };
+            // fields may already hold the new funding's era, or be
+            // TAKEN by snapshot_funding_for_splice leaving a stale tag)
+            let prev_commit_info = if estate.counterparty_commitment_funding
+                == Some(setup.funding_outpoint)
+                && estate.get_previous_counterparty_commit_info(commit_num).is_some()
+            {
+                estate.get_previous_counterparty_commit_info(commit_num)
+            } else {
+                estate.counterparty_commit_info_for(&setup.funding_outpoint).cloned()
+            };
             if Some(info2) != prev_commit_info.as_ref() {
                 #[cfg(not(feature = "log_pretty_print"))]
                 policy_log!(

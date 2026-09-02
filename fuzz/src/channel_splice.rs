@@ -170,6 +170,7 @@ impl SpliceChannelFuzz {
                     let (to_holder, to_counterparty) = (value / 2, value / 2 - 10_000);
                     let first = self.node.with_channel(&self.channel_id, |chan| {
                         chan.validate_holder_commitment_tx_phase2(
+                            chan.setup.funding_outpoint,
                             num,
                             2000,
                             to_holder,
@@ -183,6 +184,7 @@ impl SpliceChannelFuzz {
                     if first.is_ok() {
                         let retry_shifted = self.node.with_channel(&self.channel_id, |chan| {
                             chan.validate_holder_commitment_tx_phase2(
+                                chan.setup.funding_outpoint,
                                 num,
                                 2000,
                                 to_holder - 1_000,

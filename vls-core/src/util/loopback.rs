@@ -194,6 +194,7 @@ impl LoopbackChannelSigner {
                 let (offered_htlcs, received_htlcs) =
                     LoopbackChannelSigner::convert_to_htlc_info2(holder_tx.nondust_htlcs());
                 chan.validate_holder_commitment_tx_phase2(
+                    chan.setup.funding_outpoint,
                     commitment_number,
                     holder_tx.negotiated_feerate_per_kw(),
                     holder_tx.to_broadcaster_value_sat(),
@@ -379,6 +380,7 @@ impl EcdsaChannelSigner for LoopbackChannelSigner {
                 chan.htlcs_fulfilled(inbound_htlc_preimages);
                 chan.htlcs_fulfilled(outbound_htlc_preimages);
                 chan.sign_counterparty_commitment_tx_phase2(
+                    chan.setup.funding_outpoint,
                     &per_commitment_point,
                     commitment_number,
                     feerate_per_kw,

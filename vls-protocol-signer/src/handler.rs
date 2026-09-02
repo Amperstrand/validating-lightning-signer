@@ -755,9 +755,7 @@ impl Handler for RootHandler {
                 let pubkey = match PublicKey::from_slice(&m.point.0) {
                     Ok(k) => k,
                     Err(_) => {
-                        return Err(Error::Signing(Status::invalid_argument(
-                            "malformed pubkey",
-                        )))
+                        return Err(Error::Signing(Status::invalid_argument("malformed pubkey")))
                     }
                 };
                 let secret = self.node.ecdh(&pubkey).as_slice().try_into().unwrap();
@@ -1238,6 +1236,26 @@ impl ChannelHandler {
     pub fn dbid(&self) -> u64 {
         self.dbid
     }
+
+    /// Resolve the funding era for the legacy value-based (`*2`)
+    /// commitment messages. Outside a splice window the era is the
+    /// current funding and unambiguous; inside the window the wire
+    /// cannot say which funding view the values belong to, and a
+    /// mis-bound sign/validate is the #106/#112 cross-scale class —
+    /// refuse (the tx-carrying form routes by its tx input).
+    fn resolve_legacy_phase2_funding(&self) -> Result<lightning_signer::bitcoin::OutPoint> {
+        self.node
+            .with_channel(&self.channel_id, |chan| {
+                if chan.prev_setup.is_some() || chan.prev_prev_setup.is_some() {
+                    Err(Status::failed_precondition(
+                        "value-based commitment protocol cannot disambiguate the funding era during a splice window; use the tx-carrying form",
+                    ))
+                } else {
+                    Ok(chan.setup.funding_outpoint)
+                }
+            })
+            .map_err(Error::Signing)
+    }
 }
 
 impl Handler for ChannelHandler {
@@ -1257,9 +1275,7 @@ impl Handler for ChannelHandler {
                 let pubkey = match PublicKey::from_slice(&m.point.0) {
                     Ok(k) => k,
                     Err(_) => {
-                        return Err(Error::Signing(Status::invalid_argument(
-                            "malformed pubkey",
-                        )))
+                        return Err(Error::Signing(Status::invalid_argument("malformed pubkey")))
                     }
                 };
                 let secret = self.node.ecdh(&pubkey).as_slice().try_into().unwrap();
@@ -1424,8 +1440,7 @@ impl Handler for ChannelHandler {
                 let commit_num = m.commitment_number;
                 info!(
                     "#6870-check: SignRemoteCommitmentTx num={} point={}",
-                    commit_num,
-                    remote_per_commitment_point
+                    commit_num, remote_per_commitment_point
                 );
                 let feerate_sat_per_kw = m.feerate;
                 // Flip offered and received
@@ -1456,14 +1471,20 @@ impl Handler for ChannelHandler {
                 let commit_num = m.commitment_number;
                 info!(
                     "#6870-check: SignRemoteCommitmentTx2 num={} point={}",
-                    commit_num,
-                    remote_per_commitment_point
+                    commit_num, remote_per_commitment_point
                 );
                 let feerate_sat_per_kw = m.feerate;
                 // Flip offered and received
                 let (offered_htlcs, received_htlcs) = extract_htlcs(&m.htlcs);
+                // The value-based wire carries no funding-era token (the
+                // tx-carrying form routes by its input; eclair's wire names
+                // the funding_txid). Outside a splice window the era is
+                // unambiguous; inside, a mis-bound sign is the #106/#112
+                // class — refuse rather than guess.
+                let funding_outpoint = self.resolve_legacy_phase2_funding()?;
                 let (sig, htlc_sigs) = self.node.with_channel(&self.channel_id, |chan| {
                     chan.sign_counterparty_commitment_tx_phase2(
+                        funding_outpoint,
                         &remote_per_commitment_point,
                         commit_num,
                         feerate_sat_per_kw,
@@ -1579,11 +1600,7 @@ impl Handler for ChannelHandler {
                             // The newer protocol defers until an explicit `RevokeCommitmentTx`
                             if commit_num > 0 {
                                 Ok((chan.get_per_commitment_point(commit_num + 1)?, None))
-                            } else if chan
-                                .enforcement_state
-                                .next_holder_commit_info
-                                .is_some()
-                            {
+                            } else if chan.enforcement_state.next_holder_commit_info.is_some() {
                                 // Commitment 0 is special because it doesn't
                                 // have a previous commitment.  Since the
                                 // revocation of the previous commitment normally
@@ -1628,9 +1645,11 @@ impl Handler for ChannelHandler {
                         ecdsa::Signature::from_compact(&s.signature.0).expect("signature")
                     })
                     .collect();
+                let funding_outpoint = self.resolve_legacy_phase2_funding()?;
                 let (next_per_commitment_point, old_secret) =
                     self.node.with_channel(&self.channel_id, |chan| {
                         chan.validate_holder_commitment_tx_phase2(
+                            funding_outpoint,
                             commit_num,
                             feerate_sat_per_kw,
                             m.to_local_value_sat,
@@ -1647,11 +1666,7 @@ impl Handler for ChannelHandler {
                             // The newer protocol defers until an explicit `RevokeCommitmentTx`
                             if commit_num > 0 {
                                 Ok((chan.get_per_commitment_point(commit_num + 1)?, None))
-                            } else if chan
-                                .enforcement_state
-                                .next_holder_commit_info
-                                .is_some()
-                            {
+                            } else if chan.enforcement_state.next_holder_commit_info.is_some() {
                                 // Commitment 0 is special because it doesn't
                                 // have a previous commitment.  Since the
                                 // revocation of the previous commitment normally
@@ -1829,15 +1844,14 @@ fn sign_remote_htlc_to_us(
     _option_anchors: bool,
     input: u32,
 ) -> Result<Box<dyn SerBolt>> {
-    let remote_per_commitment_point =
-        match PublicKey::from_slice(&remote_per_commitment_point.0) {
-            Ok(k) => k,
-            Err(_) => {
-                return Err(Error::Signing(Status::invalid_argument(
-                    "malformed remote per commitment point",
-                )))
-            }
-        };
+    let remote_per_commitment_point = match PublicKey::from_slice(&remote_per_commitment_point.0) {
+        Ok(k) => k,
+        Err(_) => {
+            return Err(Error::Signing(Status::invalid_argument(
+                "malformed remote per commitment point",
+            )))
+        }
+    };
     let redeemscript = ScriptBuf::from(wscript.0.clone());
     let input = input as usize;
     let htlc_amount =

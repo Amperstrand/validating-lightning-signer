@@ -135,6 +135,10 @@ impl Clone for Box<dyn CommitmentPointProvider> {
 mod sync;
 
 #[cfg(test)]
+mod mutant_rails_tests;
+#[cfg(test)]
+mod phase2_era_rails_tests;
+#[cfg(test)]
 mod setup_channel_tests;
 #[cfg(test)]
 mod sign_counterparty_commitment_tests;
@@ -154,8 +158,6 @@ mod sign_mutual_close_tests;
 mod sign_onchain_tx_tests;
 #[cfg(test)]
 mod sign_splice_tests;
-#[cfg(test)]
-mod mutant_rails_tests;
 #[cfg(all(test, feature = "splice_trace"))]
 mod splice_scenario_tests;
 #[cfg(test)]

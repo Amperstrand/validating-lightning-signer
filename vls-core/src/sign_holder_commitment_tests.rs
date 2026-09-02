@@ -154,6 +154,7 @@ mod tests {
 
         node_ctx.node.with_channel(&chan_ctx.channel_id, |chan| {
             chan.validate_holder_commitment_tx_phase2(
+                chan.setup.funding_outpoint,
                 next_commit_tx_ctx.commit_num,
                 next_commit_tx_ctx.feerate_per_kw,
                 next_commit_tx_ctx.to_broadcaster,

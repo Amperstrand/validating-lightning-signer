@@ -223,6 +223,7 @@ impl ChannelFuzz {
                 .map(|_| self.dummy_sig.clone())
                 .collect::<Vec<_>>();
             chan.validate_holder_commitment_tx_phase2(
+                chan.setup.funding_outpoint,
                 self.holder_commitment_number,
                 tx.feerate_per_kw,
                 tx.to_broadcaster_value_sat - self.fee,
@@ -243,6 +244,7 @@ impl ChannelFuzz {
             let remote_per_commitment_point = self.dummy_point;
             // like validate_current, but broadcaster is the counterparty, so swap the values
             chan.sign_counterparty_commitment_tx_phase2(
+                chan.setup.funding_outpoint,
                 &remote_per_commitment_point,
                 self.cp_commitment_number + 1,
                 tx.feerate_per_kw,

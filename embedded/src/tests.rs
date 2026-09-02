@@ -307,6 +307,7 @@ fn next_state(
 
     let (sig, htlc_sigs) = channel
         .sign_counterparty_commitment_tx_phase2(
+            channel.setup.funding_outpoint,
             &per_commitment_point1,
             commit_num,
             0,
@@ -319,6 +320,7 @@ fn next_state(
 
     let (sig1, htlc_sigs1) = channel1
         .sign_counterparty_commitment_tx_phase2(
+            channel1.setup.funding_outpoint,
             &per_commitment_point,
             commit_num,
             0,
@@ -331,6 +333,7 @@ fn next_state(
 
     channel
         .validate_holder_commitment_tx_phase2(
+            channel.setup.funding_outpoint,
             commit_num,
             0,
             to_holder,
@@ -345,6 +348,7 @@ fn next_state(
 
     channel1
         .validate_holder_commitment_tx_phase2(
+            channel1.setup.funding_outpoint,
             commit_num,
             0,
             to_counterparty,
