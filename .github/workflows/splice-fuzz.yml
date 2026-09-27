@@ -1,0 +1,53 @@
+# Fuzz seed/regression replay (issue #2 step 3).
+#
+# Replays the committed regression corpus (fuzz/regression/) plus the
+# seed tests as plain cargo tests. The fuzzing cfg is REQUIRED — the
+# harness uses dummy signatures and sig checks are cfg(fuzzing)-skipped
+# (see fuzz/README.md; without the flag these tests fail "commit sig
+# verify failed", which is the invocation, not a regression).
+#
+# Toolchain pin: rust 1.98.1 stable (validated with this replay).
+name: splice-fuzz
+
+on:
+  push:
+    branches: [inr2-splice-dev]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: splice-fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz-regression:
+    name: seed + regression corpus replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: fuzz
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.98.1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+
+      - name: Replay seed/regression tests (fuzzing cfg required)
+        run: RUSTFLAGS="--cfg=fuzzing" cargo test
+
+      - name: Corpus sanity (committed regression inputs present)
+        run: |
+          test -d regression/splice_channel
+          n=$(find regression/splice_channel -type f | wc -l)
+          echo "regression/splice_channel corpus files: $n"
+          test "$n" -ge 1
