@@ -45,7 +45,7 @@ branch = "inr2-splice-dev"
 # The deterministic (no live nodes) splice suites CI must keep green:
 unit_suite = "cargo test -p vls-core --features test_utils splice"
 scenario_suite = "cargo test -p vls-core --features test_utils,splice_trace splice_scenario"
-restore_suite = "cargo test -p vls-core-test --test splice_restore_test"
+restore_suite = "cd vls-core-test && cargo test --test splice_restore_test"
 fuzz_suite = "cd fuzz && RUSTFLAGS=--cfg=fuzzing cargo test"
 
 [verification_log]
