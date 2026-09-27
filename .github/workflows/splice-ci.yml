@@ -1,0 +1,73 @@
+# Deterministic splice CI (issue #2 step 2).
+#
+# Fast, no live nodes: repository status drift check + the three
+# deterministic splice suites (unit, traced scenario, restore-path).
+# The fuzz regression replay lives in splice-fuzz.yml; the live CLN
+# ladder is a manual/scheduled job and never runs per-PR.
+#
+# Toolchain pins (deliberate bumps only):
+#   - rust 1.98.1 stable (MSRV 1.85, workspace rust-version)
+#   - txoo 4220cf69e56961dd766f3bcb0de7158fd9188562 (= release 0.10.0,
+#     satisfies the workspace [patch.crates-io] path pin)
+name: splice-ci
+
+on:
+  push:
+    branches: [inr2-splice-dev]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: splice-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  splice-status:
+    name: status manifest drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/splice-status.md consistency
+        run: ./contrib/check-splice-status.sh
+
+  deterministic-splice:
+    name: deterministic splice suites
+    needs: splice-status
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.98.1
+
+      # The workspace [patch.crates-io] resolves txoo from a sibling
+      # checkout; pin the exact revision the suites are validated on.
+      - name: Pin txoo sibling (release 0.10.0)
+        run: |
+          git clone --quiet https://gitlab.com/lightning-signer/txoo.git "${GITHUB_WORKSPACE}/../txoo-src"
+          git -C "${GITHUB_WORKSPACE}/../txoo-src" checkout --quiet 4220cf69e56961dd766f3bcb0de7158fd9188562
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            fuzz
+
+      - name: Splice unit tests (sign_splice)
+        run: cargo test -p vls-core --features test_utils splice
+
+      - name: Splice scenario tests (traced, single-threaded)
+        run: cargo test -p vls-core --features test_utils,splice_trace splice_scenario -- --test-threads=1
+
+      - name: Splice restore integration test
+        # vls-core-test is EXCLUDED from the workspace (own Cargo.lock,
+        # resolves txoo from crates.io) — run inside the crate, not -p.
+        working-directory: vls-core-test
+        run: cargo test --test splice_restore_test
