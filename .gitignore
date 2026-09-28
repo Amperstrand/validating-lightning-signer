@@ -19,3 +19,7 @@ rusty-tags.emacs
 # IDEs
 .vscode
 .idea
+
+# python bytecode (trace tooling runs in-tree)
+__pycache__/
+*.pyc
