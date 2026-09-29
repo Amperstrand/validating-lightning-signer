@@ -139,6 +139,8 @@ mod mutant_rails_tests;
 #[cfg(test)]
 mod phase2_era_rails_tests;
 #[cfg(test)]
+mod splice_era_totals_rails_tests;
+#[cfg(test)]
 mod setup_channel_tests;
 #[cfg(test)]
 mod sign_counterparty_commitment_tests;
