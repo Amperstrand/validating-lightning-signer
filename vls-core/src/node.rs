@@ -2051,7 +2051,12 @@ impl Node {
                 // BOLT #2: MUST set `funding_txid` in each `commitment_signed` message to match the
                 // BOLT #2: funding transaction spent by that commitment transaction.
                 // REF VLS 4b9cffb:EnforcementStateWithFunding (2023 per-funding overlays)
-                spliced.enforcement_state.snapshot_funding_for_splice(old_funding_outpoint);
+                spliced.enforcement_state.snapshot_funding_for_splice(
+                    old_funding_outpoint,
+                    // the retiring setup is still in place here; its push
+                    // is the fundee's entitlement floor for the new era
+                    spliced.setup.push_value_msat,
+                );
                 // fork-local (inr2-splice-dev) RBF fix v2 (the TWO-DEEP prev
                 // chain — supersedes the keep-oldest variant whose side effect
                 // was L3: splice-1's view became unreachable and its
