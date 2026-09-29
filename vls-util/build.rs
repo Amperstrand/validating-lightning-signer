@@ -5,7 +5,7 @@ use std::process::Command;
 
 fn update_version() {
     let git_desc = match Command::new("git")
-        .args(&["describe", "--tags", "--long", "--always", "--match=v*.*", "--dirty"])
+        .args(["describe", "--tags", "--long", "--always", "--match=v*.*", "--dirty"])
         .output()
     {
         Ok(output) =>
