@@ -829,6 +829,14 @@ pub struct PrevFundingCommitment {
     /// claimable check (the splice_rbf rejection, decoded from the
     /// 889324+330 outputs vs the 894199 funding)
     pub current_counterparty_info: Option<CommitmentInfo2>,
+    /// The retiring funding's push_value_msat: the fundee's entitlement
+    /// floor at the era transition when no commitment was exchanged on
+    /// the retiring funding yet (a channel spliced immediately after
+    /// opening carries its push into the new era; the commitment infos
+    /// above are None there, so the policy's carried-balance term reads
+    /// this instead).
+    #[serde(default)]
+    pub retiring_push_value_msat: u64,
 }
 
 impl EnforcementState {
@@ -1070,7 +1078,7 @@ impl EnforcementState {
     /// pending holder commitment info into the per-funding record so
     /// the new funding's flow can rebuild the channel-scoped fields
     /// without destroying the old funding's close inputs.
-    pub fn snapshot_funding_for_splice(&mut self, outpoint: OutPoint) {
+    pub fn snapshot_funding_for_splice(&mut self, outpoint: OutPoint, retiring_push_value_msat: u64) {
         info!("snapshot_funding_for_splice: {}", outpoint);
         self.prev_funding_commitment = Some(PrevFundingCommitment {
             outpoint,
@@ -1078,6 +1086,7 @@ impl EnforcementState {
             current_holder_signatures: self.current_counterparty_signatures.take(),
             next_holder_info: self.next_holder_commit_info.take(),
             current_counterparty_info: self.current_counterparty_commit_info.take(),
+            retiring_push_value_msat,
         });
     }
 

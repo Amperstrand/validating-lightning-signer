@@ -2030,15 +2030,20 @@ impl SimpleValidator {
                         // The fundee's prior entitlement: their own last
                         // commitment's broadcaster value, falling back to
                         // the holder view's countersigner value when the
-                        // counterparty never signed one on the old funding.
-                        match (
-                            prev.current_counterparty_info.as_ref(),
-                            prev.current_holder_info.as_ref(),
-                        ) {
-                            (Some(cp_info), _) => cp_info.to_broadcaster_value_sat,
-                            (None, Some(holder_info)) => holder_info.to_countersigner_value_sat,
-                            (None, None) => 0,
-                        }
+                        // counterparty never signed one on the old funding —
+                        // and floored by the retiring setup's push (the
+                        // entitlement of a funding whose commitments were
+                        // never exchanged before the splice).
+                        let from_commitments =
+                            match (
+                                prev.current_counterparty_info.as_ref(),
+                                prev.current_holder_info.as_ref(),
+                            ) {
+                                (Some(cp_info), _) => cp_info.to_broadcaster_value_sat,
+                                (None, Some(holder_info)) => holder_info.to_countersigner_value_sat,
+                                (None, None) => 0,
+                            };
+                        from_commitments.max(prev.retiring_push_value_msat / 1000)
                     })
                     .unwrap_or(0);
                 if counterparty_value_sat > setup.push_value_msat / 1000 + carried_fundee_sat {

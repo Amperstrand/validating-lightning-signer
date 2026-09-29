@@ -242,3 +242,71 @@ fn control_fresh_channel_initial_over_push_still_refused() {
         err.message()
     );
 }
+
+// push-floor rail (RED before the retiring-push snapshot field): a channel
+// spliced immediately after opening has NO exchanged commitments to
+// snapshot, so the fundee's carried entitlement is exactly the retiring
+// setup's push (the live two_chan shape: refusal read "prior-era balance
+// (0)" while the fundee legitimately carried the era-A push).
+#[test]
+fn rail_splice_era_carried_push_floor_for_unexchanged_era() {
+    let node_ctx = test_node_ctx(1);
+    const PUSH_MSAT: u64 = 500_000; // dust-safe: the fundee output must clear the 354-sat dust check
+    let push_sat = PUSH_MSAT / 1000;
+
+    // fund_test_channel with a push: the initial holder commitment pays the
+    // fundee 0 (an allowed underpay), so no commitment info ever carries
+    // the fundee's entitlement — the snapshot floor is the only carrier.
+    let mut chan_ctx = {
+        let mut ctx = crate::util::test_utils::test_chan_ctx_with_push_val(
+            &node_ctx,
+            1,
+            1_000_000,
+            PUSH_MSAT,
+        );
+        let stype = crate::node::SpendType::P2wpkh;
+        let incoming = 1_000_000 + 2_000_000;
+        let fee = 1000;
+        let change = incoming - 1_000_000 - fee;
+        let mut tx_ctx = crate::util::test_utils::TestFundingTxContext::new();
+        tx_ctx.add_wallet_input(&node_ctx, stype, 1, incoming);
+        tx_ctx.add_wallet_output(&node_ctx, stype, 1, change);
+        let outpoint_ndx = tx_ctx.add_channel_outpoint(&node_ctx, &ctx, 1_000_000);
+        let tx = tx_ctx.to_tx();
+        crate::util::test_utils::funding_tx_setup_channel(&node_ctx, &mut ctx, &tx, outpoint_ndx);
+        ctx
+    };
+    let channel_id = chan_ctx.channel_id.clone();
+
+    let _outpoint_b = splice_a_to_b(&node_ctx, &mut chan_ctx);
+    let new_value = chan_ctx.setup.channel_value_sat;
+    // the new era keeps the push (the harness carries it into the new setup)
+    let new_push_sat = chan_ctx.setup.push_value_msat / 1000;
+    assert_eq!(new_push_sat, push_sat, "harness carries the push into the new setup");
+
+    node_ctx
+        .node
+        .with_channel(&channel_id, |chan| {
+            chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
+                0,
+                remote_point(ERA_B_REMOTE_POINT_NDX),
+            );
+            Ok(())
+        })
+        .expect("numbering install");
+
+    let fundee_entitlement = push_sat + new_push_sat;
+    let res = sign_current_view_counterparty_commitment(
+        &node_ctx,
+        &channel_id,
+        &remote_point(ERA_B_REMOTE_POINT_NDX),
+        0,
+        new_value - 3755 - fundee_entitlement,
+        fundee_entitlement,
+    );
+    assert!(
+        res.is_ok(),
+        "an unexchanged era carries the retiring push: {:?}",
+        res.err()
+    );
+}
