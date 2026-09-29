@@ -280,6 +280,24 @@ pub struct HsmdInitReplyV4 {
     pub bolt12: PubKey,
 }
 
+/// CLN hsmd wire `hsmd_init_reply_failure` (115): the HSM's refusal reply.
+/// For HsmdInit this is the literal expected error reply; the vls-proxy also
+/// uses it as the synthesized reply when the signer permanently refuses any
+/// other request class — every CLN hsmd client parses replies by the
+/// expected per-request type, so this shape fails that one request loudly
+/// (channeld: status_failed "Bad <reply> <hex>"; lightningd RPC paths:
+/// command_fail) instead of wedging or killing the node.
+#[derive(SerBolt, Debug, Encodable, Decodable)]
+#[message_id(115)]
+pub struct HsmdInitReplyFailure {
+    /// The hsmd message type the signer refused (for HsmdInit itself: an
+    /// hsmd_init failure code).
+    pub error_code: u32,
+    /// Human-readable refusal text; surfaces verbatim inside the client's
+    /// "bad reply" hex dump in the node log.
+    pub error_message: WireString,
+}
+
 ///
 /// CLN only
 #[derive(SerBolt, Debug, Encodable, Decodable)]
@@ -1172,6 +1190,7 @@ pub enum Message {
     #[allow(deprecated)]
     HsmdInitReplyV2(HsmdInitReplyV2),
     HsmdInitReplyV4(HsmdInitReplyV4),
+    HsmdInitReplyFailure(HsmdInitReplyFailure),
 
     SignDelayedPaymentToUs(SignDelayedPaymentToUs),
     SignTxReply(SignTxReply),
@@ -1526,6 +1545,17 @@ mod tests {
                 Some(sample_array(WireString("test".as_bytes().to_vec()), 1))
             );
         }
+    }
+
+    #[test]
+    fn init_reply_failure_roundtrip_test() {
+        let msg = HsmdInitReplyFailure {
+            error_code: 7,
+            error_message: WireString(b"vls signer error: policy failure".to_vec()),
+        };
+        let dmsg = roundtrip(msg);
+        assert_eq!(dmsg.error_code, 7);
+        assert_eq!(dmsg.error_message.0, b"vls signer error: policy failure".to_vec());
     }
 
     #[test]
