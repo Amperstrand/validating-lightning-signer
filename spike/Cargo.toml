@@ -1,0 +1,13 @@
+[package]
+name = "electrum-vls-spike"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Fork-local spike: teach VLS how the Electrum wallet derives lightning keys. Not for upstream."
+publish = false
+rust-version.workspace = true
+
+[dependencies]
+vls-core = { path = "../vls-core" }
+hex = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }

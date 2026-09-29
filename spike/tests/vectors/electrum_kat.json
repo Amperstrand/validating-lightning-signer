@@ -1,0 +1,1493 @@
+{
+ "generator": "electrum-lnutil",
+ "start_index": 281474976710655,
+ "num_bits": 48,
+ "node_id_prefix_len": 16,
+ "cases": [
+  {
+   "name": "zeros",
+   "network": "regtest",
+   "wallet_seed": "0000000000000000000000000000000000000000000000000000000000000000",
+   "channel_seed": "0101010101010101010101010101010101010101010101010101010101010101",
+   "remote_node_id": "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "remote_funding_pubkey": "03bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "nlocktime": 700000,
+   "node_key": {
+    "pubkey": "0387c58946f1e5aa6ae62e260b8b8c3cf30b4b25f98ad0c5729015c04ad91d8fce",
+    "privkey": "afc7a5fb91d5be546e0acb3654595e4a69faef7c057bfbda3f772f05bad76173"
+   },
+   "funding_root_key": {
+    "pubkey": "0323c3e687a5e26a2f6fbe2939ec248546c21b201feb0374780b93301676f17e02",
+    "privkey": "958cb0041924d7bb11da1a72c5c71d48ec5d24e1bbde42e490d0c7d4a91121be"
+   },
+   "static_payment_key": {
+    "pubkey": "03925d6a3c2f10e00362d716a43eced871d5b9292abbbf8a465b5d84ae42e90bfa",
+    "privkey": "2d2ff78633cfa6b04e4d2afd311585876972edc0dc38dba36cbb87c3cb2a4360"
+   },
+   "multisig_key": {
+    "pubkey": "03e3f889fda6934a6966ed3be3e87fec5277a22da1c4ac81111fdaa22dfade218f",
+    "privkey": "93ef2d335bb49a2a1ad5c452d769183eebb97ef71d41c45b81ca61e47286e7b0"
+   },
+   "htlc_basepoint": {
+    "pubkey": "02538792583d7e9a43cdf695145fd43babc916f56167da2e04f6b4eeda9bc2c00e",
+    "privkey": "a9d07a5170efb6dc5196de4549bb1da49b04239d7b9a3421123bfacb0083b732"
+   },
+   "delayed_basepoint": {
+    "pubkey": "02becccd9fb8976b39ae2d8d8f48bb5becc942b0f11b6d147f3f99d4c62e771454",
+    "privkey": "9e91f4f0a022ea1a242eb7340a016113ad9e8a7f200084d191ef0cfb4f3a4f70"
+   },
+   "revocation_basepoint": {
+    "pubkey": "02c54dc910c061137ba49142960b1d7cc160b34251cdad8921bb809c392db8cb8f",
+    "privkey": "a275cb8021bfe49726d7345390faf7648cf3b23d0baef3c84b0f308450ad63be"
+   },
+   "per_commitment_secret_seed": "b382ad6e5e225af4306b726e96e5ed3a82d545b157136973b3d3ba6d33292097",
+   "anchors_funding_key_we_opened": {
+    "pubkey": "03607f66e73c753ad5abafe7507ffdf9d70efc12dd2216c7fc404934a0a7c50087",
+    "privkey": "d8869912e9ac683ba1070dc6fd954ff1aa38f4a238dc7680aa30edc255ea062d"
+   },
+   "anchors_funding_key_they_opened": {
+    "pubkey": "0278c2f7fb7131f462f817893489a675f7716f42c0ac3e00239d7caddd8c0dd203",
+    "privkey": "553fe383650a3f952d54b333b30a2397edeac53a702850692234493908950cf2"
+   },
+   "payment_basepoint": {
+    "pubkey": "02c28aca208fa83904d3e9c0f778cd25b7700622c224e6412fc9698195acd15ed8",
+    "privkey": "f176af4dc86ff663fa9ad4829c19004089dad49345bcab414d936430aae48628"
+   },
+   "shachain": [
+    {
+     "ctn": 0,
+     "index": 281474976710655,
+     "secret": "00be7b80a965fab3c46dfa580848953a41f9923c5217df30012565ce489d3847",
+     "point": "023b896195fe076e47e803e409eaa593bd137503fe0dfcb4761b07f77c76d7574a"
+    },
+    {
+     "ctn": 1,
+     "index": 281474976710654,
+     "secret": "c35a4aa68400d69dd09ad99d816b82ba9f680886f3d43aabc1cba51b285732cc",
+     "point": "0316d4eb514772876ec969d3190d094d0fbc4a4bcbe923063956ad6010b4a1ef39"
+    },
+    {
+     "ctn": 2,
+     "index": 281474976710653,
+     "secret": "0f1baa38dfd71e237d98340387af0e88fa1072800c8c477f3c4d5cfe399452f2",
+     "point": "02d9f6fbce6280f69ab679d9080b4f3d337ade3f8f7505c8aec972b184742bfb64"
+    },
+    {
+     "ctn": 3,
+     "index": 281474976710652,
+     "secret": "91bc333442fbdd36b7e6b2745c56fdbe4ccdd8a47bab2e8589c92fd4668ac261",
+     "point": "0394df4ea92c3ce7ebbeb97d488d5d7071092a39f9ba5f81c68982ecc65e6044b5"
+    },
+    {
+     "ctn": 4,
+     "index": 281474976710651,
+     "secret": "809522870cbc22805185484a42a0119c3e85959b4b1f08e51558caa3db38f756",
+     "point": "0237a32c7ca8e4af0334955cdd36a9cbd9dbb6d8eaf34334c800220b3bf5413a3a"
+    },
+    {
+     "ctn": 5,
+     "index": 281474976710650,
+     "secret": "64f5ed4bba1c582c7c8bdb3271f1d45a8d4d041746eac3fdb5bd818a8163455a",
+     "point": "03a706689fcfb870bf9457c49e0cd7749e25fd5271069f32728609bd9016afcdbd"
+    },
+    {
+     "ctn": 6,
+     "index": 281474976710649,
+     "secret": "e8089bb44866fd364c9e93a078370908646177fdd626a3cfea8e28dd91b9b576",
+     "point": "03f7a8e7e92f9e853fe63b7dcee618e00e89c17a0c0ddef0b51a4dd99059f7c515"
+    },
+    {
+     "ctn": 7,
+     "index": 281474976710648,
+     "secret": "84292f5b86aeccc2fc44a95f8b7d6d0cd87270ca6c3d123e48db238f9f592eda",
+     "point": "02ee22cacb7e31eb93f7d8f86711f1d139d9f499e09acf1022b3012da00bd00461"
+    },
+    {
+     "ctn": 8,
+     "index": 281474976710647,
+     "secret": "4c57db76e148cbaa918b4c2986c8dcd7abbc58a064786595b137844708b4131d",
+     "point": "03affc0c133f82408a39ada2340cf9a3b44b9d8001b30a42e363d30efc1d274288"
+    },
+    {
+     "ctn": 9,
+     "index": 281474976710646,
+     "secret": "f0c99cd0006f7607b3e88f73e0404d3c3055fc115d8d3472dc92a7037ed5e06a",
+     "point": "03483e79d017c5479b9f21bb0cea1b7a35b4535a8207b86985056ab8c1bfd5e6ca"
+    },
+    {
+     "ctn": 10,
+     "index": 281474976710645,
+     "secret": "18265b7f5df180f3f1c25dc064e0a661a8f49aa83738324e8a9da9ccbcd288c4",
+     "point": "037634e07fc6c73584e97ed6245de147c0ecd040c882c1e0cbdcf4a1643d27692e"
+    },
+    {
+     "ctn": 11,
+     "index": 281474976710644,
+     "secret": "a673b04bcfdd938848dc1b4298ca40a92fdaf7fc05b1ad73ff890976756b7a9d",
+     "point": "02197f18645876d84be19594c2df4eadb72b93bbabe39aa0f387e0cd3ac3bac613"
+    },
+    {
+     "ctn": 12,
+     "index": 281474976710643,
+     "secret": "97ae8c82d3c55e49fe1b70d93b8745f86545ca5e1cded474008ca1d29017390e",
+     "point": "024eb933f995f850ea8e887c17f50845d3eeb24054e8489372d5e95281739df2b2"
+    },
+    {
+     "ctn": 13,
+     "index": 281474976710642,
+     "secret": "2f290a6c323efdfc335011d10eabee845526e6edcb37b3adddac4528364a7f89",
+     "point": "036558d3988e89e9d45aa8140ca309d8f5644b965af50bf22249f1098a92d71fae"
+    },
+    {
+     "ctn": 14,
+     "index": 281474976710641,
+     "secret": "bf0d4c873e08a43d54be500b54f1e2fb8d6a20db1d351f3cbfb16fb9d3dae2e5",
+     "point": "038f35fb0febb918372ff6d6f33b313c7f42516e14a96be41ce3528f6109e284b7"
+    },
+    {
+     "ctn": 15,
+     "index": 281474976710640,
+     "secret": "466fee147cc8d6a7f6c55613307c16ac3bba000aeac780bbd4573ef9b8101275",
+     "point": "03bc14ee19ba8376847b13c484b19e2c0559002f75abeb5cde328255df699a2332"
+    },
+    {
+     "ctn": 16,
+     "index": 281474976710639,
+     "secret": "e3dc5eb7e5892e1bc09d655390b036df3deb1072ec93eb704af9261e973c0c7f",
+     "point": "03f879fb08a591121a4bc38bd9cfddb6a3381f9d361a9f5a3f6e0fc26d0b48830d"
+    },
+    {
+     "ctn": 17,
+     "index": 281474976710638,
+     "secret": "10f2df12e3b842245a867ea89ef0c4cc0b79d4d435f5873a9880992a5f013166",
+     "point": "02392f6f4d5965a9033490851dc89bf88c49814b68348f9f195a939f92d188aef1"
+    },
+    {
+     "ctn": 18,
+     "index": 281474976710637,
+     "secret": "89e2db2770fab3af270e69fd9f315b71f7ed188c2297023b5b7b8a135e4d6418",
+     "point": "02c7379666de1e7d560b6b87657a6dec84364c84e2953380aee9947f6261ca92bb"
+    },
+    {
+     "ctn": 19,
+     "index": 281474976710636,
+     "secret": "2b66cc80b971103a89477d342ada81292bead7496e3ababba1de97e988aa0d70",
+     "point": "0279ff357ebdee4a05d1df6ed15ef5ca02bfabf7b3aa157d6c912ce382f4b925c3"
+    },
+    {
+     "ctn": 20,
+     "index": 281474976710635,
+     "secret": "20ab0627b74704105f47d98666c8c4f074fd93bfa4af9924a9010f646c7f390d",
+     "point": "02fd8c8ee27baa28cc7ee4e689a58746591c510b7a0b33018866e23828b460aadc"
+    },
+    {
+     "ctn": 21,
+     "index": 281474976710634,
+     "secret": "89d130f5a1b79367358c5ac4dc7d868734f9e255bad4ec90affe12ad92cd4012",
+     "point": "02b2bd5b6f325928dbed7f4ec8568ad9f9fd2120d5b2459bc07d365880562f33f7"
+    },
+    {
+     "ctn": 22,
+     "index": 281474976710633,
+     "secret": "ec590c921fe49a11be33f9fb794e70c754d098b4b0a4f3693145174b046bf5a5",
+     "point": "02ef567cb620d4de197ba6e26bbe4f38b6274ba4be7d7d2f387afc0c40e54d8db5"
+    },
+    {
+     "ctn": 23,
+     "index": 281474976710632,
+     "secret": "e4b77934d12c6a6f496a5a4845165e6bd68b3510f0e84051c8f4e756fb2f0cb6",
+     "point": "020e28852e5265bbc4f70cc7b688f9e75994c39bebcbc759d4c04dca9f5577e558"
+    },
+    {
+     "ctn": 24,
+     "index": 281474976710631,
+     "secret": "28f0f011222adfe317088abea9fc29fce0863b482e0e4fdd541e6563a6de9a0b",
+     "point": "0226ec002a36b44d52d2b0e99aaa1ba475935d853940d447dbf56fa417c011b239"
+    },
+    {
+     "ctn": 25,
+     "index": 281474976710630,
+     "secret": "8f33abf4fc09cb9cc31c314c08b95ccffda9288a334169ac510edd1ddd5b7141",
+     "point": "02c0e759d80ae24fb9586bad5e27bf3f49ed45b16922ecad1f33d5a5c4c1048e84"
+    },
+    {
+     "ctn": 26,
+     "index": 281474976710629,
+     "secret": "2c6cb544423e9623253faf76aaa9f8ebdf6f2957644dc0da13f6ebe905a826e1",
+     "point": "02e34bc5bcba8c7b3a1bcd16f9eb366119ef03509769f3c96df02c7ef2a90d73c7"
+    },
+    {
+     "ctn": 27,
+     "index": 281474976710628,
+     "secret": "66f0fcacff87ce225eea81898d3093678675a1f853e6c94d241fc4198f9b5ffc",
+     "point": "031851da62cf97f82570a9cf9e23241e8585ad08f7db9591aff2b2fa2577a59b80"
+    },
+    {
+     "ctn": 28,
+     "index": 281474976710627,
+     "secret": "4c3b14d64bf9f422d919ce61a918c78f2adb9ae5a5a86e5afba5b3f72f803155",
+     "point": "02571fd6abf1b222ecf1848da92ac8cdf0698a869c1e20a8933c5b771b35942f45"
+    },
+    {
+     "ctn": 29,
+     "index": 281474976710626,
+     "secret": "a85c388ce17a71cc714c6934d836f1d39c7810ffc7fae450a13d3a9878ecf127",
+     "point": "02c0af0aade90c3d1814176893c8692c97d40c9ebc1613ad329a0f06970be9f061"
+    },
+    {
+     "ctn": 30,
+     "index": 281474976710625,
+     "secret": "89586a4df6c4da4dea1f38ed78d513f23209736d4cc19fe5389c80a1768663a0",
+     "point": "0379af62d50e869e25bb1773ca7041c1ee54d6c6df779df24983308d2c25e45ff3"
+    },
+    {
+     "ctn": 31,
+     "index": 281474976710624,
+     "secret": "ec43361fa9a9b782ad091f2b84704561edcb0ba1c48f10fcb7967a2d0d95826d",
+     "point": "02f03043146ef31622ce42e66345bbf0cfbeb7d2058ac42b8daee0c285a80291cf"
+    },
+    {
+     "ctn": 32,
+     "index": 281474976710623,
+     "secret": "fa6468ef7edb533dee576e57cbc45eeb758ac1b4d26946f67516625d78c12af9",
+     "point": "036a30d007b82400e5aa21bb981659e40b173c8498a5078fa0fa0af1320d948c6a"
+    },
+    {
+     "ctn": 33,
+     "index": 281474976710622,
+     "secret": "2e1870ac4a2319eb40c49f3024e8c9ef1ae5df58a60885d22626a3b4de10e44b",
+     "point": "0372d482404cfa3c599d8249352b773eaf4d401a3f0f990a97ed31552a50dfa126"
+    },
+    {
+     "ctn": 34,
+     "index": 281474976710621,
+     "secret": "ee3f6e5078b2cd0d3af9f5601463cb0dcfdd10e8a7a67bab72e5ecadcda4cae6",
+     "point": "0311015861605c16f438cb3f935e318e243205fa25e83e99b2bbb848421af62394"
+    },
+    {
+     "ctn": 35,
+     "index": 281474976710620,
+     "secret": "1efc3e0ec67a224e824b553f1c07ee2de48f6f8f95029b154823518506d0960c",
+     "point": "02014261c06e4526e29f94a9130a97f0f0e6a193e238a324493258febbad0bf531"
+    },
+    {
+     "ctn": 36,
+     "index": 281474976710619,
+     "secret": "5a1d70222391d638ab9d7eec9fef44edcf84230088e13c99f76099aa29759356",
+     "point": "029d47c4f8fc303f5ca0e433dad55eff4aca8d494c6a4da5a2513949597a2d3082"
+    },
+    {
+     "ctn": 37,
+     "index": 281474976710618,
+     "secret": "485e391f068ee28f2364baac0506a6ab07a826dc92512a99ddd9ac2754d32816",
+     "point": "02914c0671f046c937834589940c30d7beaeec3716a86a8290ab661d4b81195a47"
+    },
+    {
+     "ctn": 38,
+     "index": 281474976710617,
+     "secret": "261a7c4b4d18b76cea704b01f3f60b4531e0654fb343e1eeb974342313b1aabb",
+     "point": "02fbaf28bef07b5c93f7530f7dfeb6f743fe26402590648a1cf9d586f8908df105"
+    },
+    {
+     "ctn": 39,
+     "index": 281474976710616,
+     "secret": "bacf3b049509b76f867cf489e3eefc4577137441eb8197f636a254bc805ad56a",
+     "point": "036b6595e1b632fd292ced0ddf0ec20869056c0008da725aa197735ab3351aaf74"
+    },
+    {
+     "ctn": 40,
+     "index": 281474976710615,
+     "secret": "3c8b527a53e908649d0597b4b2fd1fb35309f34cef2c3f96ee1206d755a0d8c5",
+     "point": "0290791fb418b390f44b3146c3ed5af214f43771a0645a2b3ea058cdcebd06ef18"
+    },
+    {
+     "ctn": 41,
+     "index": 281474976710614,
+     "secret": "a5e45bfaafec290d8742a621207792790573fd266523483de5b34a5b4b15910c",
+     "point": "02629e0b25c5b83c045d720d7d0b80074cca0964b4520f76996b0550e13a57a856"
+    },
+    {
+     "ctn": 42,
+     "index": 281474976710613,
+     "secret": "05d03b7bdee7c984d41764827efc340e56f72b568a155214c0f4470a72fd9598",
+     "point": "0328cf744854b37e1045534470fbd7ee7ab36f9de62f190ee2e2e0980899a206c3"
+    },
+    {
+     "ctn": 43,
+     "index": 281474976710612,
+     "secret": "41dcb1a8b35bf519dd2f16da90c2f6136bbdcd01fd7721b93ed646abab460496",
+     "point": "0271b12070dcf1b25857c2446af4ccfc64bcf4a48c55749dc4eb4f74a0c865eded"
+    },
+    {
+     "ctn": 44,
+     "index": 281474976710611,
+     "secret": "4ebe87f64f63aeb34941ac33d7422b537f74f739797b31e5a233f583cf18d8bf",
+     "point": "03186120ce5fa0f4a871413397343edbe2ad96af6ce110d5824a8e5d260e798e75"
+    },
+    {
+     "ctn": 45,
+     "index": 281474976710610,
+     "secret": "7708ea8a4b5d3dfc4528e2f2362b590300bac9433ec1b759ea8f41d987f75549",
+     "point": "03a6056c0d1bfd144ac2b697807254fe49b9aebb5e6a12dc4b1c616706255b7b2b"
+    },
+    {
+     "ctn": 46,
+     "index": 281474976710609,
+     "secret": "6704b8f1ed53c09f5234b36811aee2c0149439700e047889e9be4ec93b10e6ab",
+     "point": "0235beedd809bdce48143593f2e9d7e9d72279a0ab8a5de6f8d974b991ce2bf00e"
+    },
+    {
+     "ctn": 47,
+     "index": 281474976710608,
+     "secret": "339fd1f860baed0b62be3d194eba2456e3213f3b183448574afba9c53495ed18",
+     "point": "035dcb675ca0c388057d8de0a07d19e93c4051280233418a916e376ffe37ead25d"
+    },
+    {
+     "ctn": 48,
+     "index": 281474976710607,
+     "secret": "9493d7ee551a480bb3eda175a002997920d40775b4e00012cf2b3a8cb9b49020",
+     "point": "02113dd7149a57b0a6ad7a8d0d7399c6d9a0bef4f08d63660c0aa70f9884ab5696"
+    },
+    {
+     "ctn": 49,
+     "index": 281474976710606,
+     "secret": "2acb9295f0a3846df3764326ad8ec3d6b88beed527d10f88c8e13de764e5fa94",
+     "point": "03df91aab143278ba18bb0caeae5d22007396be045e7427d3bccbb0ee0aec100b9"
+    },
+    {
+     "ctn": 50,
+     "index": 281474976710605,
+     "secret": "9d13d55a385c8e144bc61a13997d2aa778cbcb10a2aba53eab880ff82515a035",
+     "point": "0314ce34318eb957d3e9cb6a9b62ab67996e6e9fe056743712ac977ac9a7dedb8f"
+    },
+    {
+     "ctn": 51,
+     "index": 281474976710604,
+     "secret": "a5557f00a75264991f94131ee78d7e6135be4699c33f71e4a38b87dde2b4cea1",
+     "point": "02e3903201ec888c93af0f20b4037541ad0c585146bd4f7a169599450cee9da671"
+    },
+    {
+     "ctn": 52,
+     "index": 281474976710603,
+     "secret": "2ca56201b55116b0744dabdd6c8a42df8caabf6cfed7e7fe66609f1551e5790c",
+     "point": "02e3954c641fedb76147e31f309850b5ef62959108b55f793049df14032a380c61"
+    },
+    {
+     "ctn": 53,
+     "index": 281474976710602,
+     "secret": "fa3bfbda08967fe00998194542429ecae5589fe094b6cfca3b4240ec537338c6",
+     "point": "0263f26fdbb460fa46a3141dda5be120c57c196129f907bb9f9dc6aa8194f14056"
+    },
+    {
+     "ctn": 54,
+     "index": 281474976710601,
+     "secret": "ed3d6aee0fd9a52e643899a54c3fee0a4f29dc8d380fa469af0868fedcfab7bd",
+     "point": "0217df82df1cd32e2d8a2048b6e74a006f242cadba0f82753b72a656aac0be8880"
+    },
+    {
+     "ctn": 55,
+     "index": 281474976710600,
+     "secret": "ee309955cdc5b95e4e909e5124bf4a271d0fe098cd5292a6852e48d3e179d73f",
+     "point": "0303567efd86c625ba26d7d42b246e8b18642b86d6051ca24c6f8c0cfdec43338b"
+    },
+    {
+     "ctn": 56,
+     "index": 281474976710599,
+     "secret": "ef8d2685c1edf791da3bb32744c1ac63a447d102f26c122306f81334686536bb",
+     "point": "03322dbfb0c727fb7e27bc2a60845b8e2c1b209ba2d52b396a6caa4ccf78b9cc0c"
+    },
+    {
+     "ctn": 57,
+     "index": 281474976710598,
+     "secret": "3412339fd04f8f8b75b46b92ef9e300d094ae1404f3db649f830e6c256f74099",
+     "point": "03dc975e68b009adf6ebbc0168e2858cb080c3f9256c4f0c8663edace903185b31"
+    },
+    {
+     "ctn": 58,
+     "index": 281474976710597,
+     "secret": "71b891dd07f3b8d81b113bb57b7bfc0449321f1da3b9f1ff35eab36dbe2748f7",
+     "point": "0372c23888112f148308f82807e180c24115e9cff8fe8d6ab72d89373c351db4ad"
+    },
+    {
+     "ctn": 59,
+     "index": 281474976710596,
+     "secret": "cd6fcc68e8d08883a35c17757a7b0ab4e923465919579461f9ee89fe47716be1",
+     "point": "030c05534978079c5caf0ec2058d595589fd59d727d8202400dd3cf5009769ccbb"
+    },
+    {
+     "ctn": 60,
+     "index": 281474976710595,
+     "secret": "5d898de2bfcab9ce6e8b94e97f9c2b035a8abe6870dd93f6b9c76cd7faa6c4f0",
+     "point": "025afe1ea68407f008df41d34d016c9b80a62c0fb6a7f20cb943a8437a236763bd"
+    },
+    {
+     "ctn": 61,
+     "index": 281474976710594,
+     "secret": "5d6ee3c72a7a60a4be1812649673ed5f092a3b5475e6178e08cb25cff641c64e",
+     "point": "03f5e0c5159c36f866ff1a7a74ec96adf224b7009f54aad562a848dd814a1ea770"
+    },
+    {
+     "ctn": 62,
+     "index": 281474976710593,
+     "secret": "e21bf648aedefde139cf51416478f7dfa8cd144646851d69ba243fa499ed8ec1",
+     "point": "03f5758f9b6ed5ec34aa0a52244bb82b115d44db7d0622db8c09e6ada36ee3ab15"
+    },
+    {
+     "ctn": 63,
+     "index": 281474976710592,
+     "secret": "d7e1cad25182b5857937548e99a30343595c5ae303ce828b670dbe473a36dd00",
+     "point": "039fd899a1d8eeb2ea3bde0b8a4c27dc3bda947fa3b27d113e73e696031fcf424e"
+    },
+    {
+     "ctn": 64,
+     "index": 281474976710591,
+     "secret": "ae648c408ab581e099cdbef059316cf64490e9eeca664d7b8ba5ddc826c40b30",
+     "point": "02c616161c283d34c45ee193e8cb19697a50faf87b20fc3e2276c8145590e77fe5"
+    },
+    {
+     "ctn": 65,
+     "index": 281474976710590,
+     "secret": "c36d2a02dc55baf7137d04c8945fce6915dd95561382bb62aba4e3593943a548",
+     "point": "03ef42715cae2d594a818c3f4766613e21587009abb0825a0eee386b09e93ee9d1"
+    },
+    {
+     "ctn": 100,
+     "index": 281474976710555,
+     "secret": "f96fec2bc3c2395717c34c1cac2894069b77c974407f6c95c258c78bccc3ffbc",
+     "point": "02a65a3c12ed82b634fc6c9a4cb208bd61624a9450e37b33ac9be6924b54810d06"
+    },
+    {
+     "ctn": 4095,
+     "index": 281474976706560,
+     "secret": "8df17b5d56a88983decff38ab68fe2d82b289e4b81c1036db1a45ac3f5762998",
+     "point": "023adf81e56850c675250c172d6122246e0346c02d6b33cac5bf270ad01f07c6dc"
+    },
+    {
+     "ctn": 65536,
+     "index": 281474976645119,
+     "secret": "ca660a33f38fb12090b740c9b48c6c8aa8b6eb39e02b8d3c05776355bf11a81c",
+     "point": "0350bf12ad7fd7341132b0b4d27d81910f7e5c0fe80721c546695116361e8ea724"
+    },
+    {
+     "ctn": 1000000,
+     "index": 281474975710655,
+     "secret": "bad4eb9d0ceb45588235ac51dfcdd2d53c44adeb0a7de2e74f5a0efc97306346",
+     "point": "03ca3b01dd20cc4318ad52a948044b4f3085458ec2915076859204822e7fb5dfa5"
+    },
+    {
+     "ctn": 16777216,
+     "index": 281474959933439,
+     "secret": "34bc2c3340b9ed45e40d758e023ba1ebf3b8fb67917b17465025ae5252a8d906",
+     "point": "02d94dd026116fddfb3ca16ab49daa98ad6ed2fdad261de0483d03b865a22c708a"
+    },
+    {
+     "ctn": 1099511627776,
+     "index": 280375465082879,
+     "secret": "6cd70c7d953b545e7c1507ed2b32e490809eb7e333f431fa88429320439fcd06",
+     "point": "0208eb5feec379deaddfa65cf267e860ee2e9c212071c724f218f3a119177ab5ab"
+    },
+    {
+     "ctn": 281474976710654,
+     "index": 1,
+     "secret": "c234e3133004ddf9c37d07406d20a56c31e87c6a8cee6cf9573233cfe4975d6f",
+     "point": "02ee327a3604c43192e3e26c9d282b9e4df7b474d42f37b5e6dab7de9b4de78bac"
+    }
+   ],
+   "blinded": {
+    "htlc_at_ctn0": "035dda2719aa916de6b527c7f1ac23c05cf29dcbd2c2a41064cb107995405b84af",
+    "delayed_at_ctn1": "03cb0ccf67fe0d081b143427aa9ade551689074ae2660e4b78e002b3f8a3a32cc7",
+    "revocation_blinded_priv_at_ctn0": "c4f7b722cfecb15fc4a1f8ba2393cf3cc5215b332fb3008d52ae14523594b73b"
+   }
+  },
+  {
+   "name": "ones",
+   "network": "regtest",
+   "wallet_seed": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+   "channel_seed": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
+   "remote_node_id": "021111111111111111111111111111111111111111111111111111111111111111",
+   "remote_funding_pubkey": "032222222222222222222222222222222222222222222222222222222222222222",
+   "nlocktime": 42,
+   "node_key": {
+    "pubkey": "0342ee6db06292dc90b20567cff60376b5b5f3d7a0fcd5df7c6805a85bec841497",
+    "privkey": "9b12dd03629a2bd7301fc6b5e4095d0ebbc9c5a9f4f34db6815f4737a4c6974b"
+   },
+   "funding_root_key": {
+    "pubkey": "0327719c3c762226f4e087ecfec49d9a015c9892b0cb0876169ae846f50eb1c7b5",
+    "privkey": "a36b34d3f0427f632e36278369e76130bf38dbc64a550c2b9c713c9e8e854199"
+   },
+   "static_payment_key": {
+    "pubkey": "0225f6d7f1e9cf5e4224b302f26d10faf038d28971629481932f2fe86c09baacb3",
+    "privkey": "afd02a28d2a28b1290b7272df8003841ae3586fbbe31cd0f3f95461e385a0150"
+   },
+   "multisig_key": {
+    "pubkey": "03248b6e228e99ca56f5e96b591f7c6518f4dc3019c906fb0174687c2689afa8dd",
+    "privkey": "bf15b5bc3d724ec90b2eebbc2cbabae746f443749cf39632ed3046b25efbf4b2"
+   },
+   "htlc_basepoint": {
+    "pubkey": "036f2b24225233f9abfcccec60c17288c30af840c633a486b6e0e9f44c28d6d7e8",
+    "privkey": "1eec24f2d232583298462999da3b4ec084e9c784701a408cf464347078163f6a"
+   },
+   "delayed_basepoint": {
+    "pubkey": "031bd16c3c1b079c3691799613008932b7713875fa0a8f789075481aaf55344e23",
+    "privkey": "7ffdf2aad559634cb1d6b3adb364e225ed97feccc732d69e06d1a59b8b62d3c7"
+   },
+   "revocation_basepoint": {
+    "pubkey": "038718c5352d64fa316ef2747553c992b7327aad8c04f6a49fcc1214fe416df0f2",
+    "privkey": "6fb168fc32368bdd84cf4b80d7e85503d84950e7a0dc7098fa1aa9e01d2c16be"
+   },
+   "per_commitment_secret_seed": "3dd7fc11d2ab918ee0cb42ffeeb3d1645a2f78c0e6763500a7b4db5948cb3c99",
+   "anchors_funding_key_we_opened": {
+    "pubkey": "035e3353e8adcdd92dc4a45c7902c610b670d4e14cebdabbb6273741af8a2f61b7",
+    "privkey": "d5d4b38c38b014981f66861819523f1065d51f8724852dc0ef5f2d9188ee5872"
+   },
+   "anchors_funding_key_they_opened": {
+    "pubkey": "03887fe691af477541e6bec8762270b58b0d85fe0c4ece7f9f606ebc3e06829c58",
+    "privkey": "33e103826884595575efa1414156633489e751601d2698feac9c0d1dd8d6315e"
+   },
+   "payment_basepoint": {
+    "pubkey": "021011c1124ded6700ac6028b8b493a1c5c26b69903efc5599b332c5615c29fd99",
+    "privkey": "5743de0be4fdbd6d460b6b07b05a5a160f54ee60071ce0d9733fdd677cc6c7a9"
+   },
+   "shachain": [
+    {
+     "ctn": 0,
+     "index": 281474976710655,
+     "secret": "4f12d24ff72675ebf3b5e6b4460c7f0944e1c90c47d487b8eae70af1f48d12df",
+     "point": "025430263ff7e3c881f91aa0b0005075f44fac9bb842a009423d6ddaf26aea0983"
+    },
+    {
+     "ctn": 1,
+     "index": 281474976710654,
+     "secret": "f010a55da2eea72b38f7fc505fadbaac8a51726f888d2440156aca2d26564e63",
+     "point": "03f63a5f0e98e3a947bd8985b6404928afa5fdb0c9aca686244e7ab561062476ca"
+    },
+    {
+     "ctn": 2,
+     "index": 281474976710653,
+     "secret": "25c78bafd6c82bbd1f28ac1770ec91096ac7b35d0e63cdce58984717ae4e6bca",
+     "point": "022b32fe3b47085f9fe4b382811acb2bddd7e36f485cf92a538ce1feb824d43e33"
+    },
+    {
+     "ctn": 3,
+     "index": 281474976710652,
+     "secret": "98e573360ce871a8828689cebfde43873f82edfd28fdaf9b728ae251b4607dba",
+     "point": "0289fde11c82ec4a730bf2acc912b86482ca18fa79f41c871c0256a19bdaf79392"
+    },
+    {
+     "ctn": 4,
+     "index": 281474976710651,
+     "secret": "5edb16b670b4d662b0a2a1d12f9b655ea287be989d63aa94b1b41fce046693f4",
+     "point": "028c961f94831fd840de51a0ed56f09d670140b014eaa47e95cdac03987ae0e753"
+    },
+    {
+     "ctn": 5,
+     "index": 281474976710650,
+     "secret": "8706ab48c37d1e8d5f5a0b8277066a34e3da8cbc0a66889fee200a517bdfc0fc",
+     "point": "02718de21ac9bad6e2d1b96fa8e00d6c9a0bafcc88efe8e4825893f2ea3a570869"
+    },
+    {
+     "ctn": 6,
+     "index": 281474976710649,
+     "secret": "49576ff4c1e7ba220be3e99f0a15c7192bbd41bd24e3778d6a851070c4f1e64f",
+     "point": "02c3cf0031899131d03e577c120de7852bc71304579f9d982b340803c0879a5a36"
+    },
+    {
+     "ctn": 7,
+     "index": 281474976710648,
+     "secret": "00bdd34ac8af9c5363bf2dffeb315e1c1fb769a1f87e77cad32d7b3d43ad2bb4",
+     "point": "0298797cdc9848bd7359f0a604baf41fd2ea6ad6d58e18f20a78f38868ea02bb60"
+    },
+    {
+     "ctn": 8,
+     "index": 281474976710647,
+     "secret": "433bd74efc544c2dd982b64feceb40686c956c136ba6d007ff6c45a7405c0a5e",
+     "point": "02cff110bd53bcc43663c09a1fbceb85308ce87537d90853a45c78650f3ce618d9"
+    },
+    {
+     "ctn": 9,
+     "index": 281474976710646,
+     "secret": "9019852dc5c00a0b98184964434f8a2f64b085ea4d1350620042a895532d7917",
+     "point": "02b178e5151d05b3488b560ec7667b4d8e84881cf4d145a918c4a41b061d7ca23f"
+    },
+    {
+     "ctn": 10,
+     "index": 281474976710645,
+     "secret": "2df06d747022cc6e1e354c4702103d4c5067039b02a9446573aa719291e0ec68",
+     "point": "02ad1b84f44171868429fe9214dc3c25bc3eb72ebd83787aaf9da0079055fb2131"
+    },
+    {
+     "ctn": 11,
+     "index": 281474976710644,
+     "secret": "2b91fbc4b987daa6bb0423629041f5e1e966deecffa01f2e63b5963e0eaa8bd4",
+     "point": "02f2186f000bb4225a1a7f1c26ac319a689d5a167a85cc1d608ce52b3316353f24"
+    },
+    {
+     "ctn": 12,
+     "index": 281474976710643,
+     "secret": "5d8a1d9f270e30131a5d571fd7014bf95a55305ec7546dfc3676262b65c46ea6",
+     "point": "02c3aa562e1a6de15c37b8b464897c1f0b04f154ab78099c8531a692f689b7d50e"
+    },
+    {
+     "ctn": 13,
+     "index": 281474976710642,
+     "secret": "8b6a51203fd59bea7b3b0b548d2509dc8a42024237ef9d03954be5b59ef67cb2",
+     "point": "0384ae84917929d09397da80a0ea911da0989b5c36fdf5c9bb6da680199cb48e24"
+    },
+    {
+     "ctn": 14,
+     "index": 281474976710641,
+     "secret": "6e99af599b18a4e58dbc9cabafaece8619cf8cab3662e5b59e422afd67b58fe4",
+     "point": "03cf15e6f3a896f80d2c41cb88c7ac88a322e4af958c681dbce35e094d7bc67ccf"
+    },
+    {
+     "ctn": 15,
+     "index": 281474976710640,
+     "secret": "68b55bf4e27686ab68dbc1dd0c48ebeb2ff18fa84ee7182a5c232d256c3c6473",
+     "point": "03808c5f7a3e9f5fd0e88171cdf0676e4763b284399bc863d8ae01bbc31a6a1df9"
+    },
+    {
+     "ctn": 16,
+     "index": 281474976710639,
+     "secret": "a5b930c3d5ff01ad3e02b797118a2cf4fcf9b56b64da8d28bbe1fc55ed09765b",
+     "point": "029bada91440fe51b9cfd3d30d6fffc7f5e57e72da1e15e448346ed33c3faa1447"
+    },
+    {
+     "ctn": 17,
+     "index": 281474976710638,
+     "secret": "93762ae5dd4c3060d6de8af8da1cd351dff8490c5aa12f8b5cc58f9049ee1560",
+     "point": "029f7f6a54b5e30f364d83173cd3382af160415b53dbbdec776d0348d9f6e62c27"
+    },
+    {
+     "ctn": 18,
+     "index": 281474976710637,
+     "secret": "b1e808fb78f91852e93d67f5ddacb31b530ba0ab5627cbf896bd99a685dc3048",
+     "point": "03cdf6f9cdc698eb281fc31609fabcd00a7d8020596a11282330affeec24443f43"
+    },
+    {
+     "ctn": 19,
+     "index": 281474976710636,
+     "secret": "578c088e7321bbe7a09ae61e4fc2304ee75e7179f95ede4acf3ebdd3cbc9a3b2",
+     "point": "02451c9e2769dd8320064a8800cf7c729fb40d501aeb3a7afc28ccd32470f64220"
+    },
+    {
+     "ctn": 20,
+     "index": 281474976710635,
+     "secret": "b0eea6584a3986f9ffc3477f1378d9837b67f8a0290428221743b49ebeb09e8c",
+     "point": "027210c0d9e02c613e3cea1975cbcc553aa3a18661c348cd98c7190b5d34d33d57"
+    },
+    {
+     "ctn": 21,
+     "index": 281474976710634,
+     "secret": "949ffa5020161211e0572f48b0a50fc9db115d8d0cc96781ffed5481064de87e",
+     "point": "02d68a50b9398dfa1452821016a1ee92b0be42f4c2c963910ea09026b9e76958fd"
+    },
+    {
+     "ctn": 22,
+     "index": 281474976710633,
+     "secret": "dda9f215f025eb58181b2fa3821cde2fe85fd36a33e527989976ff79c767f498",
+     "point": "025fcb5c55cfcecc1ae109cd64f78d00600bacdfde2dce8aff49037e543a1b8137"
+    },
+    {
+     "ctn": 23,
+     "index": 281474976710632,
+     "secret": "4cecfe292dcfee78af1e3237eec510ac04bc27de514c50733c9ffb838657b9e8",
+     "point": "03ce46ccbc445b0d3396f0ce6b22644c708717a8bc0017e56bd093b61a9a62d920"
+    },
+    {
+     "ctn": 24,
+     "index": 281474976710631,
+     "secret": "f585ebaa6cb524437ea06c1613b0771d789992be27461308b720c422ae00aaef",
+     "point": "02168e2cc359c71c646c6b91dedd3810d59ae4b56177b5ac6814b5df5779b3f599"
+    },
+    {
+     "ctn": 25,
+     "index": 281474976710630,
+     "secret": "05b13315e696befdbd2180e94cae52d2ddd0936d3c1d5e50d9346c4b49ddd7df",
+     "point": "03ff3dee055f5472c1631e402cd5fb304b940b231c47650c16a499c7693d8d2851"
+    },
+    {
+     "ctn": 26,
+     "index": 281474976710629,
+     "secret": "b3e9b659651982007781a07ff899f4871046c207f41d574b570816534ecb3ca1",
+     "point": "03742040c4d772127470b8237a197b51dbbd428fa713e6f635ff83840329fba7df"
+    },
+    {
+     "ctn": 27,
+     "index": 281474976710628,
+     "secret": "4a655ca11c496652321a9cab39d2774841846f6c975c2fef5fe87e1a14770a01",
+     "point": "03c6bc8ee8e829bf09c9ef4a7f32cea060a64ff291ffde6d0d8b4f67ad8485feb3"
+    },
+    {
+     "ctn": 28,
+     "index": 281474976710627,
+     "secret": "e31c828c490f1842ba7e57bfe5982a44d9a3437748268bbf371da9dae3f7daa0",
+     "point": "03602eb6931813a02cc126aa04da68053c7819f04cce2aa168249ddf5cef4b6e1b"
+    },
+    {
+     "ctn": 29,
+     "index": 281474976710626,
+     "secret": "3549168e4ee6ebe88d2b3cf584f21928593f3686f239ccc3b65e486b300ec913",
+     "point": "035d9185595c0503762302d2b5db7b3a1cdf8f1a744ee58edf6d1f9d176e36f961"
+    },
+    {
+     "ctn": 30,
+     "index": 281474976710625,
+     "secret": "7c5192234a78de28dc6260a6123604935fd33b88b36ffb4483af9f42a1649227",
+     "point": "029c30d7f8d6090892ddeebd1093baf8840d8a083970d44e226e9dbb7a3b74c38d"
+    },
+    {
+     "ctn": 31,
+     "index": 281474976710624,
+     "secret": "01f1c8aa870715ddf94bf11de69acdd49db74dbc73f0c35780f89ecb512de217",
+     "point": "0333ad630e91dde5f322a30ff50038bc03b7aa7176dbd56a949924529cbd93e944"
+    },
+    {
+     "ctn": 32,
+     "index": 281474976710623,
+     "secret": "957fd1332a4028435f2af9841832d7698c85bc2d40ccdc153b492969507cc54c",
+     "point": "029db5d88e261ca01eaa8309c4b97fdac5253c97dce3dba5f852d1fe05473ea07a"
+    },
+    {
+     "ctn": 33,
+     "index": 281474976710622,
+     "secret": "7de66226aaf7015ef70e31d033bfff15d2ff2ae5ceba5b3be2f91da83a6b98a8",
+     "point": "02ac03f90f38d98d4758c288777a451df58641526424dd0e586e95a167e6c6d4b2"
+    },
+    {
+     "ctn": 34,
+     "index": 281474976710621,
+     "secret": "48ecd0b920cdf3b4e41e66f5fd6124e0f888931b5cfd0bb18cbb145e021835cd",
+     "point": "020494f6bc71cde57842c44ddf31e5c788e4374dd757ac23c645c11d38f2836bc8"
+    },
+    {
+     "ctn": 35,
+     "index": 281474976710620,
+     "secret": "c07be97fb1176186b4b9f7fd7e045623483909be509dd344f3f9bf6a69b8e574",
+     "point": "03c4641ec073a2e70d5ec096f42d9484190a43840db30a16cd57f4ae93c6895fe8"
+    },
+    {
+     "ctn": 36,
+     "index": 281474976710619,
+     "secret": "d19ac476acbca2705f68db4e7643ed46181b0ff9ecb2bf7175c50e71b902dd15",
+     "point": "034a02be41d7d6d08ffcb74cb5886e380d9531aed53711ce2f71f797619ab573d0"
+    },
+    {
+     "ctn": 37,
+     "index": 281474976710618,
+     "secret": "f59387a38084cdd99aa5fa957be617df80c20cba93075792a9ea942447796f59",
+     "point": "032857eac00b4d667de1fd1c7eb3d52b2d30dddd116ad63df762a187e2c6558755"
+    },
+    {
+     "ctn": 38,
+     "index": 281474976710617,
+     "secret": "ee0bcb0b8ac4ba1887f09a99e989293063f46d5f7bc8e1efc4e67e4e7d6eaea1",
+     "point": "02e45da56155cf6821b13fbb2b8fcdaaf56ffa86f7c69a55bdfa25e6893bf8fec6"
+    },
+    {
+     "ctn": 39,
+     "index": 281474976710616,
+     "secret": "bd08b4a0dddab02178c005afe2ef6fa512c3d6248c74fa7ac669952326413c1a",
+     "point": "02d9f51db65acfcfd052feff9fdb46268dce8f3b60565a6578431f7dfc9c35abf6"
+    },
+    {
+     "ctn": 40,
+     "index": 281474976710615,
+     "secret": "a46314b22eb26230701931c913ed45226d8e80e755f88cacf959d9f338ead454",
+     "point": "02a4c75bd53ea0ef0704e97d397e1b983e93e8fd8035598dfb20a27ce5c2194582"
+    },
+    {
+     "ctn": 41,
+     "index": 281474976710614,
+     "secret": "805b739bfd8f6fa66e13a2823d9ed2e7f4398ae00a4353f0134b84ab8865b4f8",
+     "point": "02580686a87cb19c53bf941c07009d4198961da38ba197c8076ac735ba7c534e1a"
+    },
+    {
+     "ctn": 42,
+     "index": 281474976710613,
+     "secret": "5dd67fff5ced545d2f01bf09ea0260352dc4970234a3aa39063c0ddf7f093571",
+     "point": "022c7a155a93433845f44605872dc7f59e09a658bb861c7c23eb210f597feab1ce"
+    },
+    {
+     "ctn": 43,
+     "index": 281474976710612,
+     "secret": "d8b060ded9451eeea8d31329a4d8f9b6bdce06dea25ef5b0ef1a0f2abf4a428b",
+     "point": "038cc72069c91ebde84e31b377bd5f1a307862c6e566bf3f05f4bc12dc97efed1f"
+    },
+    {
+     "ctn": 44,
+     "index": 281474976710611,
+     "secret": "fe99756402eda57e6fe768538b485f1bc8fb82727aa5018ad3a0acbb1c9fc48f",
+     "point": "032ac12793b636f317f1d97fd3ccf6f132f24450d713d0c44c85b6b8f95fe796fe"
+    },
+    {
+     "ctn": 45,
+     "index": 281474976710610,
+     "secret": "01bb7ebc992c738ae441957e2d0d5899961e185cf0600e4976c8333b0501bd05",
+     "point": "021b7bb86e3d820c83c8a380ee0fcf62befaf6050f74cc6ab874ebecf2c0b6cbdb"
+    },
+    {
+     "ctn": 46,
+     "index": 281474976710609,
+     "secret": "eb04332c7f9e4f54245fefe455b2037c03845ac6de63b3d21da87704e314d0fe",
+     "point": "02ddaf8018e3ee16c79aa6ce1ea4b2edb29e9eb936976d81d3d07fdb7bec03aea4"
+    },
+    {
+     "ctn": 47,
+     "index": 281474976710608,
+     "secret": "af667b9e5ea6eeebfc3c3208780fca3ac1f69c4a460c4dd7ea538a1f88ed0d2c",
+     "point": "03297aac7c6d165040c9f473fbf8d252114bc0074f2fafdd0d1f55183a99477727"
+    },
+    {
+     "ctn": 48,
+     "index": 281474976710607,
+     "secret": "941325a7a5ecbd91193ecb5bb70b55015301c05ecdbdd2c1c77246ab6d06a673",
+     "point": "036e553c14117b3435231654e5945b0f7798ed3e98bb5cccf2b44d8b1580de1c5f"
+    },
+    {
+     "ctn": 49,
+     "index": 281474976710606,
+     "secret": "1e8378277dccda634716e78998ca45319b3d2471c69e2996815afeafadce43ec",
+     "point": "02f2e5e4c5ee14497dfa390b3b70f36aceddf140b40bc4da0c10d3a7b9e9925d85"
+    },
+    {
+     "ctn": 50,
+     "index": 281474976710605,
+     "secret": "de628569fc49c47a387c7c6b04969af07d50bef73ae65a625755429693b3dc3d",
+     "point": "023f567e49fb56af712a940c544f173ada7ecbfbf38f72e4479c017bb8aae9f2ed"
+    },
+    {
+     "ctn": 51,
+     "index": 281474976710604,
+     "secret": "e3c7c7260827baab2dffb8c67236aa778226ba04338339c7f1966e9c721bc3f4",
+     "point": "02d331b3b957cbe3d7b3eced276d6b7434dc5002d21fc35c1bee457761d86885e4"
+    },
+    {
+     "ctn": 52,
+     "index": 281474976710603,
+     "secret": "dade8c0b7c9bb716f93dd72305a3d407f21ebf351ca57c8af702f541b198eebe",
+     "point": "030a6fb9fe02335502b429d066d3d65e9a45009305411edc3d8b24a07a7fa2c30a"
+    },
+    {
+     "ctn": 53,
+     "index": 281474976710602,
+     "secret": "c45de47cb83ddff851a9d9d97fad67be0a4ed1e60d7dc7b12db4f724ef82d95a",
+     "point": "03403461141ffd2020c86cb5614c28fc11d58f2d7549389b05f9a68c96b58cc221"
+    },
+    {
+     "ctn": 54,
+     "index": 281474976710601,
+     "secret": "ad2aecbe9fe1d237a6e4a215c40dfa765d7f71bfda48449906c6776699c4374e",
+     "point": "02a4601a95f336d26f14ee90351955e6f1b04b4b62a28a3740b617bbb1c624e450"
+    },
+    {
+     "ctn": 55,
+     "index": 281474976710600,
+     "secret": "9a92fa572393f99f26f2d5887e2fc2a9d4d006b9dc043c9a7ab7f30e9f423257",
+     "point": "02104c15ed8824dc56120535f27b9eaa917ef24633a9b6f3d20a7a89e405b1d8ea"
+    },
+    {
+     "ctn": 56,
+     "index": 281474976710599,
+     "secret": "336aebc7686b2b1f7a790fb4268bdb5daa3b5d430ff6c17ad38f93c88bf5ac46",
+     "point": "039a7fb1a374e41ea5aadeab538c3abf3cf45a23cc8185ab7489c5ec947fc206d2"
+    },
+    {
+     "ctn": 57,
+     "index": 281474976710598,
+     "secret": "4b1395b1a90e7f0f93e7549e63121d567aba42ae6928dbd1f08fbef5719fc480",
+     "point": "038f7ef0c3c30895e3257b8b7272454b1e41a7dcec670d2103c24d251f18f9b1b9"
+    },
+    {
+     "ctn": 58,
+     "index": 281474976710597,
+     "secret": "9f3627589e2af09f9ef661c9b3db9f6a89c3431c35b151284d7cddf229527542",
+     "point": "02787d65c6fc76d99addc6132d6b10ee14c60ebb7a71b0484fe52e2b07f2b28c60"
+    },
+    {
+     "ctn": 59,
+     "index": 281474976710596,
+     "secret": "b6350608afad7d6a1946694b7b15810fb02d7d0a8e34d0ff99aadf07e44a1bef",
+     "point": "03f5b0fa5a539d65ced26c7e77388b496a644d8f6782bfb6334f950fe4ee78f469"
+    },
+    {
+     "ctn": 60,
+     "index": 281474976710595,
+     "secret": "a64811ac43ac87731ae6333af646ccd6fea7026ac26e30b2bed4af5e7db89f1f",
+     "point": "027068fc8c76924fb71cfa0667c5560fb2b6e6476aeb04d35bf8a2f1c68dc490cb"
+    },
+    {
+     "ctn": 61,
+     "index": 281474976710594,
+     "secret": "889737ac652889782696a4e81d50d9986db3005bb26a423979774d3aa940e3ad",
+     "point": "03ca2af54605f39c12e1933f3bd8427a2821b5c4df80187b4949421f6ce4d07312"
+    },
+    {
+     "ctn": 62,
+     "index": 281474976710593,
+     "secret": "a8d2ebe4384237846a2f3b1bf5e918ee35000267058af5ff6043cd637fe5ab22",
+     "point": "02a6c72420198cf51a97f6409417e7162b38e459f85e816e476dc26bc8f306bbf6"
+    },
+    {
+     "ctn": 63,
+     "index": 281474976710592,
+     "secret": "04cdf93055039d5c1645b89e2bab57ad936c943af874ab3fabb1f6aff953f5c3",
+     "point": "02a72a84ad21d59aedcd1d2d4c515d7d9c96b6eeb42842e10c8877a8914c1fa68c"
+    },
+    {
+     "ctn": 64,
+     "index": 281474976710591,
+     "secret": "a9e8febb418d05ee81fabe850d9b76266db9b8428445f2e65d0af52c0095a698",
+     "point": "021399d5620731d572d84e1bc6f0c0dc9e6ce4fadaf782e669b7bd2a0739858f80"
+    },
+    {
+     "ctn": 65,
+     "index": 281474976710590,
+     "secret": "fed28ce65c5dc20fdde02d720c9cbbc009082521f325e6f31a7554ef03443cc7",
+     "point": "038b9f8de713d03cfb8c99896e1c95987bd36b43a973804e6bf89fa5a4fc1459e6"
+    },
+    {
+     "ctn": 100,
+     "index": 281474976710555,
+     "secret": "70149a67aea9770300d1cffd5ebd878b1dbb62fc3aa5f2a72df51ef86aa76770",
+     "point": "034964b8823403ae389cc6ba153b867d98299f58d710332035d193c05b0fe9203a"
+    },
+    {
+     "ctn": 4095,
+     "index": 281474976706560,
+     "secret": "0464f55a05b375baa40d3015c79bbd4be8d07d42f2bdbe71c5babdf7e086e419",
+     "point": "030620a08725a2c5619c0663fd193b4dfd61bf27cadadee0c03cf4a9195f5960ff"
+    },
+    {
+     "ctn": 65536,
+     "index": 281474976645119,
+     "secret": "da2b890f71216dae5b857a019b1a77f4f388958b534677150edbdae972f0c194",
+     "point": "0315f8d9416be7f1c0495e1e0a8484cabd56e6c8053f2ae2c319bbb6427621d3db"
+    },
+    {
+     "ctn": 1000000,
+     "index": 281474975710655,
+     "secret": "af6ebe3ac01ac3cbfc58ca9449083867a43a99b7fe459d11bbee357b67a166d8",
+     "point": "0202ce68ce8bdbe3e913352624fa88b75ec2e9b6432171b52c40a3746fc6cf5a88"
+    },
+    {
+     "ctn": 16777216,
+     "index": 281474959933439,
+     "secret": "27eed597055979f4589bc73631715d79f03b27404738f46fd557c270d945941d",
+     "point": "025499b5f139d5b10a42ff1594d9b1f6cb55c6ea697e5be1d52c8a92f4f75862b5"
+    },
+    {
+     "ctn": 1099511627776,
+     "index": 280375465082879,
+     "secret": "6d799237d5d455a4ac9496925eb856795c0e27d8d8c36f13cdb947b268675efd",
+     "point": "037aadae75dc10922a804bf137cc350368bd46d43f7a9b65766262bd98aa728360"
+    },
+    {
+     "ctn": 281474976710654,
+     "index": 1,
+     "secret": "3a9bc76b77b3e00bcd49dbc8b42e111e30c4c800d674cf08cd06d98535be75b2",
+     "point": "02a05b35372865ecfe6a6dffae474cac2b51b2e4dd135dbbdd21edf9525662ab37"
+    }
+   ],
+   "blinded": {
+    "htlc_at_ctn0": "025c009d5dd88153aa079f0dc504846224a909602f4cbd5c45c1fd3163b722cdc5",
+    "delayed_at_ctn1": "030c7ce1d005688578b23d40986bc928d4017668f5b5da439cc9f553adec95d204",
+    "revocation_blinded_priv_at_ctn0": "189aa66f514f9e9d92135ee7f723c0c9de4b41477a88b7dc4df8fc304618e37a"
+   }
+  },
+  {
+   "name": "mixed",
+   "network": "regtest",
+   "wallet_seed": "e7010fabababababababababababababababababababababababababababab99",
+   "channel_seed": "deadbeef55555555555555555555555555555555555555555555555555555555",
+   "remote_node_id": "03c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+   "remote_funding_pubkey": "02dededededededededededededededededededededededededededededededede",
+   "nlocktime": 2100000000,
+   "node_key": {
+    "pubkey": "02140f0b8945c9a187bd5d898fde739e1937ff037b08a1420dceee82bcd10b4527",
+    "privkey": "555ce8fbbad0743c4862f5b6cda4f7dcab104e211d971dc8ee250599f2b3a28a"
+   },
+   "funding_root_key": {
+    "pubkey": "02fbadb123ff22cc3184648e6bfec78a8f5290dfa9881738a9adfc1352a76317a1",
+    "privkey": "7313b972679e8ae45397b69f6e0e225e785794eb87407e1eba57867012215175"
+   },
+   "static_payment_key": {
+    "pubkey": "030a1dcd99ef5b0eb2758061ce849bd2c2da94b152cd7ff9cdd08bc376aad62e35",
+    "privkey": "7474b716845815f7d9b182aa3e37dc0bd0adaaaaac0ba028682a7fc0b12c1709"
+   },
+   "multisig_key": {
+    "pubkey": "03c2100d9ab4f1975dbdcc760adf17ebd40e3f31d7afa985bfaea411ab4ef4753a",
+    "privkey": "2cfb4b44ea008f1f10956eae71e793b09fcc8b17536ca43cf4f58ee3f3eda45d"
+   },
+   "htlc_basepoint": {
+    "pubkey": "022dbbcbf1bbb5d233d832949580d2965c850a35f262446df48b940bb9d2f05d91",
+    "privkey": "d36353d195cbed5dd227847277cc0849772b8dc6cfd1047459035e5060a15e46"
+   },
+   "delayed_basepoint": {
+    "pubkey": "029fdf49cc473de43af4c4a620c9ea7e2cbbe38f4d2633f91b67499e919be67863",
+    "privkey": "a63e775232cd7b8e63223285b656fa6aae58af7cb14009574ae513e6535b790a"
+   },
+   "revocation_basepoint": {
+    "pubkey": "03179c1a94d1f6a1cfee41da2d636f0fc7854b8435b802f5031c44218fde35c4bb",
+    "privkey": "b1e39578e78a88c21cebd83ab541f94c6a723c90930d0330329bf254782be791"
+   },
+   "per_commitment_secret_seed": "1bf2badf6f987a693de716a7627dd749db1e1775fa7628d71de98781b9671369",
+   "anchors_funding_key_we_opened": {
+    "pubkey": "02865081ca785931db9e180cedb669028b9ea3e8d919d7baebd577aee5d027dd7a",
+    "privkey": "c56ae77adb58597246ff7f369ff4b1237aca384af327f76f4a9afe1221b035a4"
+   },
+   "anchors_funding_key_they_opened": {
+    "pubkey": "03632d9c38b0220f0352d22837e019d2c18d6a60cb9d5422ed1a6b470e96d80c7a",
+    "privkey": "db93b92b825e6706210ab04ad52da94aa877e5c244a827f83774301d8d57dcfb"
+   },
+   "payment_basepoint": {
+    "pubkey": "02b391353a61ed76dfceddc90084db4b9927b4df5e94b25b6d38e6112142bc8786",
+    "privkey": "bf64d731272d2b0c2c23b4b4fd3d702d7489ef3d0eabffa4dc413f12ba9ea01d"
+   },
+   "shachain": [
+    {
+     "ctn": 0,
+     "index": 281474976710655,
+     "secret": "f6e3f1728c3bda020d2b9dc87d24fff8e859add8e4b23f3c848790d2f9e0faa3",
+     "point": "03bb26660acbb928ee2cce945d1352582b0bb6acc31112031097c657c075f7593d"
+    },
+    {
+     "ctn": 1,
+     "index": 281474976710654,
+     "secret": "8ca9ed8ec01254f9ac726bd776e940ef1559eddf767ed38873112c18522f5099",
+     "point": "03aa3dc1d752712e97f4fe8aaddec712d4bb19bf2a1ae8c749578763dddbe83627"
+    },
+    {
+     "ctn": 2,
+     "index": 281474976710653,
+     "secret": "52617abe16c1ea744b70d0462601dec520110dba03740159f968c0e596427985",
+     "point": "03cfd359f9a5fdf686176e677cff8a7094feb8e0592c56eef8359ca7b45fdea1ab"
+    },
+    {
+     "ctn": 3,
+     "index": 281474976710652,
+     "secret": "212eb11d844120c76ff66b222dc23d06fc8b58a9164416bb7c92c8d1a883b59a",
+     "point": "0378d20356a1da5e5ec3984c8301429561d100c22c7b44f1b0b7c932fa87832ce4"
+    },
+    {
+     "ctn": 4,
+     "index": 281474976710651,
+     "secret": "46bcbed47bf60354787edc2a6413f6c23b3f18c560adcd29f3bf0738264f92a4",
+     "point": "034ac64a0f508dc8ba5e1f726a810d25382460211d0cfae33d51b27ed2d99b2571"
+    },
+    {
+     "ctn": 5,
+     "index": 281474976710650,
+     "secret": "b250fc70c649ec5b6de5e180381cf3debad56daabf76427ba7f9ea6093235408",
+     "point": "028fc7eadbe0c2f5e15ff301e287f5a0674556d35c45dcf51d1325f32a8fc6c6bd"
+    },
+    {
+     "ctn": 6,
+     "index": 281474976710649,
+     "secret": "875a9c1844b4312f7c371942c88823623f765e219042a9ccac4f51532b962ec3",
+     "point": "030f2cea494a84d8d1df6814437d4339f33b10d8c03b06bd36b53f733cf125f4c5"
+    },
+    {
+     "ctn": 7,
+     "index": 281474976710648,
+     "secret": "c786a64847d0ee07e26f4e1258d496cd9e6e5bf85a1d0bcfd70775261ebe41b2",
+     "point": "038a5709a4c5a3bcc02eca19c871efb70892d8625cf7a4853ffb1ecf07d9fe6273"
+    },
+    {
+     "ctn": 8,
+     "index": 281474976710647,
+     "secret": "703023a28f4c6a4df7fa42d752778336f1ea27be20f571f5a7dc7b82bc6333aa",
+     "point": "0232acb58440a52986bdd6441c8c3c704700aeb07d309c7d2a2c10385ef9613ee8"
+    },
+    {
+     "ctn": 9,
+     "index": 281474976710646,
+     "secret": "9523cab4caf292d41d2bcca78d67f193a3ef31d5146b2095b455135128e723f0",
+     "point": "02ee0d86d851d2a8db1733d496ec87bbb7c6cb8f4156096ad151d59f1e48b91230"
+    },
+    {
+     "ctn": 10,
+     "index": 281474976710645,
+     "secret": "4d66cd8aa89d382ec7a002001370ff948aac7cd46d45049a8d40837ec93d8a35",
+     "point": "03cf585847dd000e5b5aa4c26aa7f5b927610042d82598d27aff8566868564e69c"
+    },
+    {
+     "ctn": 11,
+     "index": 281474976710644,
+     "secret": "9a62c4104e5b16c3666980c2f35f8743379c77ed872fd058dbac789463a08827",
+     "point": "036a1558b1d840317e0ad7590ea820bf90c2be394baf168c9ebca2dd1ee2d24d74"
+    },
+    {
+     "ctn": 12,
+     "index": 281474976710643,
+     "secret": "f31f5f155cdd01b1020a1e930093f194b51dff042ef5cc75009e1187cd80bcac",
+     "point": "0306626ddb5c9daa4b6de897f55116657bdc158e4ebab686fec6b49ed81262da2a"
+    },
+    {
+     "ctn": 13,
+     "index": 281474976710642,
+     "secret": "b06d54c959a9ba995df106b79b8331e3cb3e24a6ca785e9a80ce4373fb5d3c49",
+     "point": "03f0c1b4496beb00c95516eb585f0ec0efb557d80df4b2ba25f2dea7b0823cc55a"
+    },
+    {
+     "ctn": 14,
+     "index": 281474976710641,
+     "secret": "e9818b4dfc45615f93626883738fd3b12b12de5d86f4e4540426c652855eae7e",
+     "point": "030125a56cf104746bf0177b17d8b74e8538d675be6590eea31e0b58a3d8bbd6da"
+    },
+    {
+     "ctn": 15,
+     "index": 281474976710640,
+     "secret": "33166a926b6b245c7b5c9ea071ef2e649ffea6a630e583adb4f944b75d11ab69",
+     "point": "032e78e607858aef29b2f9c7aa58b79ed2bc9cace0f0dd68538abb2cfada1fcf0a"
+    },
+    {
+     "ctn": 16,
+     "index": 281474976710639,
+     "secret": "31d229a145e0c0c7d352ec031406c5092159a60eb6d15e4e73f8a75ea3577774",
+     "point": "024a36c0e6321248662b365fdd44967e685681b67f41c82438f6e3b8105b348873"
+    },
+    {
+     "ctn": 17,
+     "index": 281474976710638,
+     "secret": "e1b7376f61c2777b72307150a5499fbfd87fb8d2a793fcbac9129beb6f908e4d",
+     "point": "0200c1f31d151cb59d117d7be7e4d685c16a904a8bc39d609bf19627ce0826cb0b"
+    },
+    {
+     "ctn": 18,
+     "index": 281474976710637,
+     "secret": "e94ee1348e9abd6c49a8f8211250136676285a3da3f495afbd5fad444e1d0b5a",
+     "point": "0380b50a926981095b8476c781da2fc55ece5dc9534eb625b463599441ef4132c6"
+    },
+    {
+     "ctn": 19,
+     "index": 281474976710636,
+     "secret": "a97813e45e6a371592579b6a4e2c8271aa9488163f4f1acd44ed0abf978293f4",
+     "point": "034186279b58d77affcbd03fafba88d636be3e99fb9e2a960451c059615ff5f80b"
+    },
+    {
+     "ctn": 20,
+     "index": 281474976710635,
+     "secret": "e9864fd676bd94650dfeb95fb912aa16c09f24a56715045b1838d67efa0baef8",
+     "point": "03767dbad85632b985d0d25c1812abc7e4ca75e80a6f05f2d80c3724727588739d"
+    },
+    {
+     "ctn": 21,
+     "index": 281474976710634,
+     "secret": "3a26e6a6f8a89d66335477921133606a48c577228d94e29f04b8ee3ed8e31458",
+     "point": "03e55731079ca1064a2c6e3f9bcd4466dc0af14bc961761878867bb2d17d4b2170"
+    },
+    {
+     "ctn": 22,
+     "index": 281474976710633,
+     "secret": "dc1ce216c76dbad5cdd9dbb183358bdac0100bd25a8e77d2b24da33df216a69f",
+     "point": "027bff5d802d075be50973a5ac42a67763338247398a578ad2bc51f88f391ee52d"
+    },
+    {
+     "ctn": 23,
+     "index": 281474976710632,
+     "secret": "a1428ff6a01a8245d352b42808306fc8834972ab862325ac57df9469a17a1f97",
+     "point": "038435a6b75981ebdf2a3bd8971bc0468ee9b66087a8ad5db77ba7fd261b320301"
+    },
+    {
+     "ctn": 24,
+     "index": 281474976710631,
+     "secret": "189f55cddfe5a68ab03bcd4aa6e7dbbb40fbd2f3800069b3589c5bbd9ab41325",
+     "point": "02860256664bf8510d48ef4f681dac55414aacee60cceda8ce3669f3fbeff43a3e"
+    },
+    {
+     "ctn": 25,
+     "index": 281474976710630,
+     "secret": "bd6ab8460caa2f98eb32a0b62c0efb4cf463f010f1593d553531b26412d10513",
+     "point": "022720418fbe470ddeb4bab1b6766ca29842e6b0e212cf755439251ff10e8aa5c2"
+    },
+    {
+     "ctn": 26,
+     "index": 281474976710629,
+     "secret": "a221077fb8f7b245c235cd9965802b3c3babcb2d11b87d54de290e9502f0ac3e",
+     "point": "03d266333bef3e1dee550ce7810d7cacd7dd0540ee7ef2523764bdc5dda9ccc7a5"
+    },
+    {
+     "ctn": 27,
+     "index": 281474976710628,
+     "secret": "48ebfbfdb28d8d67bfb249eeda8c07509d7d8f64ba647db61947e068dd7c12a0",
+     "point": "03856b7684346b64dc17c58adaa569bffbe1b76c5bde0dba101c54d437e26f46e4"
+    },
+    {
+     "ctn": 28,
+     "index": 281474976710627,
+     "secret": "8490ff315ded7120656669040c9c9cba78b40ea69eb34338166595f464632263",
+     "point": "0270849f8f0b4a0ff6df3696f97cb19848f1f6714b1ea7a7de6830bcfb2004655d"
+    },
+    {
+     "ctn": 29,
+     "index": 281474976710626,
+     "secret": "b152c725764543b7edcd7ed79d3cf37a2f731cf0a1ba3f94be050f3cf66c9e39",
+     "point": "021da92108181adcd9500afe8d3d0b8bd5e07d2ef29c83d7abe3e632a39d5848c5"
+    },
+    {
+     "ctn": 30,
+     "index": 281474976710625,
+     "secret": "f32acfe9c671b5a25219ab0bcc9515acfe211a41933248094a85fa45c8a0483f",
+     "point": "036fac7d3b45ab42d5172f5523dc0fdf1933a87702e103102fd44b79364570a4f8"
+    },
+    {
+     "ctn": 31,
+     "index": 281474976710624,
+     "secret": "b1141d3ae494219e8e39cd4de6183b792d58046c3a0028736ce79e14a2915f41",
+     "point": "0329ccb5723d9e0df7ce519274990cbb48be0e195108b7655bdf8e3ffa00a1ad69"
+    },
+    {
+     "ctn": 32,
+     "index": 281474976710623,
+     "secret": "b5e35ec0dbf42fe82ffa30c1a963d707fc7773c3b7871bd20c3ef5d04360432f",
+     "point": "021d7def39938ca0ee631b63b6d5e6e3fad69709521a9d7381241713afdaedc839"
+    },
+    {
+     "ctn": 33,
+     "index": 281474976710622,
+     "secret": "e3f624d9c464b2de4f71f58ae1c921723b091c1cae1e71a48a78cbcf74c29a32",
+     "point": "0218523b9ce9cc4737d0dc6c1037b5c5c229b210da77a3dcabb01d6cb5a0f9bff8"
+    },
+    {
+     "ctn": 34,
+     "index": 281474976710621,
+     "secret": "3efad525bd279e14045e371ccf76c35468f33f667f29150908256b91f30a75dd",
+     "point": "038be23ca5ebd46445c5428edc5bd2bce0ea9f7f4bf2f642726de97496e694b488"
+    },
+    {
+     "ctn": 35,
+     "index": 281474976710620,
+     "secret": "05f9cf9b2e23c562ecf44bfc9d157772641d032f06798b83a85e8c3964fc7ad6",
+     "point": "0253421419103d15e1aac5b2ecc5e672cf107f249c25d359150ba5b51770fadb6a"
+    },
+    {
+     "ctn": 36,
+     "index": 281474976710619,
+     "secret": "8b27ecda011d716c36c0043fc41009a595ea3f5d831b073fac841206c0c8f8be",
+     "point": "0230d12154a391324c177e51f3d5bec2bbf4457cddd64eb7855daa9c9ea8f82ed9"
+    },
+    {
+     "ctn": 37,
+     "index": 281474976710618,
+     "secret": "0f840ada8bb44143957e596d2373b73d2a659704a4f1991f991c8b0720822cba",
+     "point": "03b5a3a2d227c46e0c08b13d1f57fd5b8d3d26d2a56b97e39cf2e761c8bc6d5ad7"
+    },
+    {
+     "ctn": 38,
+     "index": 281474976710617,
+     "secret": "ee5067f1bb812648bd828ca7e1cfdc5c406574a3150236baaa5346e79638bb48",
+     "point": "03e1721fe810051066af2da8f9cfccbe13ecc8081154f0bb0c168597eb8f8bb133"
+    },
+    {
+     "ctn": 39,
+     "index": 281474976710616,
+     "secret": "a3951cb5614e7e2198778bfc61b163cd781f3e929462337088069d174debc7d4",
+     "point": "02497fdcc9fe035533ae486ee09e751836908b2cbb8ccc79cbb82097ab0b9c9348"
+    },
+    {
+     "ctn": 40,
+     "index": 281474976710615,
+     "secret": "de8560bfb4f9f134e8d3e1be0f497c043d340eaf1684853cbada165d631baf65",
+     "point": "0280b05bab7ed765cd5c93af38c4342569c6e5f9c8201a0156f5a9b8ed08795ea9"
+    },
+    {
+     "ctn": 41,
+     "index": 281474976710614,
+     "secret": "c0d7bb0db2a6d5e59eab0bdb4877edbfcdb3972d9927ddddb5be1e132c875685",
+     "point": "03726db0bd753a492df8ab1885d1c66352829249896e99920d8373102ab7c4e489"
+    },
+    {
+     "ctn": 42,
+     "index": 281474976710613,
+     "secret": "86fb2cb7029e053c166396805e39dc86e503adea09237ed6e5c4a2a6e6d1defa",
+     "point": "03675e4cc0c28fb1a72e571091717ec0401e716b4148d0f83ff4f0c1a595ba71d1"
+    },
+    {
+     "ctn": 43,
+     "index": 281474976710612,
+     "secret": "4e114493d1711fc245277b4de78a16173b5e82a4e3fd62acb196e40c46ea90ff",
+     "point": "0271d3a32ad9df28eb15aa82ac79c7beb03f480801792b4c3144acb35dd86b33aa"
+    },
+    {
+     "ctn": 44,
+     "index": 281474976710611,
+     "secret": "cb5e925e0e0ace949fe0dd4e8f18e93f07320bdc36a5cfc1d3e6b1ba000bf0a2",
+     "point": "03ff1a74972ea87519116022e9e5744984596b2677d25eed40f02aa6a054818c75"
+    },
+    {
+     "ctn": 45,
+     "index": 281474976710610,
+     "secret": "cf8e70a16c68874bae08cf020f228962ecc3e1147d95597f241a78b027a46ad2",
+     "point": "0399d3e7a3d0e3cb9d3e6316a450e1743b2e61d13faa31b8de0d2bf63bb5741437"
+    },
+    {
+     "ctn": 46,
+     "index": 281474976710609,
+     "secret": "8630ba51d4688c0d1b46cf90f1e7d4a254db7fdb1cebf358b88568b125025c36",
+     "point": "0321ee792fc232c1e398304b8f1b3c32e36d1e36e98866b6acf4c0a274048c704f"
+    },
+    {
+     "ctn": 47,
+     "index": 281474976710608,
+     "secret": "c3bfd951ddc9d5f8d7d6cf6fa7c1cb2945c494b52b1e7de5f680b43d3c6b534b",
+     "point": "02ad6b8ea1d72d25d1dcd9b1df7727d9be7ddbc7900faae58ebb672825144a9e13"
+    },
+    {
+     "ctn": 48,
+     "index": 281474976710607,
+     "secret": "9459cc8fd1a8dd6d5c42483a22c6f50d274e090f0ee528e2e9c8be0ba5ac5a30",
+     "point": "033bc87bde1230f6fc43f8d4e275a129cc03f0d52c811cb1f0ebbb9d39c05dd21f"
+    },
+    {
+     "ctn": 49,
+     "index": 281474976710606,
+     "secret": "61ff1d7b683dba90196659941c0abd358e9d9e7d694d616f39f010521ce98957",
+     "point": "022f94afb066c75e904ebc766caa6b68855d0cddac289b4670669da68d22361a46"
+    },
+    {
+     "ctn": 50,
+     "index": 281474976710605,
+     "secret": "1335d34fcbdd38a416ecaf9678ab3ac4a20ed41ab086295242bf369e66e5e39e",
+     "point": "03cf01c40d75d5f5805c3a5b0bf73b86bd251ba80e507815e611ece9f147bc1b80"
+    },
+    {
+     "ctn": 51,
+     "index": 281474976710604,
+     "secret": "f128ddd01fc4788c564697971cc5a3be1a9705777d8c921880eadfdcdaf6eb40",
+     "point": "02c213f1de8ea4e3ed27290c9ba0f2d9c71a98833aa3041d4b68744fe77e62d682"
+    },
+    {
+     "ctn": 52,
+     "index": 281474976710603,
+     "secret": "7eba1d35c6d1c093f20be27f67268c4ce63c31b8723f0b459054215d70c32ded",
+     "point": "03f9638fb8eeeca6ff837415cf60ecf7a276388a283ff0bf4a0b4153d58375777b"
+    },
+    {
+     "ctn": 53,
+     "index": 281474976710602,
+     "secret": "7fd07af236d13f3ee19d76f74c176f1434ed34c86c3cd89142a62d98bba84cee",
+     "point": "03fb481abc93f1d0780fd86584cddc880beda22d471a4bc01263f060f35a3eb291"
+    },
+    {
+     "ctn": 54,
+     "index": 281474976710601,
+     "secret": "91bf23b705d5be061459aa233a2ba3ad7a1a2588cb101e35bf29ed57f7c25b7b",
+     "point": "0303a269b1a2af8dc16681e4272c0b000993ae315995bafe93120728a70477ab73"
+    },
+    {
+     "ctn": 55,
+     "index": 281474976710600,
+     "secret": "53b9e3672e9706e0c6035fdd53ffe71ff3b7c42dc1e2e68f1b229f84a3ca82e8",
+     "point": "02208f8e4c2f59aed16d4d24e2fbad7e40f8cc36d76112abd377be49016f4add4d"
+    },
+    {
+     "ctn": 56,
+     "index": 281474976710599,
+     "secret": "4216aa5227e5a7a6267575266251822e586c87bc2dd5c351080ef1a894bcf201",
+     "point": "038b8d919b5c7f36940924be2c2440c9df922f7e3dbe0bb13fe398413899b2dc19"
+    },
+    {
+     "ctn": 57,
+     "index": 281474976710598,
+     "secret": "e2adc74965ecefb4c2253fb9bb24c0f0b809a09c8f1a9e2ef68b05cc62bb7dac",
+     "point": "03d50938270a6a6a5db8fbbda611dba4b9c917ab2812d697f767c9e856aeb71cce"
+    },
+    {
+     "ctn": 58,
+     "index": 281474976710597,
+     "secret": "4315e4a3982239dd3096a9b232ec0ccb1992aae12cd099c83fe4c8932e478d17",
+     "point": "03af80ed3c9c850bb8dc18161a4540480a71fcadf35e36b260542c9557f3791bfe"
+    },
+    {
+     "ctn": 59,
+     "index": 281474976710596,
+     "secret": "c2efc87cd28ebde8c65f5d363a17a2a1c6df756fad43570ccda0b3e568e0c2b9",
+     "point": "0232568f179e09f6324ccd71b6f1fef9c19c9771897139ef18ac87381a138e5ffb"
+    },
+    {
+     "ctn": 60,
+     "index": 281474976710595,
+     "secret": "6383e253eded5d2f4d5d00676c832d02c7c02acb5b1d196d41a5d9a51c9ac202",
+     "point": "03265c07283e1103ca1a32559b82a6d9e659931fac16fee5017e6322c9345eb6a4"
+    },
+    {
+     "ctn": 61,
+     "index": 281474976710594,
+     "secret": "20e48053c75b7e6bfccb965b238f28759c9715207c744b538f4e2209d21cb2dc",
+     "point": "02174a04372dd690d49d2f0fd6d3c069812cbd13261aa286d09f75183840f40aff"
+    },
+    {
+     "ctn": 62,
+     "index": 281474976710593,
+     "secret": "40f6cb835867e49273f84ce4e67e50a9ff889e23b2a69823b33e6b049038539f",
+     "point": "02a696862179d451ae1ffc4fce4fdadc667f4f84883ae5e1f2f14c85d721dc37b1"
+    },
+    {
+     "ctn": 63,
+     "index": 281474976710592,
+     "secret": "86b663b835957dbde041bf4117d08847652ba050d152baf660fe828d7b13e664",
+     "point": "03752e1405e4a529f1a90410ac876ef28eb1f90f621105acfa9d8d1c780e4aa0bd"
+    },
+    {
+     "ctn": 64,
+     "index": 281474976710591,
+     "secret": "52eaa61d2f93efc8fa54be17cdb84b25d9b5c2957eeb89eac5e121437e98eeb8",
+     "point": "03a924dcef57ed00f5a731ce4267d225bf2b9e57034cc83d772dcc321ff97244e8"
+    },
+    {
+     "ctn": 65,
+     "index": 281474976710590,
+     "secret": "5b8bdc84722d9e464a0b54f6391b03400cf99d05479b359324df495db22c4e8f",
+     "point": "0295fef0394f57eab478fd700e4aee08b7c6ec63c291b9357dbeb550f89c174ecf"
+    },
+    {
+     "ctn": 100,
+     "index": 281474976710555,
+     "secret": "538bf4868bc9b88322d073aa3fc155eab66dc5a023567fff71710233f14f00e5",
+     "point": "021b5748ab4a87e3b58835edd12681df464de6b581447b5bde95d7d9ed15246e0c"
+    },
+    {
+     "ctn": 4095,
+     "index": 281474976706560,
+     "secret": "fd0cc4b22825c7e9eb01bebb979a9270f604ee2c577e81aa47e79e4bca84c006",
+     "point": "0374575f8ef2931512548404ead9c1f42d23475e18c510a09a90ce8010147ef244"
+    },
+    {
+     "ctn": 65536,
+     "index": 281474976645119,
+     "secret": "25a006ea52beedacf168eaf440d4b0aad865d02dfa1e0e613f2ec65928d83978",
+     "point": "031cd486132300b2a555bef9125690a279ee49b9337a03846793ff3ac57a8633af"
+    },
+    {
+     "ctn": 1000000,
+     "index": 281474975710655,
+     "secret": "fff5bab565d84be5dfb839d459d5f9677584072c77018af48d3a1ac0115c3908",
+     "point": "029a3df602d208b670d9207331e1a8065e0a835877db3e98fd5dbed12af96bdcb8"
+    },
+    {
+     "ctn": 16777216,
+     "index": 281474959933439,
+     "secret": "c01ab859278ae0cb1779f5cb3311ef6f9f2f8a724098e0f0ab244fcc98af6bfd",
+     "point": "03dcdb03574813af073921a5f469b06adeb2948396401ee71c7de646a64321cae3"
+    },
+    {
+     "ctn": 1099511627776,
+     "index": 280375465082879,
+     "secret": "c0a637e83c2bfdd18833faa5c71d552194384dce803fbfa5155c42bd8a8997a5",
+     "point": "02b969fa079347af85963e079b304c27669053cde0eb3f14f3d221c68e604927c7"
+    },
+    {
+     "ctn": 281474976710654,
+     "index": 1,
+     "secret": "307153bca8b3774b2d0617f7c01700880354caa8962142b5c490af400b75abf0",
+     "point": "028dec6d5533ab8aa35185ed01fadf1dec926c4729ef3a146416acc858f210d247"
+    }
+   ],
+   "blinded": {
+    "htlc_at_ctn0": "0273cd994c9c439ea23366219cb768df1805879812d62cbbf71e9e5232f31d1ce9",
+    "delayed_at_ctn1": "03aff651f80801b5d06bb05c3f4f5e7446890d9b45b627196f4fc8aa54389348bb",
+    "revocation_blinded_priv_at_ctn0": "a911fb1d608c952b4bbb12e2662eb7d906f465b8e72b7b62373628c4e883daf8"
+   }
+  }
+ ]
+}
