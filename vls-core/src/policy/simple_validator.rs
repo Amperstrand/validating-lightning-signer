@@ -614,48 +614,96 @@ impl Validator for SimpleValidator {
                             );
                         }
 
-                        if chan.enforcement_state.next_holder_commit_num != 1 {
-                            policy_err!(
-                                self,
-                                "policy-onchain-initial-commitment-countersigned",
-                                "initial holder commitment not validated",
+                        if let Some(prev_funding) =
+                            chan.enforcement_state.prev_funding_commitment.as_ref()
+                        {
+                            // Splice of an EXISTING channel (playground
+                            // #268 EC-5): the fresh-open walls below do
+                            // not apply — an existing channel carries
+                            // commitment history (num != 1) and the era
+                            // convention sends the fundee's post-splice
+                            // balance in push_value, including on inbound
+                            // channels. The value and script checks above
+                            // already tied this output to the channel's
+                            // current (new-era) setup. The splice shape
+                            // additionally requires the psbt to spend the
+                            // retiring funding outpoint — tying the new
+                            // funding to the era it replaces; that input
+                            // is co-signed separately (SignSpliceTx) under
+                            // the retiring era's keys and value view. The
+                            // full new funding value counts as beneficial:
+                            // it redeems the retiring funding input —
+                            // counted at full value on the input side —
+                            // plus fresh wallet contributions; the split
+                            // between the parties is enforced at the
+                            // commitment layer (carried balance + push).
+                            if !tx
+                                .input
+                                .iter()
+                                .any(|txin| txin.previous_output == prev_funding.outpoint)
+                            {
+                                policy_err!(
+                                    self,
+                                    "policy-onchain-splice-must-spend-retiring-funding",
+                                    "splice psbt must spend the retiring funding outpoint {}",
+                                    prev_funding.outpoint
+                                );
+                            }
+                            debug!(
+                                "output {} ({}) splice-funds channel {}",
+                                outndx,
+                                output.value.to_sat(),
+                                chan.id()
                             );
-                        }
-                        if !chan.setup.is_outbound {
-                            policy_err!(
-                                self,
-                                "policy-onchain-no-fund-inbound",
-                                "can't sign for inbound channel: dual-funding not supported yet",
-                            );
-                        }
-                        let push_val_sat = chan.setup.push_value_msat / 1000;
-                        if push_val_sat > 0 {
-                            policy_err!(
-                                self,
-                                "policy-onchain-no-channel-push",
-                                "channel push not allowed: dual-funding not supported yet",
-                            );
-                        }
-                        let our_value =
-                            chan.setup.channel_value_sat.checked_sub(push_val_sat).ok_or_else(
-                                || {
-                                    policy_error(
-                                        "policy-onchain-fee-range",
-                                        format!(
-                                            "channel value underflow: {} - {}",
-                                            chan.setup.channel_value_sat, push_val_sat
-                                        ),
-                                    )
-                                },
+                            beneficial_sum = add_beneficial_output!(
+                                beneficial_sum,
+                                chan.setup.channel_value_sat,
+                                "splice funding value"
                             )?;
-                        debug!(
-                            "output {} ({}) funds channel {}",
-                            outndx,
-                            output.value.to_sat(),
-                            chan.id()
-                        );
-                        beneficial_sum =
-                            add_beneficial_output!(beneficial_sum, our_value, "channel value")?;
+                        } else {
+                            if chan.enforcement_state.next_holder_commit_num != 1 {
+                                policy_err!(
+                                    self,
+                                    "policy-onchain-initial-commitment-countersigned",
+                                    "initial holder commitment not validated",
+                                );
+                            }
+                            if !chan.setup.is_outbound {
+                                policy_err!(
+                                    self,
+                                    "policy-onchain-no-fund-inbound",
+                                    "can't sign for inbound channel: dual-funding not supported yet",
+                                );
+                            }
+                            let push_val_sat = chan.setup.push_value_msat / 1000;
+                            if push_val_sat > 0 {
+                                policy_err!(
+                                    self,
+                                    "policy-onchain-no-channel-push",
+                                    "channel push not allowed: dual-funding not supported yet",
+                                );
+                            }
+                            let our_value =
+                                chan.setup.channel_value_sat.checked_sub(push_val_sat).ok_or_else(
+                                    || {
+                                        policy_error(
+                                            "policy-onchain-fee-range",
+                                            format!(
+                                                "channel value underflow: {} - {}",
+                                                chan.setup.channel_value_sat, push_val_sat
+                                            ),
+                                        )
+                                    },
+                                )?;
+                            debug!(
+                                "output {} ({}) funds channel {}",
+                                outndx,
+                                output.value.to_sat(),
+                                chan.id()
+                            );
+                            beneficial_sum =
+                                add_beneficial_output!(beneficial_sum, our_value, "channel value")?;
+                        }
                     }
                     _ => panic!("this can't happen"),
                 };
