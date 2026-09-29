@@ -17,6 +17,7 @@ use lightning_signer::bitcoin::hashes::Hash;
 
 use super::adapter::{ChannelReply, ChannelRequest, ClientId};
 use vls_common::*;
+use vls_protocol::serde_bolt::WireString;
 use vls_protocol::{
     msgs, msgs::DeBolt as _, msgs::Message, msgs::SerBolt as _, Error as ProtocolError,
 };
@@ -405,6 +406,13 @@ impl<C: 'static + Client> SignerLoop<C> {
                 // Wait for the signer reply
                 // Can fail if the adapter shut down
                 let reply = reply_rx.blocking_recv().map_err(|_| Error::Transport)?;
+                if let Some(err_text) = reply.error {
+                    // Permanent signer refusal: fail THIS request loudly, no
+                    // retry. Retrying here wedged the node (the empty-message
+                    // backoff loop sat on channeld's hsmd fd until the STFU
+                    // timeout; the signpsbt RPC hung for minutes).
+                    return Ok(signer_error_reply(&message, &err_text));
+                }
                 if reply.is_temporary_failure
                     // An empty signer reply is a broken vlsd round-trip, not a
                     // protocol answer — forwarded raw it parses as nothing
@@ -438,5 +446,102 @@ impl<C: 'static + Client> SignerLoop<C> {
 
     fn send_request(&mut self, message: Vec<u8>) -> Result<oneshot::Receiver<ChannelReply>> {
         self.signer_port.send_request_blocking(message, self.client_id.clone())
+    }
+}
+
+/// Map a permanent signer refusal to an hsmd wire reply that fails the
+/// pending request loudly.
+///
+/// CLN hsmd clients parse replies strictly by the expected per-request type.
+/// `hsmd_init_reply_failure` (115) is never a valid reply for a channel or
+/// wallet request, so the client's fromwire check fails on it and the
+/// request dies with the refusal text embedded in the surfaced hex:
+/// channeld `status_failed(STATUS_FAIL_HSM_IO, "Bad <reply> ...")` (the
+/// channel fails, the node lives), lightningd RPC paths `command_fail`
+/// (e.g. signpsbt's "HSM gave bad sign_withdrawal_reply ..."). For
+/// HsmdInit itself this type is the literal expected failure reply.
+/// Preapprovals have a real refusal semantic and become declines.
+pub(crate) fn signer_error_reply(request: &[u8], error_text: &str) -> Vec<u8> {
+    let message_type = if request.len() < 2 {
+        0
+    } else {
+        u16::from_be_bytes([request[0], request[1]])
+    };
+    match message_type {
+        t if t == msgs::PreapproveInvoice::TYPE => {
+            msgs::PreapproveInvoiceReply { result: false }.as_vec()
+        }
+        t if t == msgs::PreapproveKeysend::TYPE => {
+            msgs::PreapproveKeysendReply { result: false }.as_vec()
+        }
+        t => msgs::HsmdInitReplyFailure {
+            error_code: t as u32,
+            error_message: WireString(format!("vls signer error: {}", error_text).into_bytes()),
+        }
+        .as_vec(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request_bytes(message_type: u16) -> Vec<u8> {
+        message_type.to_be_bytes().to_vec()
+    }
+
+    #[test]
+    fn permanent_error_maps_to_init_reply_failure() {
+        let reply = signer_error_reply(
+            &request_bytes(msgs::SignWithdrawal::TYPE),
+            "policy failure: validate_commitment_tx: no",
+        );
+        match msgs::from_vec(reply).unwrap() {
+            Message::HsmdInitReplyFailure(m) => {
+                assert_eq!(m.error_code, msgs::SignWithdrawal::TYPE as u32);
+                let text = String::from_utf8(m.error_message.0).unwrap();
+                assert!(text.starts_with("vls signer error: policy failure"));
+            }
+            other => panic!("expected HsmdInitReplyFailure, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn permanent_error_on_channel_request_carries_request_type() {
+        let reply = signer_error_reply(
+            &request_bytes(msgs::SignCommitmentTx::TYPE),
+            "policy-commitment-initial-funding-value",
+        );
+        match msgs::from_vec(reply).unwrap() {
+            Message::HsmdInitReplyFailure(m) => {
+                assert_eq!(m.error_code, msgs::SignCommitmentTx::TYPE as u32);
+            }
+            other => panic!("expected HsmdInitReplyFailure, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn preapproval_errors_become_declines() {
+        for request_type in [msgs::PreapproveInvoice::TYPE, msgs::PreapproveKeysend::TYPE] {
+            let reply = signer_error_reply(&request_bytes(request_type), "policy-routing-balanced");
+            let parsed = msgs::from_vec(reply).unwrap();
+            match parsed {
+                Message::PreapproveInvoiceReply(m) => assert!(!m.result),
+                Message::PreapproveKeysendReply(m) => assert!(!m.result),
+                other => panic!("expected a preapproval decline, got {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn init_failure_reply_is_the_literal_expected_shape_for_init() {
+        let reply = signer_error_reply(&request_bytes(msgs::HsmdInit::TYPE), "signer unavailable");
+        match msgs::from_vec(reply).unwrap() {
+            Message::HsmdInitReplyFailure(m) => {
+                assert_eq!(m.error_code, msgs::HsmdInit::TYPE as u32);
+                assert!(String::from_utf8(m.error_message.0).unwrap().contains("signer unavailable"));
+            }
+            other => panic!("expected HsmdInitReplyFailure, got {:?}", other),
+        }
     }
 }

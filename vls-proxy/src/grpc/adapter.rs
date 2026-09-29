@@ -134,7 +134,6 @@ impl ProtocolAdapter {
     pub fn start_stream_reader(&self, mut stream: Streaming<SignerResponse>) -> JoinHandle<()> {
         let requests = self.requests.clone();
         let shutdown_signal = self.shutdown_signal.clone();
-        let shutdown_trigger = self.shutdown_trigger.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -146,19 +145,20 @@ impl ProtocolAdapter {
                         match resp_opt {
                             Some(Ok(resp)) => {
                                 debug!("got signer response {}", resp.request_id);
-                                // temporary failures are not fatal and are handled below
-                                if !resp.error.is_empty() && !resp.is_temporary_failure {
-                                    if cfg!(feature = "developer") {
-                                        // dev builds keep the node alive for
-                                        // diagnosis; the failed request's reply
-                                        // is dropped (lightningd times it out)
-                                        error!("signer error: {} (dev mode: continuing)", resp.error);
-                                    } else {
-                                        error!("signer error: {}; triggering shutdown", resp.error);
-                                        shutdown_trigger.trigger();
-                                        break;
-                                    }
-                                }
+                                // A permanent signer refusal is delivered to the
+                                // pending request as a first-class error; the
+                                // signer loop maps it to an hsmd error reply so
+                                // the node fails THAT request loudly. The old
+                                // shapes both wedged: the dev build dropped the
+                                // reply (the empty-message retry loop = the
+                                // silent STFU/signpsbt wedges), the non-dev
+                                // build shut the whole proxy down (node death).
+                                let permanent_error = if !resp.error.is_empty() && !resp.is_temporary_failure {
+                                    error!("signer error on request {}: {}", resp.request_id, resp.error);
+                                    Some(resp.error.clone())
+                                } else {
+                                    None
+                                };
 
                                 if resp.is_temporary_failure {
                                     warn!("signer temporary failure on {}: {}", resp.request_id, resp.error);
@@ -172,7 +172,11 @@ impl ProtocolAdapter {
                                 let mut reqs = requests.lock().await;
                                 let channel_req_opt = reqs.requests.remove(&resp.request_id);
                                 if let Some(channel_req) = channel_req_opt {
-                                    let reply = ChannelReply { reply: resp.message, is_temporary_failure: resp.is_temporary_failure };
+                                    let reply = ChannelReply {
+                                        reply: resp.message,
+                                        is_temporary_failure: resp.is_temporary_failure,
+                                        error: permanent_error,
+                                    };
                                     let send_res = channel_req.reply_tx.send(reply);
                                     if send_res.is_err() {
                                         // The awaiting task is gone (connection
@@ -238,6 +242,10 @@ pub struct ChannelRequest {
 pub struct ChannelReply {
     pub reply: Vec<u8>,
     pub is_temporary_failure: bool,
+    /// Permanent signer refusal text (error set, is_temporary_failure unset):
+    /// the signer loop maps this to an hsmd error reply for the pending
+    /// request instead of retrying or shutting down.
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
