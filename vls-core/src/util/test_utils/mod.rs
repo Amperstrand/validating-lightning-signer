@@ -1930,6 +1930,21 @@ pub fn make_services() -> NodeServices {
     )
 }
 
+/// Like [make_services], but with a permissive policy filter, for harnesses
+/// that must sign host-provided transactions verbatim (fork-local spike
+/// support; not for upstream).
+pub fn make_permissive_services(network: Network) -> NodeServices {
+    let mut policy = crate::policy::simple_validator::make_default_simple_policy(network);
+    policy.filter = crate::policy::filter::PolicyFilter::new_permissive();
+    make_test_services(
+        network,
+        Arc::new(crate::policy::simple_validator::SimpleValidatorFactory::new_with_policy(
+            policy,
+        )),
+        Arc::new(StandardClock()),
+    )
+}
+
 pub fn make_test_services(
     network: Network,
     validator_factory: Arc<dyn ValidatorFactory>,

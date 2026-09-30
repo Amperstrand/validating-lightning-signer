@@ -92,6 +92,136 @@ class ElectrumTap:
         self.bridge_channels[local.channel_seed.hex()] = result["channel_id"]
         return result["channel_id"]
 
+    def mirror_channel_setup(self, chan, name: str) -> None:
+        from electrum.lnutil import LOCAL, REMOTE
+
+        local = chan.config[LOCAL]
+        remote = chan.config[REMOTE]
+        outpoint = chan.funding_outpoint
+        bridge_channel_id = self.bridge_channels[local.channel_seed.hex()]
+        self.client.call(
+            "setup_channel",
+            {
+                "channel_id": bridge_channel_id,
+                "is_outbound": chan.constraints.is_initiator,
+                "channel_value_sat": chan.constraints.capacity,
+                "push_value_msat": remote.initial_msat,
+                "funding_txid": outpoint.txid,
+                "funding_vout": outpoint.output_index,
+                "holder_selected_contest_delay": local.to_self_delay,
+                "counterparty_selected_contest_delay": remote.to_self_delay,
+                "commitment_type": "AnchorsZeroFeeHtlc",
+                "counterparty_points": {
+                    "funding_pubkey": remote.multisig_key.pubkey.hex(),
+                    "revocation_basepoint": remote.revocation_basepoint.pubkey.hex(),
+                    "payment_point": remote.payment_basepoint.pubkey.hex(),
+                    "delayed_payment_basepoint": remote.delayed_basepoint.pubkey.hex(),
+                    "htlc_basepoint": remote.htlc_basepoint.pubkey.hex(),
+                },
+            },
+        )
+        self.client.call(
+            "confirm_funding_lock",
+            {
+                "channel_id": bridge_channel_id,
+                "funding_txid": outpoint.txid,
+                "funding_vout": outpoint.output_index,
+            },
+        )
+
+    def sync_commitment_state(self, chan, commit_num: int, current_point_hex: str) -> None:
+        from electrum.lnutil import LOCAL
+
+        bridge_channel_id = self.bridge_channels[chan.config[LOCAL].channel_seed.hex()]
+        self.client.call(
+            "sync_commitment_state",
+            {
+                "channel_id": bridge_channel_id,
+                "commit_num": commit_num,
+                "revoke_num": commit_num - 1,
+                "per_commitment_point": current_point_hex,
+            },
+        )
+
+    def compare_counterparty_signature_raw(
+        self,
+        chan,
+        name: str,
+        sig_64: bytes,
+        commitment,
+        witscripts: list,
+        per_commitment_point_hex: str,
+        ctn: int,
+        feerate_per_kw: int,
+    ) -> None:
+        from electrum.lnutil import LOCAL
+
+        bridge_channel_id = self.bridge_channels[chan.config[LOCAL].channel_seed.hex()]
+        result = self.client.call(
+            "sign_counterparty_commitment_raw",
+            {
+                "channel_id": bridge_channel_id,
+                "tx": commitment.serialize_to_network(include_sigs=False),
+                "witscripts": witscripts,
+                "per_commitment_point": per_commitment_point_hex,
+                "ctn": ctn,
+                "feerate_per_kw": feerate_per_kw,
+            },
+        )
+        # verification over electrum's own BIP-143 sighash is the semantic
+        # check; byte equality would additionally require identical nonce
+        # derivation across signer implementations
+        from electrum.crypto import sha256d
+        from electrum_ecc import ECPubkey
+
+        msg_hash = sha256d(commitment.serialize_preimage(0))
+        funding_pubkey = chan.config[LOCAL].multisig_key.pubkey
+        if not ECPubkey(funding_pubkey).ecdsa_verify(sig_64, msg_hash):
+            self.divergences.append(f"{name} ctn={ctn} sanity: electrum sig does not verify")
+            return
+        bridge_sig = bytes.fromhex(result["signature"])
+        self.comparisons += 1
+        if not ECPubkey(funding_pubkey).ecdsa_verify(bridge_sig, msg_hash):
+            self.divergences.append(
+                f"{name} ctn={ctn} signature(raw): bridge sig does not verify against electrum sighash"
+            )
+        elif bridge_sig != sig_64:
+            print(f"signatures verify equal at ctn={ctn}; bytes differ (nonce derivation)")
+
+    def compare_counterparty_signature(
+        self,
+        chan,
+        name: str,
+        sig_64: bytes,
+        per_commitment_point_hex: str,
+        ctn: int,
+        feerate_per_kw: int,
+        to_holder_sat: int,
+        to_counterparty_sat: int,
+    ) -> None:
+        from electrum.lnutil import LOCAL
+
+        outpoint = chan.funding_outpoint
+        bridge_channel_id = self.bridge_channels[chan.config[LOCAL].channel_seed.hex()]
+        result = self.client.call(
+            "sign_counterparty_commitment",
+            {
+                "channel_id": bridge_channel_id,
+                "funding_txid": outpoint.txid,
+                "funding_vout": outpoint.output_index,
+                "per_commitment_point": per_commitment_point_hex,
+                "ctn": ctn,
+                "feerate_per_kw": feerate_per_kw,
+                "to_holder_sat": to_holder_sat,
+                "to_counterparty_sat": to_counterparty_sat,
+            },
+        )
+        self.comparisons += 1
+        if result["signature"] != sig_64.hex():
+            self.divergences.append(
+                f"{name} ctn={ctn} signature: bridge {result['signature']} != electrum {sig_64.hex()}"
+            )
+
     def compare_point(self, chan, ctn: int, point: bytes) -> None:
         from electrum.lnutil import LOCAL
 

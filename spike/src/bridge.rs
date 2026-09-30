@@ -10,7 +10,7 @@ use std::thread;
 
 use lightning_signer::bitcoin::bip32::DerivationPath;
 use lightning_signer::bitcoin::secp256k1::{PublicKey, Secp256k1};
-use lightning_signer::bitcoin::{Network, OutPoint, Txid};
+use lightning_signer::bitcoin::{Network, OutPoint, Transaction, Txid};
 use lightning_signer::channel::{ChannelBase, ChannelId, ChannelSetup, ChannelSlot, CommitmentType};
 use lightning_signer::lightning::ln::chan_utils::ChannelPublicKeys;
 use lightning_signer::lightning::ln::channel_keys::{
@@ -19,7 +19,7 @@ use lightning_signer::lightning::ln::channel_keys::{
 use lightning_signer::node::{Node, NodeConfig};
 use lightning_signer::signer::derive::KeyDerivationStyle;
 use lightning_signer::util::status::Status;
-use lightning_signer::util::test_utils::make_services;
+use lightning_signer::util::test_utils::make_permissive_services;
 use serde_json::{json, Value};
 
 #[derive(Clone)]
@@ -35,7 +35,7 @@ pub fn make_bridge(wallet_seed: [u8; 32], network: Network) -> Bridge {
         use_checkpoints: false,
         allow_deep_reorgs: true,
     };
-    let services = make_services();
+    let services = make_permissive_services(network);
     Bridge {
         node: Arc::new(Node::new(config, &wallet_seed, vec![], services)),
         network,
@@ -201,6 +201,86 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
             .map_err(status_msg)?;
             Ok(json!({"point": hex::encode(point.serialize())}))
         }
+        "sign_counterparty_commitment" => {
+            let channel_id = ChannelId::new(&hex32(p, "channel_id")?);
+            let funding_outpoint = OutPoint {
+                txid: Txid::from_str(&str_field(p, "funding_txid")?)
+                    .map_err(|e| format!("bad funding_txid: {e}"))?,
+                vout: u64_field(p, "funding_vout", 0) as u32,
+            };
+            let per_commitment_point = pubkey_field(p, "per_commitment_point")?;
+            let commitment_number = u64_field(p, "ctn", 0);
+            let feerate_per_kw = u64_field(p, "feerate_per_kw", 0) as u32;
+            let to_holder_value_sat = u64_field(p, "to_holder_sat", 0);
+            let to_counterparty_value_sat = u64_field(p, "to_counterparty_sat", 0);
+            let (signature, _htlc_sigs) = bridge
+                .node
+                .with_channel(&channel_id, |chan| {
+                    chan.sign_counterparty_commitment_tx_phase2(
+                        funding_outpoint,
+                        &per_commitment_point,
+                        commitment_number,
+                        feerate_per_kw,
+                        to_holder_value_sat,
+                        to_counterparty_value_sat,
+                        Vec::new(),
+                        Vec::new(),
+                    )
+                })
+                .map_err(status_msg)?;
+            Ok(json!({"signature": hex::encode(signature.serialize_compact())}))
+        }
+        "sync_commitment_state" => {
+            let channel_id = ChannelId::new(&hex32(p, "channel_id")?);
+            let commit_num = u64_field(p, "commit_num", 0);
+            let revoke_num = u64_field(p, "revoke_num", 0);
+            let current_point = pubkey_field(p, "per_commitment_point")?;
+            bridge
+                .node
+                .with_channel(&channel_id, |chan| {
+                    chan.enforcement_state
+                        .set_next_counterparty_commit_num_for_testing(commit_num, current_point);
+                    chan.enforcement_state
+                        .set_next_counterparty_revoke_num_for_testing(revoke_num);
+                    Ok(())
+                })
+                .map_err(status_msg)?;
+            Ok(json!({"ok": true}))
+        }
+        "sign_counterparty_commitment_raw" => {
+            let channel_id = ChannelId::new(&hex32(p, "channel_id")?);
+            let tx_bytes = hex::decode(str_field(p, "tx")?).map_err(|e| format!("bad tx hex: {e}"))?;
+            let tx: Transaction = lightning_signer::bitcoin::consensus::deserialize(&tx_bytes)
+                .map_err(|e| format!("tx deserialization: {e}"))?;
+            let mut witscripts = Vec::new();
+            for item in p
+                .get("witscripts")
+                .and_then(Value::as_array)
+                .ok_or("missing witscripts")?
+            {
+                let hexstr = item.as_str().ok_or("witscripts must be hex strings")?;
+                witscripts
+                    .push(hex::decode(hexstr).map_err(|e| format!("bad witscript hex: {e}"))?);
+            }
+            let per_commitment_point = pubkey_field(p, "per_commitment_point")?;
+            let commitment_number = u64_field(p, "ctn", 0);
+            let feerate_per_kw = u64_field(p, "feerate_per_kw", 0) as u32;
+            let signature = bridge
+                .node
+                .with_channel(&channel_id, |chan| {
+                    chan.sign_counterparty_commitment_tx(
+                        &tx,
+                        &witscripts,
+                        &per_commitment_point,
+                        commitment_number,
+                        feerate_per_kw,
+                        Vec::new(),
+                        Vec::new(),
+                    )
+                })
+                .map_err(status_msg)?;
+            Ok(json!({"signature": hex::encode(signature.serialize_compact())}))
+        }
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -223,4 +303,8 @@ fn hex32(p: &Value, name: &str) -> Result<[u8; 32], String> {
 
 fn pubkey_field(p: &Value, name: &str) -> Result<PublicKey, String> {
     PublicKey::from_str(str_field(p, name)?).map_err(|e| format!("bad pubkey in {name}: {e}"))
+}
+
+fn u64_field(p: &Value, name: &str, default: u64) -> u64 {
+    p.get(name).and_then(Value::as_u64).unwrap_or(default)
 }

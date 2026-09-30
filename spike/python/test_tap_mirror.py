@@ -30,6 +30,54 @@ def find_binary(explicit: str | None) -> str:
     raise SystemExit(f"vls_bridge binary not found; tried: {candidates}")
 
 
+def build_witscripts(chan, counterparty_chan, commitment, ctn, pcp):
+    import hashlib
+
+    from electrum import lnutil
+    from electrum.lnutil import LOCAL, REMOTE
+
+    local = chan.config[LOCAL]
+    remote = chan.config[REMOTE]
+    # both basepoint-party assignments and both delay sources are candidates;
+    # the sha256 program match decides
+    to_local_candidates = [
+        lnutil.make_commitment_output_to_local_witness_script(
+            lnutil.derive_blinded_pubkey(rev_base, pcp),
+            delay,
+            lnutil.derive_pubkey(delayed_base, pcp),
+        )
+        for rev_base, delayed_base in (
+            (local.revocation_basepoint.pubkey, remote.delayed_basepoint.pubkey),
+            (remote.revocation_basepoint.pubkey, local.delayed_basepoint.pubkey),
+        )
+        for delay in (remote.to_self_delay, local.to_self_delay)
+    ]
+    candidates = to_local_candidates + [
+        lnutil.make_commitment_output_to_remote_witness_script(remote.payment_basepoint.pubkey),
+        lnutil.make_commitment_output_to_remote_witness_script(local.payment_basepoint.pubkey),
+        lnutil.make_commitment_output_to_anchor_witness_script(remote.multisig_key.pubkey),
+        lnutil.make_commitment_output_to_anchor_witness_script(local.multisig_key.pubkey),
+    ]
+    witscripts = []
+    for idx, o in enumerate(commitment.outputs()):
+        spk = o.scriptpubkey
+        match = b""
+        if len(spk) == 34 and spk[0] == 0x00 and spk[1] == 0x20:
+            program = spk[2:]
+            for cand in candidates:
+                if hashlib.sha256(cand).digest() == program:
+                    match = cand
+                    break
+            if not match:
+                print(f"PROBE-DIAG output[{idx}] value={o.value} program={program.hex()}")
+                for cidx, cand in enumerate(candidates):
+                    print(
+                        f"PROBE-DIAG   candidate[{cidx}] sha256={hashlib.sha256(cand).digest().hex()}"
+                    )
+        witscripts.append(match.hex())
+    return witscripts
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", default=None)
@@ -40,7 +88,7 @@ async def main() -> None:
     sys.path.insert(0, args.electrum_src)
 
     from tests.lnhelpers import _create_mock_lnwallet, create_test_channels
-    from electrum.lnutil import LOCAL
+    from electrum.lnutil import LOCAL, REMOTE
 
     from electrum_tap import ElectrumTap, SyncBridgeClient
 
@@ -86,7 +134,44 @@ async def main() -> None:
             alice_channel.get_secret_and_point(LOCAL, ctn)
             bob_channel.get_secret_and_point(LOCAL, ctn)
 
+        tap.mirror_channel_setup(alice_channel, "alice")
+        print("mirrored alice channel setup into bridge")
+
+        commitment = alice_channel.get_next_commitment(REMOTE)
+        # commitment locktimes mix in funding-locktime privacy bits, so the
+        # authoritative number is the HTLC manager's counter
+        commitment_ctn = alice_channel.get_next_ctn(REMOTE)
+        # the counterparty's pcp derived from its own seed — alice's
+        # next_per_commitment_point tracking cannot be trusted over the source
+        from electrum import lnutil as _lnutil
+
+        pcp_bytes = _lnutil.secret_to_pubkey(
+            int.from_bytes(
+                _lnutil.get_per_commitment_secret_from_seed(
+                    bob_channel.config[LOCAL].per_commitment_secret_seed,
+                    _lnutil.RevocationStore.START_INDEX - commitment_ctn,
+                ),
+                "big",
+            )
+        )
+        per_commitment_point = pcp_bytes.hex()
+
+        witscripts = build_witscripts(alice_channel, bob_channel, commitment, commitment_ctn, pcp_bytes)
+
+        tap.sync_commitment_state(alice_channel, commitment_ctn, per_commitment_point)
         sig_64, htlc_sigs = alice_channel.sign_next_commitment()
+        tap.compare_counterparty_signature_raw(
+            alice_channel,
+            "alice",
+            sig_64,
+            commitment,
+            witscripts,
+            per_commitment_point,
+            commitment_ctn,
+            6000,
+        )
+        print(f"signature cross-check done at ctn={commitment_ctn}")
+
         bob_channel.receive_new_commitment(sig_64, htlc_sigs)
         bob_revocation = bob_channel.revoke_current_commitment()
         alice_channel.receive_revocation(bob_revocation)

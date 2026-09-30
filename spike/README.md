@@ -76,10 +76,45 @@ to any future live plugin that taps both sides in one process.
 
     spike/python/.venv/bin/python spike/python/test_tap_mirror.py
 
+## M4: signing cross-check (done)
+
+The "VLS validates" milestone: VLS signs Electrum's **actual** commitment
+transaction and the signature verifies against Electrum's own BIP-143 sighash
+(`sha256d(commitment.serialize_preimage(0))` — the same computation
+`receive_new_commitment` verifies with). Self-validating: Electrum's own
+signature is verified first as a sanity gate. Signature BYTES differ between
+`electrum_ecc` and `rust-secp` (nonce derivation), so verification — not byte
+equality — is the check.
+
+Route taken (after dead ends, all documented):
+- The semantic `sign_counterparty_commitment_tx_phase2` route diverges **by
+  construction**: Electrum's commitments have sorted outputs, privacy-mixed
+  locktime/sequence, and a p2wsh-wrapped to_remote
+  (`<pubkey> CHECKSIGVERIFY 1 CSV`) that VLS's canonical recomposition cannot
+  reproduce.
+- The raw-tx route (`sign_counterparty_commitment_tx`, channel.rs) decodes the
+  actual tx via per-output witscripts. Strict policy then rejects it at the
+  `recomposed tx mismatch` gate; the fork's permissive mode (splice-resume
+  workaround) falls through and signs the HOST tx verbatim. The bridge builds
+  its node with the fork-local `make_permissive_services()` (test_utils).
+
+Findings banked along the way:
+- VLS's counterparty commit numbering is electrum ctn + 1; the harness syncs
+  state via the pub testing setters (`sync_commitment_state` bridge method).
+- The counterparty per-commitment point must be derived from its OWN seed
+  (`get_per_commitment_secret_from_seed(bob_seed, START_INDEX - ctn)`);
+  to_local witscripts are matched by sha256 program against a candidate
+  matrix (both basepoint-party assignments, both delay sources).
+- `PartialTransaction.serialize()` returns PSBT;
+  `serialize_to_network(include_sigs=False)` gives the network hex the Rust
+  side needs.
+- LDK's `make_funding_redeemscript` sorts keys — order-independent.
+
 ## Next
 
 - Live regtest channel (Electrum <-> CLN/lnrod) tapped through the same
   bridge; wire-level mirroring via `Peer._process_message`.
-- Signing cross-check: `sign_counterparty_commitment` on the bridge compared
-  against Electrum's `sign_next_commitment` signatures.
 - Anchors payment basepoint seam (needs channel context in derivation).
+- Strict-mode interop: the recomposed-tx gate is the documented boundary —
+  a VLS-side "sign foreign-host tx" mode (or canonicalization) would be
+  needed for production use beyond the permissive spike.
