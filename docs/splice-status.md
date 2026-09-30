@@ -44,7 +44,7 @@ delivery_revision = "v26.06.6"
 # -v26.06.8) + vls negative-guard-redesign@fd710500; pin tracks it.
 fork_repo = "Amperstrand/lightning"
 fork_branch = "negative-guard-redesign-v26"
-strict_verified_revision = "988251455"
+strict_verified_revision = "9f7fe1e66"
 suite_file = "tests/test_splicing.py"
 
 [vls]
@@ -61,7 +61,7 @@ fuzz_suite = "cd fuzz && RUSTFLAGS=--cfg=fuzzing cargo test"
 2026-08-31 = "soak: 5/5 rc=0, arm-verified (claim upgraded 2x -> 7x)"
 2026-09-02 = "permissive full matrix 59/0 incl. test_splicing 12/12"
 2026-09-03 = "strict 12 passed in 385.42s @ the 1800s bound"
-2026-09-30 = "strict 12/12 manifest green, 19P/0F before a 1800s reap in the non-manifest EC-7 late force-close remainder (abort_after_sigs_sent itself green post 63aa71b6) — CLN inr2-splice-harness-v26.06.8@5e799b8f2 (full 3-bug fundee fix: units + channel-role + prior-balance, = upstream PR 9591 splice-fundee-msat semantics), vlsd bins splice-initial-allowance-exact@4a82f3b8 (PR-A/B/C + 63aa71b6 EC-7 close fix + 7effd825 carried-term drop: allowance = reported push exactly), ARM cln:socket 54 starts; native arm rc=0; D1 FINAL same day (playground #268 owner decision, negative-guard-redesign pair: CLN negative-guard-redesign-v26@988251455 + twin -ff branch negative-guard-redesign@50b3b6bf8 — host total now includes pending-at-setup HTLCs attributable to the fundee — and vls negative-guard-redesign@fd710500 — WARN stray-host detectors + fundee-splice-out rail): manifest 12/12 strict in a COMPLETED 326.80s run, ARM cln:socket 50 starts, vls-core 687/0, unit rails 3x + RED/GREEN A/B; EC-7 family deselected there (pre-existing base stall, reproduced identically with D1-free control bins @5ff8c8d8), non-manifest rbf_htlc_sigs teardown gossip error; -ff lineage full file under D1 18/19 (sole failure = the pre-existing -ff gossip drift, present in the pre-D1 soak)"
+2026-09-30 = "strict 12/12 manifest, EXACT selection (12 passed / 12 deselected in 223.64s, completed run) — CLN inr2-splice-harness-v26.06.8@9f7fe1e66 (full 3-bug fundee fix = upstream PR 9591 semantics + EC-6 registration + signer-refusal-is-an-answer hardening), vlsd sec-sweep-signer-rails@3f2da062 (PR-A/B/C + 63aa71b6 EC-7 close fix + carried-term drop), ARM cln:socket 30 starts; native arm rc=0; full-file strict 24P/0F/2 teardown-E same stack"
 ```
 
 ## The 12-case ladder
