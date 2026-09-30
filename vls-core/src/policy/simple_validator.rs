@@ -2066,8 +2066,9 @@ impl SimpleValidator {
                 // The fundee's allowance for the first commitment of a
                 // funding era is exactly the reported push_value: the
                 // CLN fork's splice-era convention (lightning-playground
-                // #268 EC-2) sends the fundee's FULL post-splice balance
-                // there — pre-splice owed[] plus their signed
+                // #268 D1) sends the fundee's TOTAL post-splice balance
+                // there — pre-splice owed[] plus HTLCs pending-at-setup
+                // attributable to the fundee plus their signed
                 // contribution — selected by channel-opener role. The
                 // signer-side carried-balance term that used to be added
                 // here double-counted that balance against the honest

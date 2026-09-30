@@ -22,6 +22,9 @@
 //! - must-accept (unexchanged era): a channel spliced before any
 //!   commitments were exchanged carries the fundee's entitlement purely
 //!   via the reported push.
+//! - must-accept (D1 splice-out): a fundee withdrawal reports a REDUCED
+//!   total; the first new-era commitment paying exactly that reduced
+//!   total signs, and the pre-reduction balance refuses.
 //! - control: a FRESH channel's initial commitment paying the fundee more
 //!   than push_value stays rejected (the original invariant, unweakened).
 
@@ -294,6 +297,80 @@ fn control_fresh_channel_initial_over_push_still_refused() {
         over_push,
     );
     let err = res.expect_err("a fresh channel's initial over-push payment must be refused");
+    assert!(
+        err.message().contains("initial commitment may only send push_value_msat"),
+        "refusal must be the initial-funding policy, got: {}",
+        err.message()
+    );
+}
+
+// D1 rail: the fundee SPLICES OUT. The host's report is the fundee's
+// REDUCED total (owed + pending + a negative signed relative — the
+// negative-guard shape that motivated D1); the first new-era commitment
+// paying exactly that reduced total must sign, and the pre-reduction
+// balance must refuse: the reduction travels in the report, it does not
+// ride a wrapped value or a carried term.
+#[test]
+fn rail_splice_era_fundee_splice_out_reduced_total_signs() {
+    let node_ctx = test_node_ctx(1);
+    let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+    let channel_id = chan_ctx.channel_id.clone();
+
+    const CARRIED_CP_SAT: u64 = 200_000;
+    const SPLICE_OUT_SAT: u64 = 50_000;
+    establish_era_a_counterparty_balance(&node_ctx, &mut chan_ctx, CARRIED_CP_SAT);
+
+    // The D1-convention host report for a fundee splice-out: the fundee's
+    // total balance REDUCED by the withdrawal (channeld peer-fails only
+    // if this would go negative — a true over-draw).
+    chan_ctx.setup.push_value_msat = (CARRIED_CP_SAT - SPLICE_OUT_SAT) * 1000;
+
+    let _outpoint_b = splice_a_to_b(&node_ctx, &mut chan_ctx);
+    let new_value = chan_ctx.setup.channel_value_sat;
+    assert_eq!(
+        chan_ctx.setup.push_value_msat / 1000,
+        CARRIED_CP_SAT - SPLICE_OUT_SAT,
+        "harness carries the reduced report into the new setup"
+    );
+
+    node_ctx
+        .node
+        .with_channel(&channel_id, |chan| {
+            chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
+                0,
+                remote_point(ERA_B_REMOTE_POINT_NDX),
+            );
+            Ok(())
+        })
+        .expect("numbering install");
+
+    // Exactly the reduced total: must sign.
+    let reduced = CARRIED_CP_SAT - SPLICE_OUT_SAT;
+    let res = sign_current_view_counterparty_commitment(
+        &node_ctx,
+        &channel_id,
+        &remote_point(ERA_B_REMOTE_POINT_NDX),
+        0,
+        new_value - 3755 - reduced,
+        reduced,
+    );
+    assert!(
+        res.is_ok(),
+        "the first new-era commitment must pay the reduced total: {:?}",
+        res.err()
+    );
+
+    // The PRE-reduction balance: above the reported total, must refuse
+    // (the withdrawal is binding, not advisory).
+    let res = sign_current_view_counterparty_commitment(
+        &node_ctx,
+        &channel_id,
+        &remote_point(ERA_B_REMOTE_POINT_NDX),
+        0,
+        new_value - 3755 - CARRIED_CP_SAT,
+        CARRIED_CP_SAT,
+    );
+    let err = res.expect_err("the pre-reduction balance must refuse");
     assert!(
         err.message().contains("initial commitment may only send push_value_msat"),
         "refusal must be the initial-funding policy, got: {}",

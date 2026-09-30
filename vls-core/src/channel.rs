@@ -2383,16 +2383,22 @@ impl Channel {
             // own test_script_splice_msat teardown). Install the NEW
             // funding's baseline instead: the post-splice balance split
             // from the setup, no HTLCs — exactly the num-0-equivalent
-            // the initial lockin keeps. push_value carries the
-            // fundee-relative balance (wrapped on splice-outs — the
-            // node.rs convention); wrapped values fall back to the
-            // initial_holder_value rail. The info feerate is not
-            // consulted by the mutual-close rails (value + htlcs only).
+            // the initial lockin keeps. Under the #268 D1
+            // absolute-balance convention push_value is the fundee's
+            // TOTAL post-splice balance (a plain msat total); a wrapped
+            // value is a stray unfixed host — WARN (detector) and fall
+            // back to the initial_holder_value rail. The info feerate
+            // is not consulted by the mutual-close rails (value +
+            // htlcs only).
             let push_sat = self.setup.push_value_msat / 1000;
             let push_is_plain_msat = self.setup.push_value_msat <= i64::MAX as u64;
             let (to_holder, to_cp) = if push_is_plain_msat {
                 (self.setup.channel_value_sat.saturating_sub(push_sat), push_sat)
             } else {
+                warn!(
+                    "post-splice push_value {} is not a plain msat total: stray host on the wrapped relative-delta convention (#268 D1)",
+                    self.setup.push_value_msat
+                );
                 let ih = self.enforcement_state.initial_holder_value;
                 (ih, self.setup.channel_value_sat.saturating_sub(ih))
             };
