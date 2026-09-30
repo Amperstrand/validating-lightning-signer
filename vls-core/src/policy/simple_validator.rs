@@ -2150,7 +2150,11 @@ pub fn make_default_simple_policy(network: Network) -> SimplePolicy {
             max_htlcs: 1000,
             max_htlc_value_sat: 16_777_216, // lnd itest: multi-hop_htlc_error_propagation
             use_chain_state: false,
-            min_feerate_per_kw: 253,     // testnet/regtest observed
+            // Regtest has no fee market: CLN's regtest estimates
+            // (e.g. a 226 sat/kw sweep estimate) float just under the
+            // observed-network floor and get refused. Keep the floor for
+            // the real test networks; regtest runs beneath it.
+            min_feerate_per_kw: if network == Network::Regtest { 200 } else { 253 }, // testnet observed
             max_feerate_per_kw: 333_333, // 301_096 observed in testnet
             enforce_balance: false,
             max_routing_fee_msat: 222_000, // CLN test_pay_avoid_low_fee_chan_1: 200_000

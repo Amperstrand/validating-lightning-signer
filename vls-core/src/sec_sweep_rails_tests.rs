@@ -46,3 +46,16 @@ fn rail_wrapped_push_lockin_falls_back_to_initial_holder_value() {
     );
     assert_eq!(info.to_countersigner_value_sat, value_b - initial_holder);
 }
+
+// The regtest feerate floor rides below CLN's regtest sweep estimates
+// (observed 226 sat/kw) so honest sweeps sign; the real test networks
+// keep the observed floor (253).
+#[test]
+fn rail_regtest_feerate_floor_below_cln_estimates() {
+    use crate::policy::simple_validator::make_default_simple_policy;
+    use lightning_signer::bitcoin::Network;
+    assert_eq!(make_default_simple_policy(Network::Regtest).min_feerate_per_kw, 200);
+    assert_eq!(make_default_simple_policy(Network::Testnet).min_feerate_per_kw, 253);
+    assert_eq!(make_default_simple_policy(Network::Signet).min_feerate_per_kw, 253);
+    assert_eq!(make_default_simple_policy(Network::Bitcoin).min_feerate_per_kw, 253);
+}
