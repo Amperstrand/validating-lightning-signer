@@ -216,26 +216,56 @@ therefore precisely scoped: wrap lnsweep's justice builders + bridge RPCs
 for VLS's `sign_justice_revoked_output`/`sign_justice_revoked_htlc` — with
 M7a, VLS already holds every secret needed (shachain-validated).
 
-## M7c: justice cross-check plumbing (shipped; replay partial)
+## M7c: justice cross-check plumbing (shipped; diagnostic complete)
 
 The plumbing for the last unexercised surface is complete:
-- Bridge RPC `sign_justice_sweep` → VLS `Channel::sign_justice_sweep` (tx,
-  input, revocation_secret, redeemscript, amount).
+- Bridge RPC `sign_justice_sweep` → VLS `Channel::sign_justice_sweep`.
 - Tap `cross_check_justice`: wraps `lnsweep.sweep_their_ctx_justice`;
   derives electrum's revocation key from its own config (same formula VLS
   uses), builds a fixed synthetic sweep of the revoked to_local, signs it
   electrum-side, asks VLS to sign the same tx, and verifies VLS's signature
-  over electrum's BIP-143 sighash (the M4 verification pattern).
+  over electrum's BIP-143 sighash.
 
-Replay re-ran the full M7b choreography on channel #3 (open → payments with
-live revocation validation ctn 5-8 → snapshot → advance → restore → desync
-detection → stale broadcast → FORCE_CLOSING) and produced a signed sweep
-(0.0394, held locally pending anchor/CSV schedule). **Open issue, isolated**:
-the tap's justice wrap never printed — the sweep hasn't broadcast, and the
-interception point may need to move deeper (e.g. wrap
-`lnsweep.sweep_ctx_to_local` or the lnwatcher journal processing) or the
-queue needs flushing with more blocks. Next action: replay once more with
-`-v` daemon logging and trace which lnsweep path builds the held sweep.
+**Diagnostic (complete)** — why the wrap didn't fire, fully traced:
+
+The wrap intercepts `lnsweep.sweep_their_ctx_justice` (lnsweep.py:732,
+module-global lookup — placement verified correct). It is only called when
+`extract_ctx_secrets` (lnsweep.py:528) classifies the broadcast ctx as
+revoked:
+
+```python
+ctn = extract_ctn_from_tx_and_chan(ctx, chan)   # BOLT-03 obscured ctn
+oldest_unrevoked = chan.get_oldest_unrevoked_ctn(REMOTE)
+if ctn == oldest_unrevoked:      → current,  is_revocation=False
+elif ctn == oldest_unrevoked+1:  → next,     is_revocation=False
+elif ctn < oldest_unrevoked:     → BREACH → revocation_store.retrieve_secret()
+                                   → if UnableToDeriveSecret: return None
+                                   → else: is_revocation=True → JUSTICE
+```
+
+In the corrected replay (channel #4, Electrum offline during CLN's stale
+broadcast), the verbose logs show:
+- `(lnsweep) found their ctx` fires — the stale ctx IS classified as THEIR ctx
+- ONLY `their_ctx_to_remote` sweep registers (payment-key path, CSV-1 for
+  anchors) — the justice sweep (`to_local_for_revoked_ctx`) NEVER appears
+- NO `UnableToDeriveSecret` in the logs — the breach branch was never entered
+
+**Root cause**: the decoded ctn matched `oldest_unrevoked_remote_ctn` or `+1`
+(not below it), so the stale ctx was classified as the CURRENT or NEXT
+commitment — not a breach. The channel's remote_ctn was 7 (from the wallet);
+the snapshot was taken at ctn ~3 after k1; k2/k3 advanced to 7. The stale
+ctx's decoded ctn is apparently in the 6-8 range despite CLN being restored
+to ctn ~3 — suggesting either the choreography's ctn gap was effectively
+smaller than intended (CLN's snapshot state captured more advancement than
+expected), or Electrum's `oldest_unrevoked_ctn(REMOTE)` is lower than the
+latest remote_ctn (the revocation store's tracking differs from the hm log's
+ctn — `oldest_unrevoked` is not `log[REMOTE]['ctn']`).
+
+**Next step for the next replay**: (a) more payment rounds between snapshot
+and broadcast (wider ctn gap), and (b) add a diagnostic print inside the wrap
+path showing `ctn` vs `oldest_unrevoked_remote_ctn` at classification time
+(instrument `extract_ctx_secrets` itself), and (c) verify the revocation
+store has derivable secrets for the target ctn before triggering the close.
 
 ## Next
 

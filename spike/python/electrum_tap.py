@@ -137,6 +137,7 @@ class ElectrumTap:
         from electrum.lnutil import LOCAL, REMOTE
 
         try:
+            self.ensure_registered(chan)
             key = chan.config[LOCAL].channel_seed.hex()
             bridge_channel_id = self.bridge_channels.get(key)
             if bridge_channel_id is None:
