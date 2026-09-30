@@ -566,27 +566,18 @@ async fn send_response(
                 return true;
             }
         }
-        Err(Error::Handler(HandlerError::Temporary(error))) => {
-            error!("received temporary error from handler: {}", error);
-            let response = SignerResponse {
-                request_id,
-                message: vec![],
-                error: error.message().to_string(),
-                is_temporary_failure: true,
-            };
-            let res = sender.send(response).await;
-            if res.is_err() {
-                error!("stream closed");
-                return true;
-            }
-        }
         Err(e) => {
-            error!("received error from handler: {:?}", e);
+            let (error_text, is_temporary_failure) = response_error_parts(&e);
+            if is_temporary_failure {
+                error!("received temporary error from handler: {}", error_text);
+            } else {
+                error!("received error from handler: {:?}", e);
+            }
             let response = SignerResponse {
                 request_id,
                 message: vec![],
-                error: format!("{:?}", e),
-                is_temporary_failure: false,
+                error: error_text,
+                is_temporary_failure,
             };
             let res = sender.send(response).await;
             if res.is_err() {
@@ -596,6 +587,68 @@ async fn send_response(
         }
     }
     false
+}
+
+/// Classify a handler error for the RPC reply: (error text,
+/// is_temporary_failure). Only a handler-reported Temporary error is
+/// temporary — policy failures (and everything else) are permanent, so
+/// the proxy never retries them (the PR-A contract).
+fn response_error_parts(e: &Error) -> (String, bool) {
+    match e {
+        Error::Handler(HandlerError::Temporary(status)) => {
+            (status.message().to_string(), true)
+        }
+        other => (format!("{:?}", other), false),
+    }
+}
+
+#[cfg(test)]
+mod error_classification_tests {
+    use super::*;
+    use lightning_signer::util::status;
+    
+
+    fn policy_error() -> Error {
+        Error::Handler(HandlerError::Signing(
+            lightning_signer::util::status::Status::failed_precondition(
+                "policy failure: policy-routing-balanced",
+            ),
+        ))
+    }
+
+    #[test]
+    fn policy_errors_are_never_temporary() {
+        let (_, temporary) = response_error_parts(&policy_error());
+        assert!(!temporary, "a policy failure must classify permanent");
+    }
+
+    #[test]
+    fn temporary_status_classifies_temporary() {
+        let status =
+            lightning_signer::util::status::Status::new(status::Code::Temporary, "try again");
+        let e = Error::Handler(HandlerError::Temporary(status));
+        let (_, temporary) = response_error_parts(&e);
+        assert!(temporary, "Code::Temporary must classify temporary");
+    }
+
+    #[test]
+    fn non_handler_errors_are_never_temporary() {
+        let e = Error::Persist(PersistError::Internal("gone".to_string()));
+        let (_, temporary) = response_error_parts(&e);
+        assert!(!temporary);
+    }
+
+    #[test]
+    fn status_conversion_routes_by_code() {
+        let perm = HandlerError::from(
+            lightning_signer::util::status::Status::failed_precondition("p"),
+        );
+        assert!(matches!(perm, HandlerError::Signing(_)));
+        let temp = HandlerError::from(
+            lightning_signer::util::status::Status::new(status::Code::Temporary, "t"),
+        );
+        assert!(matches!(temp, HandlerError::Temporary(_)));
+    }
 }
 
 async fn do_connect(uri: &Uri) -> HsmdClient<Channel> {
@@ -828,6 +881,8 @@ async fn make_external_persist(uri: &Url, builder: &HandlerBuilder) -> ExternalP
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lightning_signer::util::status;
+    
     use lightning_signer::bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
     use std::fs;
 
