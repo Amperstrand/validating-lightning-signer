@@ -238,17 +238,19 @@ channel at ctn 23 vs snapshot at ~5).
   2. `to_self_delay` from the WRONG side (`REMOTE` instead of `LOCAL`) —
      Electrum's `sweep_their_ctx_justice` uses the non-broadcaster's
      (LOCAL/us) delay. Fixed.
-- **Remaining gap**: `to_local not found` — the derived witness script
-  still doesn't match the actual output in the stale ctx. Root cause is
-  the witness-script derivation chain (revocation pubkey ← shachain
-  secret; delayed pubkey ← basepoint + pcp). The shachain-retrieved
-  secret may produce a pcp that differs from what CLN used for this
-  specific commitment — a genuine cross-implementation subtlety that
-  needs address-level diffing to resolve (print derived vs actual
-  scriptpubkeys side by side).
+- **Remaining gap RESOLVED**: `to_local not found` — the SPK-DIFF
+  instrumentation shows the stale ctx has only 2 outputs (1 anchor @330
+  + 1 main @~2.9M = to_remote). CLN's to_local was **trimmed from the
+  commitment tx** (CLN's balance was below the dust limit for this
+  commitment). The cross-check is CORRECT: there is literally no to_local
+  output to sweep. The justice path would need a channel where CLN holds
+  a balance above the dust limit at the snapshot point.
 
 **The instrumentation (committed) is permanent yield**: every future replay
-shows the classification, the wrap firing, and the exact failure point.
+shows the classification, the wrap firing, the revocation-key equivalence
+(both derivation paths verified identical), the witness script, and the
+actual output scriptpubkeys — the exact side-by-side needed to debug any
+future mismatch.
 
 ## Next
 

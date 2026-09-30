@@ -221,6 +221,14 @@ class ElectrumTap:
             )
             program = sha256d(witness_script)
             spk = bytes([0x00, 0x20]) + program
+            # compare both derivation paths for the revocation pubkey
+            from electrum.lnutil import derive_blinded_pubkey
+            rev_pub_from_priv = lnutil.secret_to_pubkey(int.from_bytes(our_rev_priv, "big"))
+            rev_pub_from_pub = derive_blinded_pubkey(
+                chan.config[LOCAL].revocation_basepoint.pubkey, pcp
+            )
+            if rev_pub_from_priv != rev_pub_from_pub:
+                print(f"tap: REV-KEY-MISMATCH priv_path={rev_pub_from_priv.hex()} pub_path={rev_pub_from_pub.hex()}", flush=True)
             output_idx = None
             amount = None
             for i, o in enumerate(ctx.outputs()):
@@ -228,6 +236,11 @@ class ElectrumTap:
                     output_idx, amount = i, o.value
                     break
             if output_idx is None:
+                print(f"tap: SPK-DIFF derived={spk.hex()}", flush=True)
+                print(f"tap: SPK-DIFF pcp={pcp.hex()}", flush=True)
+                print(f"tap: SPK-DIFF delay={chan.config[LOCAL].to_self_delay} script={witness_script.hex()}", flush=True)
+                for i, o in enumerate(ctx.outputs()):
+                    print(f"tap: SPK-DIFF out[{i}]={o.scriptpubkey.hex()} val={o.value}", flush=True)
                 print("tap: justice cross-check skipped (to_local not found)", flush=True)
                 return
             from electrum.transaction import address_to_script
