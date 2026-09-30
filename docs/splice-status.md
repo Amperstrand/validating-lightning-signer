@@ -25,7 +25,7 @@ verified_cases = 12
 total_cases = 12
 modes = ["permissive", "strict"]
 last_delivered = 2026-08-30
-last_strict_verified = 2026-09-03
+last_strict_verified = 2026-09-30
 delivery_commit = "dc5b77e73e93896f5f9af371ef3304b27ca9ec5c"
 
 [cln]
@@ -36,8 +36,8 @@ delivery_revision = "v26.06.6"
 # the CLN fork branch, @ 5f8f28785 (pushed 2026-09-02) with replay rails
 # @ 1fe46dec3; branch advances, ladder re-proven per advance.
 fork_repo = "Amperstrand/lightning"
-fork_branch = "inr2-splice-harness"
-strict_verified_revision = "1fe46dec3"
+fork_branch = "inr2-splice-harness-v26.06.8"
+strict_verified_revision = "5e799b8f2"
 suite_file = "tests/test_splicing.py"
 
 [vls]
@@ -54,6 +54,7 @@ fuzz_suite = "cd fuzz && RUSTFLAGS=--cfg=fuzzing cargo test"
 2026-08-31 = "soak: 5/5 rc=0, arm-verified (claim upgraded 2x -> 7x)"
 2026-09-02 = "permissive full matrix 59/0 incl. test_splicing 12/12"
 2026-09-03 = "strict 12 passed in 385.42s @ the 1800s bound"
+2026-09-30 = "strict 12/12 manifest green in 482.89s completed run (full file: 20 passed / 4 failed, all non-manifest EC-7 force-close family, open lane) — CLN inr2-splice-harness-v26.06.8@5e799b8f2, vlsd bins f73f76e7 (stack PR-A/B/C), ARM cln:socket; same fix stack cherry-picked on inr2-splice-harness@2b435fa1b and -ff@21b7aa2f7"
 ```
 
 ## The 12-case ladder
@@ -64,18 +65,18 @@ checker counts these rows against `verified_cases`.
 
 | # | Case (`tests/test_splicing.py`) | Delivered | Strict-verified |
 |---|---|---|---|
-| 1 | `test_splice` | 2026-08-30 | 2026-09-03 |
-| 2 | `test_two_chan_splice_in` | 2026-08-30 | 2026-09-03 |
-| 3 | `test_splice_rbf` | 2026-08-30 | 2026-09-03 |
-| 4 | `test_splice_nosign` | 2026-08-30 | 2026-09-03 |
-| 5 | `test_splice_gossip` | 2026-08-30 | 2026-09-03 |
-| 6 | `test_splice_listnodes` | 2026-08-30 | 2026-09-03 |
-| 7 | `test_splice_out` | 2026-08-30 | 2026-09-03 |
-| 8 | `test_invalid_splice` | 2026-08-30 | 2026-09-03 |
-| 9 | `test_commit_crash_splice` | 2026-08-30 | 2026-09-03 |
-| 10 | `test_splice_stuck_htlc` | 2026-08-30 | 2026-09-03 |
-| 11 | `test_route_by_old_scid` | 2026-08-30 | 2026-09-03 |
-| 12 | `test_splice_unannounced` | 2026-08-30 | 2026-09-03 |
+| 1 | `test_splice` | 2026-08-30 | 2026-09-30 |
+| 2 | `test_two_chan_splice_in` | 2026-08-30 | 2026-09-30 |
+| 3 | `test_splice_rbf` | 2026-08-30 | 2026-09-30 |
+| 4 | `test_splice_nosign` | 2026-08-30 | 2026-09-30 |
+| 5 | `test_splice_gossip` | 2026-08-30 | 2026-09-30 |
+| 6 | `test_splice_listnodes` | 2026-08-30 | 2026-09-30 |
+| 7 | `test_splice_out` | 2026-08-30 | 2026-09-30 |
+| 8 | `test_invalid_splice` | 2026-08-30 | 2026-09-30 |
+| 9 | `test_commit_crash_splice` | 2026-08-30 | 2026-09-30 |
+| 10 | `test_splice_stuck_htlc` | 2026-08-30 | 2026-09-30 |
+| 11 | `test_route_by_old_scid` | 2026-08-30 | 2026-09-30 |
+| 12 | `test_splice_unannounced` | 2026-08-30 | 2026-09-30 |
 
 Release/master CLN probes are **informational** until explicitly promoted
 to this table (promotion = a full-ladder row in `[verification_log]`).
