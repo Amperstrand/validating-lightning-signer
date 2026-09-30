@@ -156,10 +156,29 @@ trigger without extra plumbing; and `request_force_close` against a
 cooperative peer negotiates a mutual close (the unilateral justice/sweep
 path needs an unresponsive peer — M6 material).
 
+## M6: unilateral close + sweep (done)
+
+Drove the unilateral path end-to-end: CLN `close … unilateral` broadcast its
+commitment (mempool), Electrum's watcher detected the foreign ctx, channel
+went CLOSED after 3 confirmations, and the to_remote sweep landed (0.049 BTC
+unconfirmed, anchors CSV path).
+
+**Finding (empirical)**: the tap emitted zero lines during the sweep — the
+anchors to_remote sweep signs with the static **payment basepoint**, which
+bypasses the per-commitment surface the tap wraps
+(`get_secret_and_point`/`sign_next_commitment`). This is the documented
+anchors payment-basepoint seam, now confirmed on-chain: in a
+VLS-holds-keys deployment, this sweep would need VLS-side derivation
+support (`derive_payment_basepoint(static_secret, funding_pubkey)`).
+
+Also learned: Electrum's `request_force_close` asks the REMOTE to close
+(REQUESTED_FCLOSE) — the local unilateral lever is the peer's, so the M6
+flow used CLN-side `close 1` (unilateral timeout).
+
 ## Next
 
-- Unilateral close + justice sweep path (unresponsive peer or CLN `close`
-  with unreasonable fee / `dev-fail`), then watchtower-style old-state
-  broadcast.
-- Anchors payment basepoint seam (needs channel context in derivation).
+- Old-state broadcast (watchtower scenario): CLN with `--developer` +
+  `dev-sign-last-tx`-style stale commitment, Electrum justice path
+  (revocation keys — the deepest VLS surface).
+- Anchors payment-basepoint seam implementation (sweep support).
 - Strict-mode interop: the recomposed-tx gate is the documented boundary.
