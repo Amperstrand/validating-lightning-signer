@@ -211,11 +211,15 @@ fn rail_era_num0_point_and_secret_reuse_is_pinned() {
     );
 }
 
-/// T2: EMPIRICAL PIN of the exposure. Post-splice, era-B num-0 is
-/// current and unrevoked; the sweep presents the era-A secret
-/// (byte-identical to era-B's by derivation). The signer signs — there
-/// is no era, number, or revocation-state gate in sign_justice_sweep.
-/// This rail PINS current behavior so any change to it is deliberate.
+/// T2: state-blindness pin (DEFENSE-IN-DEPTH observation, NOT an
+/// exposure — see EC4B-ADJUDICATION.md's retraction). The signer signs
+/// this hand-built sweep because sign_justice_sweep carries no era,
+/// number, or revocation-state gate — but the state is UNREACHABLE via
+/// the protocol: splices re-sign the CURRENT index (same-number
+/// re-activation) and never validate below it
+/// (policy-commitment-holder-not-revoked, simple_validator.rs:973), so
+/// an era-B commitment at an era-A-RELEASED index cannot exist. The rail
+/// pins the justice path's state-blindness so any change is deliberate.
 #[test]
 fn rail_justice_sweep_signs_with_cross_era_secret_today() {
     let node_ctx = test_node_ctx(1);
@@ -279,7 +283,7 @@ fn rail_justice_sweep_signs_with_cross_era_secret_today() {
 /// whether the fork carries that defense or the exposure is filed at
 /// spec level.
 #[test]
-#[ignore = "EC-4b design fork: cross-era secret reuse makes possession-proofs ambiguous for num-0 post-splice; refusal gate pending owner ruling"]
+#[ignore = "RETIRED per EC4B-ADJUDICATION retraction: the guarded state is unreachable (same-number re-activation never signs below the current index; simple_validator.rs:973 refuses the released zone). Kept as the documented-RED record of the design fork that closed as not-a-vulnerability."]
 fn rail_justice_sweep_current_era_unrevoked_should_refuse() {
     let node_ctx = test_node_ctx(1);
     let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
