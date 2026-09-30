@@ -278,12 +278,129 @@ impl KeyDerive for LndKeyDerive {
     }
 }
 
+/// Electrum wallet compatible derivation (fork-local, not for upstream).
+///
+/// Mirrors spesmilo/electrum `lnutil.py`: wallet-level keys derive from the
+/// lightning xprv at `m/67'/` off the node seed; channel-level keys derive
+/// from a fresh BIP32 root built from the per-channel `channel_seed`, which
+/// arrives as the `keys_id`. Anchors-context derivations (multisig funding
+/// key, payment basepoint) need channel context the `KeyDerive` trait does
+/// not carry and live in the electrum-vls-spike crate.
+pub struct ElectrumKeyDerive {
+    network: Network,
+}
+
+// LnKeyFamily indices from electrum/lnutil.py; every family is hardened
+// except NODE_KEY.
+const ELECTRUM_FAMILY_MULTISIG: u32 = 0;
+const ELECTRUM_FAMILY_REVOCATION_BASE: u32 = 1;
+const ELECTRUM_FAMILY_HTLC_BASE: u32 = 2;
+const ELECTRUM_FAMILY_PAYMENT_BASE: u32 = 3;
+const ELECTRUM_FAMILY_DELAY_BASE: u32 = 4;
+const ELECTRUM_FAMILY_REVOCATION_ROOT: u32 = 5;
+const ELECTRUM_FAMILY_NODE_KEY: u32 = 6;
+
+impl ElectrumKeyDerive {
+    /// network value.
+    pub fn new(network: Network) -> Self {
+        Self { network }
+    }
+}
+
+fn electrum_family_keypair(
+    node: &Xpriv,
+    family: u32,
+    hardened: bool,
+    secp_ctx: &Secp256k1<secp256k1::All>,
+) -> (SecretKey, PublicKey) {
+    let child = if hardened {
+        ChildNumber::from_hardened_idx(family)
+    } else {
+        ChildNumber::from_normal_idx(family)
+    }
+    .expect("family index");
+    let path = vec![
+        child,
+        ChildNumber::from_normal_idx(0).expect("static index"),
+        ChildNumber::from_normal_idx(0).expect("static index"),
+    ];
+    let child = node.derive_priv(secp_ctx, &path).expect("hardened derivation cannot fail");
+    let secret = child.private_key;
+    let public = PublicKey::from_secret_key(secp_ctx, &secret);
+    (secret, public)
+}
+
+impl KeyDerive for ElectrumKeyDerive {
+    fn master_key(&self, seed: &[u8]) -> Xpriv {
+        Xpriv::new_master(self.network, seed).expect("seed produces master key")
+    }
+
+    fn node_keys(
+        &self,
+        seed: &[u8],
+        secp_ctx: &Secp256k1<secp256k1::All>,
+    ) -> (PublicKey, SecretKey) {
+        let master = self.master_key(seed);
+        let ln_root = master
+            .derive_priv(
+                secp_ctx,
+                &[ChildNumber::from_hardened_idx(67).expect("static index")],
+            )
+            .expect("hardened derivation cannot fail");
+        let (secret, public) =
+            electrum_family_keypair(&ln_root, ELECTRUM_FAMILY_NODE_KEY, false, secp_ctx);
+        (public, secret)
+    }
+
+    fn channel_keys(
+        &self,
+        _seed: &[u8],
+        keys_id: &[u8; 32],
+        _basepoint_index: u32,
+        _master_key: &Xpriv,
+        secp_ctx: &Secp256k1<secp256k1::All>,
+    ) -> (SecretKey, SecretKey, SecretKey, SecretKey, SecretKey, [u8; 32]) {
+        // keys_id carries Electrum's random per-channel channel_seed, which is
+        // itself a fresh BIP32 root — it is not derived from the node seed.
+        let channel_master = Xpriv::new_master(self.network, keys_id).expect("channel seed");
+        let (multisig, _) =
+            electrum_family_keypair(&channel_master, ELECTRUM_FAMILY_MULTISIG, true, secp_ctx);
+        let (revocation_base, _) = electrum_family_keypair(
+            &channel_master,
+            ELECTRUM_FAMILY_REVOCATION_BASE,
+            true,
+            secp_ctx,
+        );
+        let (htlc_base, _) =
+            electrum_family_keypair(&channel_master, ELECTRUM_FAMILY_HTLC_BASE, true, secp_ctx);
+        let (payment, _) =
+            electrum_family_keypair(&channel_master, ELECTRUM_FAMILY_PAYMENT_BASE, true, secp_ctx);
+        let (delayed, _) =
+            electrum_family_keypair(&channel_master, ELECTRUM_FAMILY_DELAY_BASE, true, secp_ctx);
+        let (revocation_root, _) = electrum_family_keypair(
+            &channel_master,
+            ELECTRUM_FAMILY_REVOCATION_ROOT,
+            true,
+            secp_ctx,
+        );
+        (
+            multisig,
+            revocation_base,
+            htlc_base,
+            payment,
+            delayed,
+            revocation_root.secret_bytes(),
+        )
+    }
+}
+
 /// Construct a key deriver based on the style
 pub fn key_derive(style: KeyDerivationStyle, network: Network) -> Box<dyn KeyDerive> {
     match style {
         KeyDerivationStyle::Native => Box::new(NativeKeyDerive { network }),
         KeyDerivationStyle::Ldk => Box::new(LdkKeyDerive { network }),
         KeyDerivationStyle::Lnd => Box::new(LndKeyDerive { network }),
+        KeyDerivationStyle::Electrum => Box::new(ElectrumKeyDerive { network }),
     }
 }
 
@@ -299,17 +416,20 @@ pub enum KeyDerivationStyle {
     Ldk = 2,
     /// The LND style
     Lnd = 3,
+    /// Electrum wallet compatible (fork-local, not for upstream)
+    Electrum = 4,
 }
 
 impl TryFrom<u8> for KeyDerivationStyle {
     type Error = ();
 
     fn try_from(v: u8) -> Result<Self, Self::Error> {
-        use KeyDerivationStyle::{Ldk, Lnd, Native};
+        use KeyDerivationStyle::{Electrum, Ldk, Lnd, Native};
         match v {
             x if x == Native as u8 => Ok(Native),
             x if x == Ldk as u8 => Ok(Ldk),
             x if x == Lnd as u8 => Ok(Lnd),
+            x if x == Electrum as u8 => Ok(Electrum),
             _ => Err(()),
         }
     }
@@ -321,6 +441,7 @@ impl core::fmt::Display for KeyDerivationStyle {
             KeyDerivationStyle::Native => "native",
             KeyDerivationStyle::Ldk => "ldk",
             KeyDerivationStyle::Lnd => "lnd",
+            KeyDerivationStyle::Electrum => "electrum",
         })
     }
 }
@@ -333,6 +454,7 @@ impl core::str::FromStr for KeyDerivationStyle {
             "native" => Ok(KeyDerivationStyle::Native),
             "ldk" => Ok(KeyDerivationStyle::Ldk),
             "lnd" => Ok(KeyDerivationStyle::Lnd),
+            "electrum" => Ok(KeyDerivationStyle::Electrum),
             _ => Err(()),
         }
     }
@@ -350,6 +472,8 @@ impl KeyDerivationStyle {
             // lnd uses two BIP32 branches, one for external and one
             // for internal (change) addresses.
             KeyDerivationStyle::Lnd => Some(2),
+            // Electrum addresses are not managed by the signer.
+            KeyDerivationStyle::Electrum => None,
         }
     }
 
@@ -363,6 +487,7 @@ impl KeyDerivationStyle {
             KeyDerivationStyle::Native => get_account_extended_key_native(secp_ctx, network, seed),
             KeyDerivationStyle::Ldk => get_account_extended_key_native(secp_ctx, network, seed),
             KeyDerivationStyle::Lnd => get_account_extended_key_lnd(secp_ctx, network, seed),
+            KeyDerivationStyle::Electrum => get_account_extended_key_native(secp_ctx, network, seed),
         }
     }
 }

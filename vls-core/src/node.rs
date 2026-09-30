@@ -1770,6 +1770,58 @@ impl Node {
         self.find_or_create_channel(channel_id, arc_self)
     }
 
+    /// Create a new channel whose keys are derived from an externally-provided
+    /// keys_id instead of a node-derived one (fork-local, not for upstream).
+    ///
+    /// For the Electrum mirror: the wallet's random per-channel `channel_seed`
+    /// is passed as the keys_id; with `KeyDerivationStyle::Electrum` the
+    /// channel keys then match Electrum's derivation byte-for-byte.
+    pub fn new_channel_with_keys_id(
+        &self,
+        keys_id: [u8; 32],
+        arc_self: &Arc<Node>,
+    ) -> Result<(ChannelId, Option<ChannelSlot>), Status> {
+        let channel_id = ChannelId::new(&keys_id);
+        let blockheight = arc_self.get_tracker().height();
+        let mut channels = self.get_channels();
+        let policy = self.policy();
+        if channels.len() >= policy.max_channels() {
+            // FIXME(3) we don't garbage collect channels
+            return Err(failed_precondition(format!(
+                "too many channels ({} >= {})",
+                channels.len(),
+                policy.max_channels()
+            )));
+        }
+
+        // Is there an existing channel slot?
+        if let Some(slot) = channels.get(&channel_id) {
+            let slot = slot.lock().unwrap().clone();
+            return Ok((channel_id, Some(slot)));
+        }
+
+        let channel_value_sat = 0; // Placeholder value, not known yet.
+        let (keys, payment_key) =
+            self.keys_manager.get_channel_keys_with_keys_id(keys_id, channel_value_sat);
+
+        let stub = ChannelStub {
+            node: Arc::downgrade(arc_self),
+            secp_ctx: Secp256k1::new(),
+            keys,
+            payment_key,
+            id0: channel_id.clone(),
+            blockheight,
+        };
+        // TODO(507) this clone is expensive
+        channels.insert(channel_id.clone(), Arc::new(Mutex::new(ChannelSlot::Stub(stub.clone()))));
+        self.persister
+            .new_channel(&self.get_id(), &stub)
+            // Persist.new_channel should only fail if the channel was previously persisted.
+            // So if it did fail, we have an internal error.
+            .expect("channel was in storage but not in memory");
+        Ok((channel_id.clone(), Some(ChannelSlot::Stub(stub))))
+    }
+
     fn find_or_create_channel(
         &self,
         channel_id: ChannelId,
