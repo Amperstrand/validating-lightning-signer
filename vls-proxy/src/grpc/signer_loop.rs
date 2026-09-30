@@ -295,7 +295,25 @@ impl<C: 'static + Client> SignerLoop<C> {
                             self.log_prefix
                         );
                         return Err(Error::Protocol(ProtocolError::UnexpectedType(
-                            msgs::HsmdInit::TYPE,
+                            msgs::HsmdDevPreinit2::TYPE,
+                        )));
+                    }
+                    _ = self.do_proxy_msg(raw_msg, /*ONEWAY*/ true)?;
+                }
+                // Explicit v1 dev-preinit (wire type 99) handling: without
+                // this arm the message falls through to the generic
+                // unknown-type path and surfaces as a bogus
+                // HsmdInitReplyFailure(error_code = 99) — a dirty signal on
+                // the permanent-error channel for a message that is not a
+                // channel request at all. Preinit is oneway by nature.
+                Message::HsmdDevPreinit(_) => {
+                    if !self.is_root() {
+                        error!(
+                            "read loop {}: unexpected HsmdDevPreinit on non-root connection",
+                            self.log_prefix
+                        );
+                        return Err(Error::Protocol(ProtocolError::UnexpectedType(
+                            msgs::HsmdDevPreinit::TYPE,
                         )));
                     }
                     _ = self.do_proxy_msg(raw_msg, /*ONEWAY*/ true)?;

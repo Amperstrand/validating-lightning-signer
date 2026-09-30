@@ -1513,6 +1513,29 @@ mod tests {
         }
     }
 
+    // The v1 dev-preinit must parse to its EXPLICIT variant — a v1
+    // preinit falling through to the generic unknown-type path is what
+    // turns it into a bogus HsmdInitReplyFailure on the permanent-error
+    // channel (the signal the sec-sweep rail pins as unclean).
+    #[test]
+    #[cfg(feature = "developer")]
+    fn dev_preinit_v1_roundtrip_test() {
+        let msg = HsmdDevPreinit {
+            derivation_style: 0,
+            network_name: WireString("regtest".as_bytes().to_vec()),
+            seed: None,
+            allowlist: Array(vec![]),
+        };
+
+        let ser = msg.as_vec();
+        match from_vec(ser).unwrap() {
+            Message::HsmdDevPreinit(dmsg) => {
+                assert_eq!(dmsg.derivation_style, msg.derivation_style);
+            }
+            other => panic!("bad deser type: {:?}", other),
+        }
+    }
+
     #[test]
     fn name_test() {
         assert_eq!(Message::NodeInfo(NodeInfo {}).inner().name(), "NodeInfo");
