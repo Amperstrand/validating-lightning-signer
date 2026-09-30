@@ -187,11 +187,39 @@ its shachain, VLS holds everything it needs to produce justice signatures
 for a stale-state broadcast (M7b, needs a developer CLN build +
 snapshot/restore dance).
 
+## M7b: stale-state broadcast → justice (done)
+
+The full watchtower scenario, end-to-end on live infra:
+
+1. Stopped CLN mid-channel and snapshotted its state (docker cp, 388K).
+2. Advanced the channel with payments — Electrum collected revocations
+   (`tap: revocation validated ctn=14..16`; CLN ended 34 revocations
+   ahead of its snapshot).
+3. Restored the stale CLN state (helper container on the volume), restarted
+   — CLN immediately detected the desync on reestablish
+   (`bad reestablish revocation_number: 0 vs 34`), went ONCHAIN, and
+   unilateral-closed with the **revoked** commitment
+   (`112ba977…`, confirmed).
+4. Electrum's watcher: FORCE_CLOSING → justice sweep broadcast and
+   confirmed (`131e326f…` spending `112ba977:1`).
+
+**Witness forensics** (the decisive evidence): the sweep's input witness is
+`[sig(71), empty(0), script(75)]` — the **empty item is the IF-true branch
+selector** of the to_local script, i.e. the spend used the **revocation
+key**. That is the justice path, on-chain, confirmed.
+
+**Tap finding (consistent with M6)**: the tap was silent through the entire
+justice flow — lnsweep's justice builders sign with
+`derive_blinded_privkey(revocation_basepoint_secret, remote_pcp_secret)`
+directly, never touching the wrapped surfaces. The next increment is
+therefore precisely scoped: wrap lnsweep's justice builders + bridge RPCs
+for VLS's `sign_justice_revoked_output`/`sign_justice_revoked_htlc` — with
+M7a, VLS already holds every secret needed (shachain-validated).
+
 ## Next
 
-- M7b — old-state broadcast (watchtower scenario): CLN `--developer` +
-  snapshot/restore, Electrum justice path (revocation-key spends — the
-  deepest VLS surface).
-- Anchors payment-basepoint seam implementation (sweep support; the M6
-  finding, known formula).
+- Justice cross-check: wrap lnsweep justice builders, bridge
+  `sign_justice_revoked_*`; replay this exact scenario and compare VLS's
+  justice signatures against Electrum's (the last unexercised surface).
+- Anchors payment-basepoint seam implementation (sweep support; M6 finding).
 - Strict-mode interop: the recomposed-tx gate is the documented boundary.
