@@ -140,6 +140,8 @@ mod mutant_rails_tests;
 mod phase2_era_rails_tests;
 #[cfg(test)]
 #[cfg(test)]
+mod splice_abort_close_rails_tests;
+#[cfg(test)]
 mod splice_era_totals_rails_tests;
 #[cfg(test)]
 mod splice_onchain_rails_tests;

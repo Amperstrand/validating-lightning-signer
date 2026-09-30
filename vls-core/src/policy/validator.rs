@@ -297,7 +297,21 @@ pub trait Validator {
                 estate.next_holder_commit_num
             );
         }
-        // this is safe because we must have validated a holder commitment
+        // A splice-era state can reach the close path before any holder
+        // commitment of the new era was validated (an aborted splice swaps
+        // the era setup while the numbering carries over). Refuse loudly
+        // instead of crashing the signer process — the panic killed vlsd
+        // and wedged the node teardown for 19 minutes (strict
+        // abort_after_sigs run 2026-09-28; decode:
+        // /root/splice-ec7-evidence-2026-09-30/DECODE-EC7.md).
+        if estate.current_holder_commit_info.is_none() {
+            policy_err!(
+                self,
+                "policy-holder-commitment-missing",
+                "no validated holder commitment for close number {} (splice era without a validated holder commitment?)",
+                commitment_number
+            );
+        }
         let commitment_info = estate.current_holder_commit_info.as_ref().unwrap().clone();
         Ok(commitment_info)
     }
