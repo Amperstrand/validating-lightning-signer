@@ -144,6 +144,8 @@ mod splice_abort_close_rails_tests;
 #[cfg(test)]
 mod splice_era_totals_rails_tests;
 #[cfg(test)]
+mod splice_era_point_reuse_tests;
+#[cfg(test)]
 mod splice_onchain_rails_tests;
 #[cfg(test)]
 mod setup_channel_tests;
