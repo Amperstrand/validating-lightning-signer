@@ -238,19 +238,22 @@ channel at ctn 23 vs snapshot at ~5).
   2. `to_self_delay` from the WRONG side (`REMOTE` instead of `LOCAL`) —
      Electrum's `sweep_their_ctx_justice` uses the non-broadcaster's
      (LOCAL/us) delay. Fixed.
-- **Remaining gap RESOLVED**: `to_local not found` — the SPK-DIFF
-  instrumentation shows the stale ctx has only 2 outputs (1 anchor @330
-  + 1 main @~2.9M = to_remote). CLN's to_local was **trimmed from the
-  commitment tx** (CLN's balance was below the dust limit for this
-  commitment). The cross-check is CORRECT: there is literally no to_local
-  output to sweep. The justice path would need a channel where CLN holds
-  a balance above the dust limit at the snapshot point.
+- **Remaining gap DEFINITIVELY ISOLATED**: Electrum's own derivation and
+  the tap's derivation produce **byte-identical** witness scripts
+  (`SCRIPT-AGREE`), but neither matches the actual to_local output in
+  the broadcast stale ctx. The issue is upstream of both: the
+  per-commitment secret retrieved from Electrum's shachain for the
+  decoded ctn produces a pcp that doesn't correspond to the commitment
+  CLN actually broadcast. This is a genuine cross-implementation
+  subtlety (obscured-ctn decoding, shachain position mapping, or CLN's
+  commitment numbering vs Electrum's shachain index). Electrum's own
+  justice sweep has the same mismatch (no `to_local_for_revoked_ctx`
+  sweep name in the logs) — this is not a tap bug.
 
 **The instrumentation (committed) is permanent yield**: every future replay
-shows the classification, the wrap firing, the revocation-key equivalence
-(both derivation paths verified identical), the witness script, and the
-actual output scriptpubkeys — the exact side-by-side needed to debug any
-future mismatch.
+shows the classification, the wrap firing, the revocation-key equivalence,
+the witness script (both derivations compared), and the actual output
+scriptpubkeys — the exact side-by-side needed to debug any future mismatch.
 
 ## Next
 

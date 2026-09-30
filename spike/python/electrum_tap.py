@@ -221,6 +221,30 @@ class ElectrumTap:
             )
             program = sha256d(witness_script)
             spk = bytes([0x00, 0x20]) + program
+            # electrum's own derivation for comparison
+            from electrum.lnutil import derive_blinded_pubkey, derive_pubkey
+            from electrum import bitcoin as btc_mod
+            electrum_rev_pub = derive_blinded_pubkey(
+                chan.config[LOCAL].revocation_basepoint.pubkey, pcp
+            )
+            electrum_delayed = derive_pubkey(
+                chan.config[REMOTE].delayed_basepoint.pubkey, pcp
+            )
+            electrum_script = lnutil.make_commitment_output_to_local_witness_script(
+                electrum_rev_pub,
+                chan.config[LOCAL].to_self_delay,
+                electrum_delayed,
+            )
+            electrum_spk = bytes([0x00, 0x20]) + sha256d(electrum_script)
+            if electrum_spk != spk:
+                print(f"tap: SCRIPT-MISMATCH mine={witness_script.hex()}", flush=True)
+                print(f"tap: SCRIPT-MISMATCH electrum={electrum_script.hex()}", flush=True)
+            else:
+                print(f"tap: SCRIPT-AGREE spk={spk.hex()}", flush=True)
+                for i, o in enumerate(ctx.outputs()):
+                    if o.scriptpubkey == spk:
+                        print(f"tap: FOUND at out[{i}] val={o.value}", flush=True)
+                        break
             # compare both derivation paths for the revocation pubkey
             from electrum.lnutil import derive_blinded_pubkey
             rev_pub_from_priv = lnutil.secret_to_pubkey(int.from_bytes(our_rev_priv, "big"))
