@@ -88,10 +88,33 @@ class ElectrumTap:
 
         if self.live:
             import electrum.lnsweep as lnsweep_mod
+            from electrum.lnutil import REMOTE as REMOTE_CONST
+
+            extract_original = lnsweep_mod.extract_ctx_secrets
+
+            def extract_ctx_secrets(chan, ctx):
+                result = extract_original(chan, ctx)
+                try:
+                    from electrum.lnutil import extract_ctn_from_tx_and_chan
+                    ctn = extract_ctn_from_tx_and_chan(ctx, chan)
+                    oldest = chan.get_oldest_unrevoked_ctn(REMOTE_CONST)
+                    if result is None:
+                        print(f"tap: CTN ctn={ctn} oldest_unrevoked={oldest} → None (derivation failed)", flush=True)
+                    else:
+                        _, _, is_rev, _ = result
+                        cls = "BREACH" if is_rev else ("current" if ctn == oldest else "next" if ctn == oldest + 1 else "other")
+                        print(f"tap: CTN ctn={ctn} oldest_unrevoked={oldest} → {cls}", flush=True)
+                except Exception as exc:
+                    print(f"tap: CTN-diag {exc!r}", flush=True)
+                return result
+
+            lnsweep_mod.extract_ctx_secrets = extract_ctx_secrets
+            self._original_extract = extract_original
 
             justice_original = lnsweep_mod.sweep_their_ctx_justice
 
             def sweep_their_ctx_justice(chan, ctx, per_commitment_secret):
+                print(f"tap: justice wrap CALLED for {name_of(chan)}", flush=True)
                 tap.cross_check_justice(chan, ctx, per_commitment_secret)
                 return justice_original(chan, ctx, per_commitment_secret)
 
@@ -141,6 +164,7 @@ class ElectrumTap:
             key = chan.config[LOCAL].channel_seed.hex()
             bridge_channel_id = self.bridge_channels.get(key)
             if bridge_channel_id is None:
+                print("tap: justice skipped (channel not in bridge)", flush=True)
                 return
             # the revealed secret is for the remote's CURRENT point, i.e.
             # electrum ctn; VLS numbering is electrum ctn + 1
@@ -161,6 +185,7 @@ class ElectrumTap:
     def cross_check_justice(self, chan, ctx, per_commitment_secret) -> None:
         """Synthetic comparison: build a fixed sweep of the revoked to_local,
         sign it on both sides, verify VLS's signature over electrum's sighash."""
+        print("tap: cross_check_justice ENTERED", flush=True)
         from electrum import bitcoin as ebitcoin
         from electrum import lnutil
         from electrum.crypto import sha256d
@@ -169,9 +194,11 @@ class ElectrumTap:
         from electrum.transaction import PartialTransaction, PartialTxInput, PartialTxOutput
 
         try:
+            self.ensure_registered(chan)
             key = chan.config[LOCAL].channel_seed.hex()
             bridge_channel_id = self.bridge_channels.get(key)
             if bridge_channel_id is None:
+                print("tap: justice skipped (not in bridge after register)", flush=True)
                 return
             pcp = lnutil.secret_to_pubkey(
                 int.from_bytes(per_commitment_secret, "big")
@@ -184,9 +211,12 @@ class ElectrumTap:
             this_delayed_pub = lnutil.derive_pubkey(
                 chan.config[REMOTE].delayed_basepoint.pubkey, pcp
             )
+            # electrum's own derivation (lnsweep.sweep_their_ctx_justice):
+            # to_self_delay comes from the NON-broadcaster (LOCAL/us) — the
+            # delay we impose on them for their to_local
             witness_script = lnutil.make_commitment_output_to_local_witness_script(
                 lnutil.secret_to_pubkey(int.from_bytes(our_rev_priv, "big")),
-                chan.config[REMOTE].to_self_delay,
+                chan.config[LOCAL].to_self_delay,
                 this_delayed_pub,
             )
             program = sha256d(witness_script)
