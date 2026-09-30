@@ -35,6 +35,10 @@ delivery_revision = "v26.06.6"
 # Strict-mode re-verification (2026-09-02/03) and all later ladder runs:
 # the CLN fork branch, @ 5f8f28785 (pushed 2026-09-02) with replay rails
 # @ 1fe46dec3; branch advances, ladder re-proven per advance.
+# 2026-09-30 (D1 negative-guard redesign, playground #268): strict
+# re-verified on the -ff lineage + D1 convention branch — push_value is
+# the fundee TOTAL post-splice balance (owed + fundee-pending HTLCs +
+# signed relative); the same stack is pending lineage merge (owner call).
 fork_repo = "Amperstrand/lightning"
 fork_branch = "inr2-splice-harness-v26.06.8"
 strict_verified_revision = "5e799b8f2"
@@ -54,7 +58,7 @@ fuzz_suite = "cd fuzz && RUSTFLAGS=--cfg=fuzzing cargo test"
 2026-08-31 = "soak: 5/5 rc=0, arm-verified (claim upgraded 2x -> 7x)"
 2026-09-02 = "permissive full matrix 59/0 incl. test_splicing 12/12"
 2026-09-03 = "strict 12 passed in 385.42s @ the 1800s bound"
-2026-09-30 = "strict 12/12 manifest green in 482.89s completed run (full file: 20 passed / 4 failed, all non-manifest EC-7 force-close family, open lane) — CLN inr2-splice-harness-v26.06.8@5e799b8f2, vlsd bins f73f76e7 (stack PR-A/B/C), ARM cln:socket; same fix stack cherry-picked on inr2-splice-harness@2b435fa1b and -ff@21b7aa2f7"
+2026-09-30 = "strict 12/12 manifest green, 19P/0F before a 1800s reap in the non-manifest EC-7 late force-close remainder (abort_after_sigs_sent itself green post 63aa71b6) — CLN inr2-splice-harness-v26.06.8@5e799b8f2 (full 3-bug fundee fix: units + channel-role + prior-balance, = upstream PR 9591 splice-fundee-msat semantics), vlsd bins splice-initial-allowance-exact@4a82f3b8 (PR-A/B/C + 63aa71b6 EC-7 close fix + 7effd825 carried-term drop: allowance = reported push exactly), ARM cln:socket 54 starts; native arm rc=0"
 ```
 
 ## The 12-case ladder
