@@ -216,10 +216,31 @@ therefore precisely scoped: wrap lnsweep's justice builders + bridge RPCs
 for VLS's `sign_justice_revoked_output`/`sign_justice_revoked_htlc` — with
 M7a, VLS already holds every secret needed (shachain-validated).
 
+## M7c: justice cross-check plumbing (shipped; replay partial)
+
+The plumbing for the last unexercised surface is complete:
+- Bridge RPC `sign_justice_sweep` → VLS `Channel::sign_justice_sweep` (tx,
+  input, revocation_secret, redeemscript, amount).
+- Tap `cross_check_justice`: wraps `lnsweep.sweep_their_ctx_justice`;
+  derives electrum's revocation key from its own config (same formula VLS
+  uses), builds a fixed synthetic sweep of the revoked to_local, signs it
+  electrum-side, asks VLS to sign the same tx, and verifies VLS's signature
+  over electrum's BIP-143 sighash (the M4 verification pattern).
+
+Replay re-ran the full M7b choreography on channel #3 (open → payments with
+live revocation validation ctn 5-8 → snapshot → advance → restore → desync
+detection → stale broadcast → FORCE_CLOSING) and produced a signed sweep
+(0.0394, held locally pending anchor/CSV schedule). **Open issue, isolated**:
+the tap's justice wrap never printed — the sweep hasn't broadcast, and the
+interception point may need to move deeper (e.g. wrap
+`lnsweep.sweep_ctx_to_local` or the lnwatcher journal processing) or the
+queue needs flushing with more blocks. Next action: replay once more with
+`-v` daemon logging and trace which lnsweep path builds the held sweep.
+
 ## Next
 
-- Justice cross-check: wrap lnsweep justice builders, bridge
-  `sign_justice_revoked_*`; replay this exact scenario and compare VLS's
-  justice signatures against Electrum's (the last unexercised surface).
+- Flush the M7c replay: trace the held sweep's lnsweep path (wrap may need
+  to move to `sweep_ctx_to_local` or lnwatcher level), get the justice
+  cross-check to fire.
 - Anchors payment-basepoint seam implementation (sweep support; M6 finding).
 - Strict-mode interop: the recomposed-tx gate is the documented boundary.

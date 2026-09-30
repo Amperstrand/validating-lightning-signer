@@ -87,6 +87,17 @@ class ElectrumTap:
         self._original_get_secret_and_point = original
 
         if self.live:
+            import electrum.lnsweep as lnsweep_mod
+
+            justice_original = lnsweep_mod.sweep_their_ctx_justice
+
+            def sweep_their_ctx_justice(chan, ctx, per_commitment_secret):
+                tap.cross_check_justice(chan, ctx, per_commitment_secret)
+                return justice_original(chan, ctx, per_commitment_secret)
+
+            lnsweep_mod.sweep_their_ctx_justice = sweep_their_ctx_justice
+            self._original_justice = justice_original
+
             sign_original = Channel.sign_next_commitment
 
             def sign_next_commitment(chan, *args, **kwargs):
@@ -145,6 +156,97 @@ class ElectrumTap:
         except Exception as exc:
             self.divergences.append(f"{name_of(chan)} revocation: {exc!r}")
             print(f"tap: REVOCATION-FAIL {name_of(chan)}: {exc!r}", flush=True)
+
+    def cross_check_justice(self, chan, ctx, per_commitment_secret) -> None:
+        """Synthetic comparison: build a fixed sweep of the revoked to_local,
+        sign it on both sides, verify VLS's signature over electrum's sighash."""
+        from electrum import bitcoin as ebitcoin
+        from electrum import lnutil
+        from electrum.crypto import sha256d
+        from electrum.lnutil import LOCAL, REMOTE
+        from electrum_ecc import ECPubkey
+        from electrum.transaction import PartialTransaction, PartialTxInput, PartialTxOutput
+
+        try:
+            key = chan.config[LOCAL].channel_seed.hex()
+            bridge_channel_id = self.bridge_channels.get(key)
+            if bridge_channel_id is None:
+                return
+            pcp = lnutil.secret_to_pubkey(
+                int.from_bytes(per_commitment_secret, "big")
+            )
+            # electrum's own derivation (lnsweep.sweep_their_ctx_justice)
+            our_rev_priv = lnutil.derive_blinded_privkey(
+                chan.config[LOCAL].revocation_basepoint.privkey,
+                per_commitment_secret,
+            )
+            this_delayed_pub = lnutil.derive_pubkey(
+                chan.config[REMOTE].delayed_basepoint.pubkey, pcp
+            )
+            witness_script = lnutil.make_commitment_output_to_local_witness_script(
+                lnutil.secret_to_pubkey(int.from_bytes(our_rev_priv, "big")),
+                chan.config[REMOTE].to_self_delay,
+                this_delayed_pub,
+            )
+            program = sha256d(witness_script)
+            spk = bytes([0x00, 0x20]) + program
+            output_idx = None
+            amount = None
+            for i, o in enumerate(ctx.outputs()):
+                if o.scriptpubkey == spk:
+                    output_idx, amount = i, o.value
+                    break
+            if output_idx is None:
+                print("tap: justice cross-check skipped (to_local not found)", flush=True)
+                return
+            from electrum.transaction import address_to_script
+            dest = address_to_script(
+                ebitcoin.pubkey_to_address("p2wpkh", chan.config[LOCAL].payment_basepoint.pubkey.hex())
+            )
+            from electrum.transaction import TxOutpoint
+            txin = PartialTxInput(prevout=TxOutpoint(txid=ctx.txid(), out_idx=output_idx))
+            txin.witness_script = witness_script
+            txin.privkey = our_rev_priv
+            txin.block_height = 0
+            sweep = PartialTransaction(
+                inputs=[txin],
+                outputs=[PartialTxOutput(scriptpubkey=dest, value=amount - 1000)],
+                locktime=0,
+                version=2,
+            )
+            pre_hash = sweep.serialize_preimage(0)
+            msg_hash = sha256d(pre_hash)
+            electrum_sig = sweep.sign_txin(0, our_rev_priv)
+            tx_hex = sweep.serialize_to_network(include_sigs=False)
+            result = self.client.call(
+                "sign_justice_sweep",
+                {
+                    "channel_id": bridge_channel_id,
+                    "tx": tx_hex,
+                    "input": 0,
+                    "revocation_secret": per_commitment_secret.hex(),
+                    "redeemscript": witness_script.hex(),
+                    "amount_sat": amount,
+                },
+            )
+            vls_sig = bytes.fromhex(result["signature"])
+            # verify VLS's signature over electrum's sighash with electrum's derived pubkey
+            rev_pub = lnutil.secret_to_pubkey(int.from_bytes(our_rev_priv, "big"))
+            if not ECPubkey(rev_pub).ecdsa_verify(vls_sig, msg_hash):
+                self.divergences.append(
+                    f"{name_of(chan)} justice: VLS sig does not verify against electrum sighash"
+                )
+                print("tap: JUSTICE-DIVERGENCE — VLS sig invalid over electrum sighash", flush=True)
+            else:
+                self.comparisons += 1
+                print(
+                    f"tap: justice cross-checked (vls sig verifies, out={amount}) "
+                    f"comparisons={self.comparisons}",
+                    flush=True,
+                )
+        except Exception as exc:
+            self.divergences.append(f"{name_of(chan)} justice cross-check: {exc!r}")
+            print(f"tap: JUSTICE-FAIL {name_of(chan)}: {exc!r}", flush=True)
 
     def ensure_registered(self, chan) -> None:
         from electrum.lnutil import LOCAL
