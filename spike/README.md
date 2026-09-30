@@ -142,9 +142,24 @@ Operational notes: `--server` is a per-subcommand option (must follow
 raw route; background daemons must run in a real terminal (herdr pane) —
 shell-tool timeouts kill their process groups.
 
+## M5.1: payment soak (done)
+
+12-payment soak through the live channel (9 paid, 3 ssh-timing invoice
+misses — channel itself flawless): commitment numbers advanced ctn 15→33
+(**18 live commitment rounds**), cross-check comparisons 12→**116**,
+**divergences=0 throughout**. Every VLS commitment signature verified
+against Electrum's own BIP-143 sighash.
+
+Also explored: CLN v26.06 `setchannel` sets only routing fees — commitment
+feerate updates are funder-side (Electrum), with no deterministic regtest
+trigger without extra plumbing; and `request_force_close` against a
+cooperative peer negotiates a mutual close (the unilateral justice/sweep
+path needs an unresponsive peer — M6 material).
+
 ## Next
 
-- Longer soak: many payments, HTLC-heavy rounds, fee updates, a force-close
-  sweep — hunt divergences where they live.
+- Unilateral close + justice sweep path (unresponsive peer or CLN `close`
+  with unreasonable fee / `dev-fail`), then watchtower-style old-state
+  broadcast.
 - Anchors payment basepoint seam (needs channel context in derivation).
 - Strict-mode interop: the recomposed-tx gate is the documented boundary.
