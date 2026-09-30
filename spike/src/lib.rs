@@ -3,101 +3,38 @@
 //! Mirrors `electrum/lnutil.py` (spesmilo/electrum). Wallet-level keys derive
 //! from the lightning xprv at `m/67'/`; channel-level keys derive from a
 //! per-channel random 32-byte `channel_seed` used as a fresh BIP32 root.
-//! Anchors channels additionally derive the multisig funding key and the
-//! payment basepoint from wallet-level secrets plus channel context; because
-//! the `KeyDerive` trait carries no channel context, those are standalone
-//! functions for the M2 setup seam, and `channel_keys()` returns the
-//! channel-seed family keys (legacy semantics) instead.
+//! The `KeyDerive` implementation lives in vls-core as
+//! `KeyDerivationStyle::Electrum`; this crate keeps the anchors-context
+//! derivations (multisig funding key, payment basepoint — they need channel
+//! context the trait lacks), the shachain helpers, the KAT, and the bridge.
 //!
 //! Per-commitment secrets use the BOLT-3 shachain over
-//! `per_commitment_secret_seed` with index `START_INDEX - ctn`. vls-core's
-//! built-in `chan_utils::build_commitment_secret` implements LDK's scheme,
-//! which differs; the KAT documents the divergence and an Electrum style must
-//! override the per-commitment derivation in M2.
+//! `per_commitment_secret_seed` with index `START_INDEX - ctn`; vls-core's
+//! `chan_utils::build_commitment_secret` matches it exactly (KAT-proven over
+//! scattered ctns up to `START_INDEX-1`), so no per-commitment override is
+//! needed.
 
 use bitcoin::bip32::{ChildNumber, Xpriv};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::{Hash, HashEngine};
-use bitcoin::secp256k1::{self, PublicKey, SecretKey, Secp256k1, Signing};
+use bitcoin::secp256k1::{PublicKey, SecretKey, Secp256k1, Signing};
 use bitcoin::Network;
 
 use lightning_signer::bitcoin;
-use lightning_signer::signer::derive::KeyDerive;
+
+pub use lightning_signer::signer::derive::ElectrumKeyDerive;
+
+pub mod bridge;
 
 pub const NODE_ID_PREFIX_LEN: usize = 16;
 pub const NUM_BITS: u64 = 48;
 pub const START_INDEX: u64 = (1u64 << NUM_BITS) - 1;
 
-// LnKeyFamily indices from electrum/lnutil.py; every family is hardened
-// except NODE_KEY.
-const FAMILY_MULTISIG: u32 = 0;
-const FAMILY_REVOCATION_BASE: u32 = 1;
-const FAMILY_HTLC_BASE: u32 = 2;
+// LnKeyFamily indices used by the standalone derivations below; every family
+// is hardened except NODE_KEY.
 const FAMILY_PAYMENT_BASE: u32 = 3;
-const FAMILY_DELAY_BASE: u32 = 4;
-const FAMILY_REVOCATION_ROOT: u32 = 5;
 const FAMILY_NODE_KEY: u32 = 6;
 const FAMILY_FUNDING_ROOT_KEY: u32 = 10;
-
-/// Derive keys for nodes and channels the way Electrum does.
-#[derive(Clone, Debug)]
-pub struct ElectrumKeyDerive {
-    network: Network,
-}
-
-impl ElectrumKeyDerive {
-    pub fn new(network: Network) -> Self {
-        Self { network }
-    }
-}
-
-impl KeyDerive for ElectrumKeyDerive {
-    fn master_key(&self, seed: &[u8]) -> Xpriv {
-        Xpriv::new_master(self.network, seed).expect("seed produces master key")
-    }
-
-    fn node_keys(
-        &self,
-        seed: &[u8],
-        secp_ctx: &Secp256k1<secp256k1::All>,
-    ) -> (PublicKey, SecretKey) {
-        let master = self.master_key(seed);
-        let ln_root = derive_path_priv(
-            &master,
-            &[ChildNumber::from_hardened_idx(67).expect("static index")],
-            secp_ctx,
-        );
-        let (sk, pk) = family_keypair(&ln_root, FAMILY_NODE_KEY, false, secp_ctx);
-        (pk, sk)
-    }
-
-    fn channel_keys(
-        &self,
-        _seed: &[u8],
-        keys_id: &[u8; 32],
-        _basepoint_index: u32,
-        _master_key: &Xpriv,
-        secp_ctx: &Secp256k1<secp256k1::All>,
-    ) -> (SecretKey, SecretKey, SecretKey, SecretKey, SecretKey, [u8; 32]) {
-        // keys_id carries Electrum's random per-channel channel_seed, which is
-        // itself a fresh BIP32 root — it is not derived from the node seed.
-        let channel_master = Xpriv::new_master(self.network, keys_id).expect("channel seed");
-        let (multisig, _) = family_keypair(&channel_master, FAMILY_MULTISIG, true, secp_ctx);
-        let (revocation_base, _) = family_keypair(&channel_master, FAMILY_REVOCATION_BASE, true, secp_ctx);
-        let (htlc_base, _) = family_keypair(&channel_master, FAMILY_HTLC_BASE, true, secp_ctx);
-        let (payment, _) = family_keypair(&channel_master, FAMILY_PAYMENT_BASE, true, secp_ctx);
-        let (delayed, _) = family_keypair(&channel_master, FAMILY_DELAY_BASE, true, secp_ctx);
-        let (revocation_root, _) = family_keypair(&channel_master, FAMILY_REVOCATION_ROOT, true, secp_ctx);
-        (
-            multisig,
-            revocation_base,
-            htlc_base,
-            payment,
-            delayed,
-            revocation_root.secret_bytes(),
-        )
-    }
-}
 
 fn derive_path_priv<X: Signing>(
     node: &Xpriv,

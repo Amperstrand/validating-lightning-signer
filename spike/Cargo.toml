@@ -8,6 +8,7 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-vls-core = { path = "../vls-core" }
+vls-core = { path = "../vls-core", features = ["test_utils"] }
 hex = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }

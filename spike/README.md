@@ -43,10 +43,24 @@ secrets/points over scattered ctns up to `START_INDEX-1`):
     spike/python/.venv/bin/python spike/python/gen_vectors.py /path/to/electrum spike/tests/vectors/electrum_kat.json
     cargo test -p electrum-vls-spike
 
-## Next (M2/M3)
+## M2: bridge (done)
 
-- M2: Unix-socket JSON-RPC sidecar embedding a vls-core `Node` (pattern:
-  `vls-core/src/util/loopback.rs` + lnrod's `vls2.rs`), fed by an Electrum
-  plugin that taps `Peer._process_message` / `Channel` signing sites.
-- M3: live regtest channel (Electrum <-> CLN/lnrod), VLS validates and
-  cross-signs; hunt divergences.
+`spike/src/bridge.rs` embeds a vls-core `Node` and serves JSON-lines RPC over a
+Unix socket: `node_info`, `new_channel`, `setup_channel`, `confirm_funding_lock`,
+`get_per_commitment_point`. This uses the two fork-local vls-core changes:
+`KeyDerivationStyle::Electrum` (derive.rs) and `Node::new_channel_with_keys_id`
+(node.rs), which routes an externally-provided keys_id (Electrum's
+`channel_seed`) into key derivation.
+
+Verified twice: `tests/bridge_e2e.rs` (Rust) and `python/test_bridge_client.py`
+(Python — the Electrum-shaped consumer path). Over the socket, the bridge's
+node_id, channel basepoints, and per-commitment points equal Electrum's own
+values from the KAT vectors.
+
+    cargo build -p electrum-vls-spike --bin vls_bridge
+    spike/python/.venv/bin/python spike/python/test_bridge_client.py
+
+## Next (M3)
+
+- M3: Electrum plugin tap (Peer/Channel monkey-patch) mirroring a live channel
+  into the bridge; divergence hunting.
