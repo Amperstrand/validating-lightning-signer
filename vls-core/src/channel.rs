@@ -1430,7 +1430,19 @@ impl Channel {
         &mut self,
         commitment_number: u64,
     ) -> Result<ClosableHolderCommitment, Status> {
-        if commitment_number == self.enforcement_state.next_holder_commit_num {
+        // An un-activated era-initial holder commitment (num = next-1 on
+        // the CURRENT funding, numbering carried across the era swap,
+        // current slot still empty — the aborted-splice shape) is a
+        // validated, counterparty-signed record: the close may use it.
+        // The funding tag binds it to this era; anything else falls
+        // through to the typed refusal below.
+        let era_initial_close = commitment_number + 1 == self.enforcement_state.next_holder_commit_num
+            && self.enforcement_state.current_holder_commit_info.is_none()
+            && self.enforcement_state.holder_commitment_funding
+                == Some(self.setup.funding_outpoint);
+        if commitment_number == self.enforcement_state.next_holder_commit_num
+            || era_initial_close
+        {
             if let Some((info, counterparty_signatures)) =
                 &self.enforcement_state.next_holder_commit_info
             {
@@ -3477,7 +3489,19 @@ impl Channel {
         )?;
         info!("#hang-probe: payments validated");
 
+        // The era-initial shape: num = next-1 on the CURRENT funding with
+        // the current slot still empty — the era swap carries the
+        // numbering (point-stream continuity) while clearing the holder
+        // info, so the new era's first commitment arrives looking like a
+        // retransmit. It is NOT one: nothing was ever stored for this
+        // era. Store it pending + tagged, exactly like a first
+        // validation (the aborted-splice close consumes it; live evidence
+        // 2026-09-30 02:04:04Z: validated, replied Ok, stored nowhere).
+        let era_initial = commitment_number + 1 == self.enforcement_state.next_holder_commit_num
+            && view.funding_outpoint == self.setup.funding_outpoint
+            && self.enforcement_state.current_holder_commit_info.is_none();
         if commitment_number == self.enforcement_state.next_holder_commit_num
+            || era_initial
             || (self.enforcement_state.prev_funding_commitment.is_some()
                 && commitment_number + 1 == self.enforcement_state.next_holder_commit_num
                 && view.funding_outpoint != self.setup.funding_outpoint)
@@ -3486,7 +3510,9 @@ impl Channel {
                 counterparty_commit_sig.clone(),
                 counterparty_htlc_sigs.to_vec(),
             );
-            if commitment_number == self.enforcement_state.next_holder_commit_num {
+            if commitment_number == self.enforcement_state.next_holder_commit_num
+                || era_initial
+            {
                 self.enforcement_state.next_holder_commit_info =
                     Some((info2, counterparty_signatures));
                 // Tag the ROUTED view, not the channel setup: a fresh

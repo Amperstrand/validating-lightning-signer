@@ -132,3 +132,150 @@ fn rail_plain_close_after_holder_validation_still_signs() {
         .with_channel(&channel_id, |chan| chan.sign_holder_commitment_tx_phase2(close_num));
     assert!(res.is_ok(), "plain close must still sign: {:?}", res.err());
 }
+
+/// R1 (EC-7 part 2): the era-B initial holder commitment — validated at
+/// num = next-1 on the CURRENT funding (the numbering-carry shape CLN's
+/// splice flow produces) — must be STORED, and the unilateral close at
+/// that number must SIGN from it. Pre-fix: validated, replied Ok, stored
+/// NOWHERE (the retransmit no-op branch); close refused.
+#[test]
+fn rail_splice_initial_holder_commitment_stored_and_closable() {
+    let node_ctx = test_node_ctx(1);
+    let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+    let channel_id = chan_ctx.channel_id.clone();
+
+    // Era A: one validated holder commitment (num 1).
+    let channel_value = chan_ctx.setup.channel_value_sat;
+    let mut ctx1 = channel_commitment(
+        &node_ctx,
+        &chan_ctx,
+        1,
+        3755,
+        channel_value - 3755,
+        0,
+        vec![],
+        vec![],
+    );
+    let (sig1, hsig1) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx1);
+    validate_holder_commitment(&node_ctx, &chan_ctx, &ctx1, &sig1, &hsig1)
+        .expect("era-A num-1 holder commitment validates");
+
+    // The splice swap: numbering carries, current holder info cleared.
+    let _outpoint_b = splice_a_to_b(&node_ctx, &mut chan_ctx);
+
+    let (next_num, current_some) = node_ctx
+        .node
+        .with_channel(&channel_id, |chan: &mut Channel| {
+            Ok((
+                chan.enforcement_state.next_holder_commit_num,
+                chan.enforcement_state.current_holder_commit_info.is_some(),
+            ))
+        })
+        .expect("state read");
+    assert!(!current_some, "era swap clears current holder info");
+
+    // Era-B initial holder commitment at num = next-1 (the CLN shape:
+    // commit_index = next_index-1 on the new funding, numbering carried).
+    let era_b_value = chan_ctx.setup.channel_value_sat;
+    let mut ctx_b = channel_commitment(
+        &node_ctx,
+        &chan_ctx,
+        next_num - 1,
+        3755,
+        era_b_value - 3755,
+        0,
+        vec![],
+        vec![],
+    );
+    let (sig_b, hsig_b) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx_b);
+    validate_holder_commitment(&node_ctx, &chan_ctx, &ctx_b, &sig_b, &hsig_b)
+        .expect("era-B initial holder commitment validates");
+
+    // STORED? The pending slot must carry it, tagged with era B's funding.
+    let (pending_some, tagged_b) = node_ctx
+        .node
+        .with_channel(&channel_id, |chan: &mut Channel| {
+            Ok((
+                chan.enforcement_state.next_holder_commit_info.is_some(),
+                chan.enforcement_state.holder_commitment_funding
+                    == Some(chan.setup.funding_outpoint),
+            ))
+        })
+        .expect("state read");
+    assert!(
+        pending_some && tagged_b,
+        "era-B initial commitment must be stored pending + tagged: pending={} tagged={}",
+        pending_some,
+        tagged_b
+    );
+
+    // And the close at that number must SIGN (from the pending record).
+    let res = node_ctx
+        .node
+        .with_channel(&channel_id, |chan| {
+            chan.sign_holder_commitment_tx_phase2(next_num - 1)
+        });
+    assert!(res.is_ok(), "era-B close must sign: {:?}", res.err());
+}
+
+/// R4: the retransmit no-op is preserved — re-validating the CURRENT
+/// commitment on a normal channel (num = next-1, view == setup, current
+/// present) must NOT clobber state or change closeability.
+#[test]
+fn rail_current_commitment_revalidation_is_still_a_noop() {
+    let node_ctx = test_node_ctx(1);
+    let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+    let channel_id = chan_ctx.channel_id.clone();
+
+    let channel_value = chan_ctx.setup.channel_value_sat;
+    let mut ctx1 = channel_commitment(
+        &node_ctx,
+        &chan_ctx,
+        1,
+        3755,
+        channel_value - 3755,
+        0,
+        vec![],
+        vec![],
+    );
+    let (sig1, hsig1) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx1);
+    validate_holder_commitment(&node_ctx, &chan_ctx, &ctx1, &sig1, &hsig1)
+        .expect("era-A num-1 holder commitment validates");
+
+    let before = node_ctx
+        .node
+        .with_channel(&channel_id, |chan: &mut Channel| {
+            Ok((
+                chan.enforcement_state.next_holder_commit_num,
+                chan.enforcement_state.current_holder_commit_info.as_ref().map(|i| i.total_value()),
+                chan.enforcement_state.next_holder_commit_info.is_some(),
+            ))
+        })
+        .expect("state before");
+
+    // Re-validate the SAME num-1 (retransmit shape; current is present).
+    let (sig1b, hsig1b) = counterparty_sign_holder_commitment(&node_ctx, &chan_ctx, &mut ctx1);
+    validate_holder_commitment(&node_ctx, &chan_ctx, &ctx1, &sig1b, &hsig1b)
+        .expect("retransmission validates");
+
+    let after = node_ctx
+        .node
+        .with_channel(&channel_id, |chan: &mut Channel| {
+            Ok((
+                chan.enforcement_state.next_holder_commit_num,
+                chan.enforcement_state.current_holder_commit_info.as_ref().map(|i| i.total_value()),
+                chan.enforcement_state.next_holder_commit_info.is_some(),
+            ))
+        })
+        .expect("state after");
+
+    assert_eq!(before, after, "retransmit must remain a no-op");
+
+    // And the plain close still signs.
+    let res = node_ctx
+        .node
+        .with_channel(&channel_id, |chan| {
+            chan.sign_holder_commitment_tx_phase2(before.0 - 1)
+        });
+    assert!(res.is_ok(), "close after retransmit must sign: {:?}", res.err());
+}
