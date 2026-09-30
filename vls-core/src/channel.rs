@@ -2390,6 +2390,14 @@ impl Channel {
             // consulted by the mutual-close rails (value + htlcs only).
             let push_sat = self.setup.push_value_msat / 1000;
             let push_is_plain_msat = self.setup.push_value_msat <= i64::MAX as u64;
+            if !push_is_plain_msat {
+                warn!(
+                    "wrapped push_value_msat {} on channel {}: the host lacks the \
+                     sats-to-msat splice conversion (unfixed-host detector)",
+                    self.setup.push_value_msat,
+                    self.id()
+                );
+            }
             let (to_holder, to_cp) = if push_is_plain_msat {
                 (self.setup.channel_value_sat.saturating_sub(push_sat), push_sat)
             } else {

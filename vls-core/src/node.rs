@@ -2033,6 +2033,13 @@ impl Node {
                 // the convention survives. Wrapped values skip this
                 // rail; the commitment validation checks the real split.
                 let push_is_plain_msat = setup.push_value_msat <= i64::MAX as u64;
+                if !push_is_plain_msat {
+                    warn!(
+                        "wrapped push_value_msat {} on splice re-setup of channel {:?}: \
+                         the host lacks the sats-to-msat conversion (unfixed-host detector)",
+                        setup.push_value_msat, c.id()
+                    );
+                }
                 if push_is_plain_msat && setup.push_value_msat > setup.channel_value_sat * 1000 {
                     return Err(Status::invalid_argument(format!(
                         "beneficial channel value underflow: {} - {}",
