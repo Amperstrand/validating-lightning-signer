@@ -1,21 +1,27 @@
-//! Playground #268 item 3 rails: the splice-era initial-funding policy must
-//! evaluate against the CARRIED prior-era balances, not against push_value
-//! alone.
+//! Playground #268 item 3 rails: the splice-era initial-funding policy
+//! allowance is EXACTLY the reported push_value (owner decision
+//! 2026-09-30, handoff item 1(b) "carried-term keep-vs-drop" -> drop).
 //!
 //! BOLTs #1160 splicing starts a fresh commitment-number era on the new
-//! funding, so the first new-era commitment legitimately re-runs the
-//! commit_num == 0 policy checks. `policy-commitment-initial-funding-value`
-//! assumes a FRESH channel there (fundee entitled to push_value only) — but a
-//! SPLICED channel's fundee carries their entire prior-era balance into the
-//! new era, so an honest first new-era commitment is refused and the splice
-//! wedges (live evidence: the strict two_chan run, signer refusal at the
-//! STFU-complete moment).
+//! funding, so the first new-era commitment re-runs the commit_num == 0
+//! policy checks. The CLN fork's splice-era convention
+//! (lightning-playground #268 EC-2 / upstream PR 9591's splice-fundee-msat
+//! branch, semantically identical) sends the fundee's FULL post-splice
+//! balance in push_value: pre-splice owed[] plus their signed
+//! contribution, selected by channel-opener role. The signer-side
+//! carried-balance term that used to be ADDED to the allowance
+//! double-counted that balance against the honest report (over-allowance
+//! of exactly the carried amount); its snapshot floor duplicated what
+//! owed[] already carries. Both dropped — the allowance is push_value.
 //!
-//! Both rails (campaign doctrine — every carve-out gets both):
-//! - must-accept: first new-era commitment pays the counterparty exactly
-//!   their prior-era balance + push_value -> SignRemoteCommitmentTx succeeds.
-//! - must-refuse: the same shape paying MORE than prior balance + push_value
-//!   is still rejected.
+//! Rails (campaign doctrine — every carve-out gets both):
+//! - must-accept: first new-era commitment pays the fundee exactly the
+//!   REPORTED push_value (which carries their full entitlement).
+//! - must-refuse: anything above the reported push_value is rejected —
+//!   including the pre-drop "carried + push" shape, which double-counts.
+//! - must-accept (unexchanged era): a channel spliced before any
+//!   commitments were exchanged carries the fundee's entitlement purely
+//!   via the reported push.
 //! - control: a FRESH channel's initial commitment paying the fundee more
 //!   than push_value stays rejected (the original invariant, unweakened).
 
@@ -117,11 +123,11 @@ fn sign_current_view_counterparty_commitment(
     })
 }
 
-// must-accept rail (RED against current code): the honest first new-era
-// commitment — counterparty receives exactly their carried prior-era
-// balance plus the new era's push_value — must sign in strict policy.
+// must-accept rail: the honest first new-era commitment — fundee paid
+// exactly the REPORTED push_value, which (CLN fork / PR 9591 semantics)
+// already carries their prior-era balance plus contribution.
 #[test]
-fn rail_splice_era_initial_commitment_pays_carried_balance_plus_push() {
+fn rail_splice_era_initial_commitment_pays_reported_entitlement() {
     let node_ctx = test_node_ctx(1);
     let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
     let channel_id = chan_ctx.channel_id.clone();
@@ -129,10 +135,18 @@ fn rail_splice_era_initial_commitment_pays_carried_balance_plus_push() {
     const CARRIED_CP_SAT: u64 = 200_000;
     establish_era_a_counterparty_balance(&node_ctx, &mut chan_ctx, CARRIED_CP_SAT);
 
+    // What an EC-2-convention host reports: the fundee's full
+    // post-splice entitlement (their carried balance; the harness
+    // carries setup.push_value_msat into the new era).
+    chan_ctx.setup.push_value_msat = CARRIED_CP_SAT * 1000;
+
     let _outpoint_b = splice_a_to_b(&node_ctx, &mut chan_ctx);
     let new_value = chan_ctx.setup.channel_value_sat;
-    let push_sat = chan_ctx.setup.push_value_msat / 1000;
-    assert!(push_sat == 0, "test setup uses a zero-push splice");
+    assert_eq!(
+        chan_ctx.setup.push_value_msat / 1000,
+        CARRIED_CP_SAT,
+        "harness carries the reported push into the new setup"
+    );
 
     node_ctx
         .node
@@ -145,36 +159,35 @@ fn rail_splice_era_initial_commitment_pays_carried_balance_plus_push() {
         })
         .expect("numbering install");
 
-    let cp_entitlement = CARRIED_CP_SAT + push_sat;
     let res = sign_current_view_counterparty_commitment(
         &node_ctx,
         &channel_id,
         &remote_point(ERA_B_REMOTE_POINT_NDX),
         0,
-        new_value - 3755 - cp_entitlement,
-        cp_entitlement,
+        new_value - 3755 - CARRIED_CP_SAT,
+        CARRIED_CP_SAT,
     );
     assert!(
         res.is_ok(),
-        "the first new-era commitment must pay carried balance + push: {:?}",
+        "the first new-era commitment must pay the reported entitlement: {:?}",
         res.err()
     );
 }
 
-// must-refuse rail: the same shape paying MORE than carried + push stays
-// rejected — the carve-out carries prior state, it does not open the cap.
+// must-refuse rail: paying MORE than the reported push_value stays
+// rejected — the report carries the entitlement, it does not open a cap.
 #[test]
-fn rail_splice_era_initial_commitment_over_carried_balance_refused() {
+fn rail_splice_era_initial_commitment_over_reported_entitlement_refused() {
     let node_ctx = test_node_ctx(1);
     let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
     let channel_id = chan_ctx.channel_id.clone();
 
     const CARRIED_CP_SAT: u64 = 200_000;
     establish_era_a_counterparty_balance(&node_ctx, &mut chan_ctx, CARRIED_CP_SAT);
+    chan_ctx.setup.push_value_msat = CARRIED_CP_SAT * 1000;
 
     let _outpoint_b = splice_a_to_b(&node_ctx, &mut chan_ctx);
     let new_value = chan_ctx.setup.channel_value_sat;
-    let push_sat = chan_ctx.setup.push_value_msat / 1000;
 
     node_ctx
         .node
@@ -187,7 +200,7 @@ fn rail_splice_era_initial_commitment_over_carried_balance_refused() {
         })
         .expect("numbering install");
 
-    let overpaid = CARRIED_CP_SAT + push_sat + 50_000;
+    let overpaid = CARRIED_CP_SAT + 50_000;
     let res = sign_current_view_counterparty_commitment(
         &node_ctx,
         &channel_id,
@@ -196,7 +209,52 @@ fn rail_splice_era_initial_commitment_over_carried_balance_refused() {
         new_value - 3755 - overpaid,
         overpaid,
     );
-    let err = res.expect_err("over the carried balance + push must be refused");
+    let err = res.expect_err("over the reported entitlement must be refused");
+    assert!(
+        err.message().contains("initial commitment may only send push_value_msat"),
+        "refusal must be the initial-funding policy, got: {}",
+        err.message()
+    );
+}
+
+// flip rail (was the pre-drop must-accept): the "carried + push" shape
+// DOUBLE-COUNTS once the report carries the balance — it must refuse.
+#[test]
+fn rail_splice_era_initial_commitment_double_counted_carried_refused() {
+    let node_ctx = test_node_ctx(1);
+    let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+    let channel_id = chan_ctx.channel_id.clone();
+
+    const CARRIED_CP_SAT: u64 = 200_000;
+    establish_era_a_counterparty_balance(&node_ctx, &mut chan_ctx, CARRIED_CP_SAT);
+    chan_ctx.setup.push_value_msat = CARRIED_CP_SAT * 1000;
+
+    let _outpoint_b = splice_a_to_b(&node_ctx, &mut chan_ctx);
+    let new_value = chan_ctx.setup.channel_value_sat;
+
+    node_ctx
+        .node
+        .with_channel(&channel_id, |chan| {
+            chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
+                0,
+                remote_point(ERA_B_REMOTE_POINT_NDX),
+            );
+            Ok(())
+        })
+        .expect("numbering install");
+
+    // The pre-drop allowance was push + carried = 2x the entitlement;
+    // paying it must now refuse.
+    let double_counted = CARRIED_CP_SAT * 2;
+    let res = sign_current_view_counterparty_commitment(
+        &node_ctx,
+        &channel_id,
+        &remote_point(ERA_B_REMOTE_POINT_NDX),
+        0,
+        new_value - 3755 - double_counted,
+        double_counted,
+    );
+    let err = res.expect_err("the double-counted shape must refuse post-drop");
     assert!(
         err.message().contains("initial commitment may only send push_value_msat"),
         "refusal must be the initial-funding policy, got: {}",
@@ -243,20 +301,16 @@ fn control_fresh_channel_initial_over_push_still_refused() {
     );
 }
 
-// push-floor rail (RED before the retiring-push snapshot field): a channel
-// spliced immediately after opening has NO exchanged commitments to
-// snapshot, so the fundee's carried entitlement is exactly the retiring
-// setup's push (the live two_chan shape: refusal read "prior-era balance
-// (0)" while the fundee legitimately carried the era-A push).
+// unexchanged-era rail: a channel spliced before any commitments were
+// exchanged carries the fundee's entitlement purely via the reported
+// push (owed[] carried it upstream all along — the dropped snapshot
+// floor duplicated this).
 #[test]
-fn rail_splice_era_carried_push_floor_for_unexchanged_era() {
+fn rail_splice_era_unexchanged_entitlement_via_reported_push() {
     let node_ctx = test_node_ctx(1);
     const PUSH_MSAT: u64 = 500_000; // dust-safe: the fundee output must clear the 354-sat dust check
     let push_sat = PUSH_MSAT / 1000;
 
-    // fund_test_channel with a push: the initial holder commitment pays the
-    // fundee 0 (an allowed underpay), so no commitment info ever carries
-    // the fundee's entitlement — the snapshot floor is the only carrier.
     let mut chan_ctx = {
         let mut ctx = crate::util::test_utils::test_chan_ctx_with_push_val(
             &node_ctx,
@@ -280,7 +334,6 @@ fn rail_splice_era_carried_push_floor_for_unexchanged_era() {
 
     let _outpoint_b = splice_a_to_b(&node_ctx, &mut chan_ctx);
     let new_value = chan_ctx.setup.channel_value_sat;
-    // the new era keeps the push (the harness carries it into the new setup)
     let new_push_sat = chan_ctx.setup.push_value_msat / 1000;
     assert_eq!(new_push_sat, push_sat, "harness carries the push into the new setup");
 
@@ -295,18 +348,35 @@ fn rail_splice_era_carried_push_floor_for_unexchanged_era() {
         })
         .expect("numbering install");
 
-    let fundee_entitlement = push_sat + new_push_sat;
+    // Exactly the reported push: must sign.
     let res = sign_current_view_counterparty_commitment(
         &node_ctx,
         &channel_id,
         &remote_point(ERA_B_REMOTE_POINT_NDX),
         0,
-        new_value - 3755 - fundee_entitlement,
-        fundee_entitlement,
+        new_value - 3755 - push_sat,
+        push_sat,
     );
     assert!(
         res.is_ok(),
-        "an unexchanged era carries the retiring push: {:?}",
+        "an unexchanged era carries the entitlement via the report: {:?}",
         res.err()
+    );
+
+    // The pre-drop shape (retiring push + new push) double-counts now.
+    let over = push_sat * 2;
+    let res = sign_current_view_counterparty_commitment(
+        &node_ctx,
+        &channel_id,
+        &remote_point(ERA_B_REMOTE_POINT_NDX),
+        0,
+        new_value - 3755 - over,
+        over,
+    );
+    let err = res.expect_err("the double-counted unexchanged shape must refuse");
+    assert!(
+        err.message().contains("initial commitment may only send push_value_msat"),
+        "refusal must be the initial-funding policy, got: {}",
+        err.message()
     );
 }
