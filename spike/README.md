@@ -60,7 +60,26 @@ values from the KAT vectors.
     cargo build -p electrum-vls-spike --bin vls_bridge
     spike/python/.venv/bin/python spike/python/test_bridge_client.py
 
-## Next (M3)
+## M3: tap harness (done)
 
-- M3: Electrum plugin tap (Peer/Channel monkey-patch) mirroring a live channel
-  into the bridge; divergence hunting.
+`python/electrum_tap.py` wraps `Channel.get_secret_and_point` (fires during
+signing, revocation and sweeps) and mirrors every LOCAL per-commitment point
+into the bridge. `python/test_tap_mirror.py` builds REAL Electrum channels
+with Electrum's own test helpers (`tests/lnhelpers.py`), registers both
+sides, runs direct ctn 0..2 checks plus a full commitment round
+(sign -> receive_new_commitment -> revoke -> receive_revocation), and asserts
+zero divergences: 12 point comparisons, 0 divergences, all basepoints equal.
+
+Discovery: both sides of a channel share `channel_id` (derived from the
+funding outpoint), so the tap registry is keyed by `channel_seed` — relevant
+to any future live plugin that taps both sides in one process.
+
+    spike/python/.venv/bin/python spike/python/test_tap_mirror.py
+
+## Next
+
+- Live regtest channel (Electrum <-> CLN/lnrod) tapped through the same
+  bridge; wire-level mirroring via `Peer._process_message`.
+- Signing cross-check: `sign_counterparty_commitment` on the bridge compared
+  against Electrum's `sign_next_commitment` signatures.
+- Anchors payment basepoint seam (needs channel context in derivation).
