@@ -25,7 +25,7 @@ verified_cases = 12
 total_cases = 12
 modes = ["permissive", "strict"]
 last_delivered = 2026-08-30
-last_strict_verified = 2026-09-03
+last_strict_verified = 2026-09-30
 delivery_commit = "dc5b77e73e93896f5f9af371ef3304b27ca9ec5c"
 
 [cln]
@@ -35,9 +35,16 @@ delivery_revision = "v26.06.6"
 # Strict-mode re-verification (2026-09-02/03) and all later ladder runs:
 # the CLN fork branch, @ 5f8f28785 (pushed 2026-09-02) with replay rails
 # @ 1fe46dec3; branch advances, ladder re-proven per advance.
+# 2026-09-30 (D1 negative-guard redesign, playground #268): strict
+# re-verified on the -ff lineage + D1 convention branch — push_value is
+# the fundee TOTAL post-splice balance (owed + fundee-pending HTLCs +
+# signed relative); the same stack is pending lineage merge (owner call).
+# 2026-09-30 late (D1 final): the newest verification below ran the FULL
+# D1 pair — CLN negative-guard-redesign-v26@988251455 (D1 host term on
+# -v26.06.8) + vls negative-guard-redesign@fd710500; pin tracks it.
 fork_repo = "Amperstrand/lightning"
-fork_branch = "inr2-splice-harness"
-strict_verified_revision = "1fe46dec3"
+fork_branch = "negative-guard-redesign-v26"
+strict_verified_revision = "988251455"
 suite_file = "tests/test_splicing.py"
 
 [vls]
@@ -54,6 +61,7 @@ fuzz_suite = "cd fuzz && RUSTFLAGS=--cfg=fuzzing cargo test"
 2026-08-31 = "soak: 5/5 rc=0, arm-verified (claim upgraded 2x -> 7x)"
 2026-09-02 = "permissive full matrix 59/0 incl. test_splicing 12/12"
 2026-09-03 = "strict 12 passed in 385.42s @ the 1800s bound"
+2026-09-30 = "strict 12/12 manifest green, 19P/0F before a 1800s reap in the non-manifest EC-7 late force-close remainder (abort_after_sigs_sent itself green post 63aa71b6) — CLN inr2-splice-harness-v26.06.8@5e799b8f2 (full 3-bug fundee fix: units + channel-role + prior-balance, = upstream PR 9591 splice-fundee-msat semantics), vlsd bins splice-initial-allowance-exact@4a82f3b8 (PR-A/B/C + 63aa71b6 EC-7 close fix + 7effd825 carried-term drop: allowance = reported push exactly), ARM cln:socket 54 starts; native arm rc=0; D1 FINAL same day (playground #268 owner decision, negative-guard-redesign pair: CLN negative-guard-redesign-v26@988251455 + twin -ff branch negative-guard-redesign@50b3b6bf8 — host total now includes pending-at-setup HTLCs attributable to the fundee — and vls negative-guard-redesign@fd710500 — WARN stray-host detectors + fundee-splice-out rail): manifest 12/12 strict in a COMPLETED 326.80s run, ARM cln:socket 50 starts, vls-core 687/0, unit rails 3x + RED/GREEN A/B; EC-7 family deselected there (pre-existing base stall, reproduced identically with D1-free control bins @5ff8c8d8), non-manifest rbf_htlc_sigs teardown gossip error; -ff lineage full file under D1 18/19 (sole failure = the pre-existing -ff gossip drift, present in the pre-D1 soak)"
 ```
 
 ## The 12-case ladder
@@ -64,18 +72,18 @@ checker counts these rows against `verified_cases`.
 
 | # | Case (`tests/test_splicing.py`) | Delivered | Strict-verified |
 |---|---|---|---|
-| 1 | `test_splice` | 2026-08-30 | 2026-09-03 |
-| 2 | `test_two_chan_splice_in` | 2026-08-30 | 2026-09-03 |
-| 3 | `test_splice_rbf` | 2026-08-30 | 2026-09-03 |
-| 4 | `test_splice_nosign` | 2026-08-30 | 2026-09-03 |
-| 5 | `test_splice_gossip` | 2026-08-30 | 2026-09-03 |
-| 6 | `test_splice_listnodes` | 2026-08-30 | 2026-09-03 |
-| 7 | `test_splice_out` | 2026-08-30 | 2026-09-03 |
-| 8 | `test_invalid_splice` | 2026-08-30 | 2026-09-03 |
-| 9 | `test_commit_crash_splice` | 2026-08-30 | 2026-09-03 |
-| 10 | `test_splice_stuck_htlc` | 2026-08-30 | 2026-09-03 |
-| 11 | `test_route_by_old_scid` | 2026-08-30 | 2026-09-03 |
-| 12 | `test_splice_unannounced` | 2026-08-30 | 2026-09-03 |
+| 1 | `test_splice` | 2026-08-30 | 2026-09-30 |
+| 2 | `test_two_chan_splice_in` | 2026-08-30 | 2026-09-30 |
+| 3 | `test_splice_rbf` | 2026-08-30 | 2026-09-30 |
+| 4 | `test_splice_nosign` | 2026-08-30 | 2026-09-30 |
+| 5 | `test_splice_gossip` | 2026-08-30 | 2026-09-30 |
+| 6 | `test_splice_listnodes` | 2026-08-30 | 2026-09-30 |
+| 7 | `test_splice_out` | 2026-08-30 | 2026-09-30 |
+| 8 | `test_invalid_splice` | 2026-08-30 | 2026-09-30 |
+| 9 | `test_commit_crash_splice` | 2026-08-30 | 2026-09-30 |
+| 10 | `test_splice_stuck_htlc` | 2026-08-30 | 2026-09-30 |
+| 11 | `test_route_by_old_scid` | 2026-08-30 | 2026-09-30 |
+| 12 | `test_splice_unannounced` | 2026-08-30 | 2026-09-30 |
 
 Release/master CLN probes are **informational** until explicitly promoted
 to this table (promotion = a full-ladder row in `[verification_log]`).
