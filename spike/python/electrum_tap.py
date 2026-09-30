@@ -13,36 +13,54 @@ import socket
 
 class SyncBridgeClient:
     def __init__(self, path: str):
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.connect(path)
-        self.f = self.sock.makefile("rwb")
+        self.path = path
+        self.sock = None
+        self.f = None
         self._id = 0
+
+    def _connect(self) -> None:
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect(self.path)
+        self.f = self.sock.makefile("rwb")
 
     def call(self, method: str, params: dict | None = None) -> dict:
         self._id += 1
         request = {"id": self._id, "method": method, "params": params or {}}
-        self.f.write((json.dumps(request) + "\n").encode())
-        self.f.flush()
-        line = self.f.readline()
-        if not line:
-            raise RuntimeError(f"bridge closed connection during {method}")
-        response = json.loads(line)
-        if "error" in response:
-            raise RuntimeError(f"{method}: {response['error']}")
-        return response.get("result", {})
+        for attempt in (0, 1):
+            if self.f is None:
+                self._connect()
+            try:
+                self.f.write((json.dumps(request) + "\n").encode())
+                self.f.flush()
+                line = self.f.readline()
+                if not line:
+                    raise RuntimeError(f"bridge closed connection during {method}")
+                response = json.loads(line)
+                if "error" in response:
+                    raise RuntimeError(f"{method}: {response['error']}")
+                return response.get("result", {})
+            except (BrokenPipeError, OSError):
+                self.f = None
+                self.sock = None
+                if attempt:
+                    raise
 
     def close(self) -> None:
-        self.f.close()
-        self.sock.close()
+        if self.f is not None:
+            self.f.close()
+        if self.sock is not None:
+            self.sock.close()
 
 
 class ElectrumTap:
-    def __init__(self, client: SyncBridgeClient):
+    def __init__(self, client: SyncBridgeClient, live: bool = False):
         self.client = client
+        self.live = live
         self.bridge_channels: dict[str, str] = {}
         self.divergences: list[str] = []
         self.comparisons = 0
         self._original_get_secret_and_point = None
+        self._original_sign_next_commitment = None
 
     def install(self) -> None:
         from electrum.lnchannel import Channel
@@ -52,6 +70,11 @@ class ElectrumTap:
         tap = self
 
         def get_secret_and_point(chan, subject, ctn, *args, **kwargs):
+            if subject == LOCAL and tap.live:
+                try:
+                    tap.ensure_registered(chan)
+                except Exception as exc:
+                    tap.divergences.append(f"{name_of(chan)} live-register: {exc!r}")
             secret, point = original(chan, subject, ctn, *args, **kwargs)
             if subject == LOCAL:
                 try:
@@ -63,18 +86,116 @@ class ElectrumTap:
         Channel.get_secret_and_point = get_secret_and_point
         self._original_get_secret_and_point = original
 
-    def uninstall(self) -> None:
-        if self._original_get_secret_and_point is not None:
-            from electrum.lnchannel import Channel
+        if self.live:
+            sign_original = Channel.sign_next_commitment
 
+            def sign_next_commitment(chan, *args, **kwargs):
+                capture = tap.capture_commitment(chan)
+                sig_64, htlc_sigs = sign_original(chan, *args, **kwargs)
+                if capture is not None:
+                    tap.cross_check_signature(chan, sig_64, capture)
+                return sig_64, htlc_sigs
+
+            Channel.sign_next_commitment = sign_next_commitment
+            self._original_sign_next_commitment = sign_original
+
+    def uninstall(self) -> None:
+        from electrum.lnchannel import Channel
+
+        if self._original_get_secret_and_point is not None:
             Channel.get_secret_and_point = self._original_get_secret_and_point
             self._original_get_secret_and_point = None
+        if self._original_sign_next_commitment is not None:
+            Channel.sign_next_commitment = self._original_sign_next_commitment
+            self._original_sign_next_commitment = None
+
+    def ensure_registered(self, chan) -> None:
+        from electrum.lnutil import LOCAL
+
+        if chan.config[LOCAL].channel_seed.hex() in self.bridge_channels:
+            return
+        name = name_of(chan)
+        self.register_channel(chan, name)
+        self.mirror_channel_setup(chan, name)
+        # a live channel registers mid-life: fast-forward the bridge's
+        # numbering to the channel's current counters
+        holder_num = chan.hm.log[LOCAL]["ctn"]
+        sync_point = self.bridge_channels.get(chan.config[LOCAL].channel_seed.hex())
+        if sync_point is None:
+            return
+        from electrum import lnutil
+        from electrum.lnutil import REMOTE
+
+        pcp = chan.config[REMOTE].next_per_commitment_point
+        self.client.call(
+            "sync_commitment_state",
+            {
+                "channel_id": sync_point,
+                "commit_num": holder_num,
+                "revoke_num": max(holder_num - 1, 0),
+                "holder_commit_num": holder_num,
+                "per_commitment_point": pcp.hex(),
+            },
+        )
+        print(f"tap: live-registered channel {name} (holder ctn={holder_num})", flush=True)
+
+    def capture_commitment(self, chan):
+        from electrum.lnutil import LOCAL, REMOTE
+
+        try:
+            self.ensure_registered(chan)
+            commitment = chan.get_next_commitment(REMOTE)
+            return {
+                "commitment": commitment,
+                "ctn": chan.get_next_ctn(REMOTE),
+                "pcp": chan.config[REMOTE].next_per_commitment_point,
+                "witscripts": build_witscripts(chan, commitment, chan.config[REMOTE].next_per_commitment_point),
+                "feerate": chan.hm.get_feerate_in_next_ctx(REMOTE),
+            }
+        except Exception as exc:
+            self.divergences.append(f"{name_of(chan)} capture: {exc!r}")
+            print(f"tap: CAPTURE-FAIL {name_of(chan)}: {exc!r}", flush=True)
+            return None
+
+    def cross_check_signature(self, chan, sig_64: bytes, capture: dict) -> None:
+        try:
+            self.sync_commitment_state(chan, capture["ctn"], capture["pcp"].hex())
+            self.compare_counterparty_signature_raw(
+                chan,
+                name_of(chan),
+                sig_64,
+                capture["commitment"],
+                capture["witscripts"],
+                capture["pcp"].hex(),
+                capture["ctn"],
+                capture["feerate"],
+            )
+            print(
+                f"tap: signature cross-checked ctn={capture['ctn']} "
+                f"comparisons={self.comparisons} divergences={len(self.divergences)}",
+                flush=True,
+            )
+        except Exception as exc:
+            self.divergences.append(f"{name_of(chan)} cross-check: {exc!r}")
+            print(f"tap: CROSSCHECK-FAIL {name_of(chan)}: {exc!r}", flush=True)
+        if self.divergences:
+            print(f"tap: DIVERGENCES ({len(self.divergences)}):", flush=True)
+            for d in self.divergences[-5:]:
+                print(f"tap:   {d}", flush=True)
 
     def register_channel(self, chan, name: str) -> str:
         from electrum.lnutil import LOCAL
 
         local = chan.config[LOCAL]
-        result = self.client.call("new_channel", {"channel_seed": local.channel_seed.hex()})
+        # anchors channels derive the funding key from the wallet
+        # funding_root_secret, so the live wallet's real key must be injected
+        result = self.client.call(
+            "new_channel",
+            {
+                "channel_seed": local.channel_seed.hex(),
+                "funding_privkey": local.multisig_key.privkey.hex(),
+            },
+        )
         expected = {
             "funding_pubkey": local.multisig_key.pubkey.hex(),
             "htlc_basepoint": local.htlc_basepoint.pubkey.hex(),
@@ -229,14 +350,70 @@ class ElectrumTap:
         bridge_channel_id = self.bridge_channels.get(key)
         if bridge_channel_id is None:
             return
-        result = self.client.call(
-            "get_per_commitment_point", {"channel_id": bridge_channel_id, "ctn": ctn}
-        )
+        try:
+            result = self.client.call(
+                "get_per_commitment_point", {"channel_id": bridge_channel_id, "ctn": ctn}
+            )
+        except RuntimeError as exc:
+            # peek-ahead past the synced numbering window is expected: the
+            # point for ctn+1 is queried before the next numbering sync
+            if "commitment_number" in str(exc) and "invalid" in str(exc):
+                return
+            raise
         self.comparisons += 1
         if result["point"] != point.hex():
             self.divergences.append(
                 f"{name_of(chan)} ctn={ctn}: bridge {result['point']} != electrum {point.hex()}"
             )
+
+
+def build_witscripts(chan, commitment, pcp):
+    import hashlib
+
+    from electrum import lnutil
+    from electrum.lnutil import LOCAL, REMOTE
+
+    local = chan.config[LOCAL]
+    remote = chan.config[REMOTE]
+    # single-sided live variant: no peer seed, so both basepoint-party
+    # assignments and both delay sources are candidates and the sha256
+    # program match decides
+    to_local_candidates = [
+        lnutil.make_commitment_output_to_local_witness_script(
+            lnutil.derive_blinded_pubkey(rev_base, pcp),
+            delay,
+            lnutil.derive_pubkey(delayed_base, pcp),
+        )
+        for rev_base, delayed_base in (
+            (local.revocation_basepoint.pubkey, remote.delayed_basepoint.pubkey),
+            (remote.revocation_basepoint.pubkey, local.delayed_basepoint.pubkey),
+        )
+        for delay in (remote.to_self_delay, local.to_self_delay)
+    ]
+    candidates = to_local_candidates + [
+        lnutil.make_commitment_output_to_remote_witness_script(remote.payment_basepoint.pubkey),
+        lnutil.make_commitment_output_to_remote_witness_script(local.payment_basepoint.pubkey),
+        lnutil.make_commitment_output_to_anchor_witness_script(remote.multisig_key.pubkey),
+        lnutil.make_commitment_output_to_anchor_witness_script(local.multisig_key.pubkey),
+    ]
+    witscripts = []
+    for idx, o in enumerate(commitment.outputs()):
+        spk = o.scriptpubkey
+        match = b""
+        if len(spk) == 34 and spk[0] == 0x00 and spk[1] == 0x20:
+            program = spk[2:]
+            for cand in candidates:
+                if hashlib.sha256(cand).digest() == program:
+                    match = cand
+                    break
+            if not match:
+                print(
+                    f"tap: DIAG output[{idx}] value={o.value} program={program.hex()} "
+                    f"candidates={[hashlib.sha256(c).digest().hex() for c in candidates]}",
+                    flush=True,
+                )
+        witscripts.append(match.hex())
+    return witscripts
 
 
 def name_of(chan) -> str:

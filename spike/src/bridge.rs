@@ -109,9 +109,22 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
         })),
         "new_channel" => {
             let channel_seed = hex32(p, "channel_seed")?;
+            let funding_override = match str_field(p, "funding_privkey") {
+                Ok(hexstr) => {
+                    let bytes = hex::decode(hexstr)
+                        .map_err(|e| format!("bad hex in funding_privkey: {e}"))?;
+                    let arr: [u8; 32] =
+                        bytes.try_into().map_err(|_| "funding_privkey must be 32 bytes")?;
+                    Some(
+                        lightning_signer::bitcoin::secp256k1::SecretKey::from_slice(&arr)
+                            .map_err(|e| format!("bad funding_privkey: {e}"))?,
+                    )
+                }
+                Err(_) => None,
+            };
             let (channel_id, slot) = bridge
                 .node
-                .new_channel_with_keys_id(channel_seed, &bridge.node)
+                .new_channel_with_keys_id(channel_seed, funding_override.as_ref(), &bridge.node)
                 .map_err(status_msg)?;
             let secp = Secp256k1::new();
             let pubkeys = match slot {
@@ -234,6 +247,7 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
             let channel_id = ChannelId::new(&hex32(p, "channel_id")?);
             let commit_num = u64_field(p, "commit_num", 0);
             let revoke_num = u64_field(p, "revoke_num", 0);
+            let holder_num = u64_field(p, "holder_commit_num", commit_num);
             let current_point = pubkey_field(p, "per_commitment_point")?;
             bridge
                 .node
@@ -242,6 +256,8 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
                         .set_next_counterparty_commit_num_for_testing(commit_num, current_point);
                     chan.enforcement_state
                         .set_next_counterparty_revoke_num_for_testing(revoke_num);
+                    chan.enforcement_state
+                        .set_next_holder_commit_num_for_testing(holder_num);
                     Ok(())
                 })
                 .map_err(status_msg)?;

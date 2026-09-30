@@ -110,11 +110,41 @@ Findings banked along the way:
   side needs.
 - LDK's `make_funding_redeemscript` sorts keys — order-independent.
 
+## M5: live regtest channel (done)
+
+The end-to-end proof: a real Electrum daemon on regtest, a real channel to a
+CLN node, real invoice payments — with VLS mirroring the channel live and
+every commitment signature it produces **verifying against Electrum's own
+BIP-143 sighash**. Final state: `signature cross-checked ctn=14/15,
+comparisons=12, divergences=0`.
+
+Topology: bitcoind + electrumx + CLN on ai-legion (docker, ports tunneled
+over ssh through a jumphost), vls_bridge + tapped Electrum daemon on the
+workstation. `run_electrum_tapped.py` wraps the daemon entry, installs the
+live tap (`ensure_registered` mirrors channels lazily on first use;
+`sign_next_commitment` is wrapped for the signature cross-check).
+
+Two live-only seams found and fixed VLS-side (the spike thesis):
+- **Funding-key seam**: live anchors channels derive the multisig funding key
+  from the wallet `funding_root_secret`, not from `channel_seed` (the M3/M4
+  harness masked this by passing `multisig_funding_keypair=None`). Fix:
+  `new_channel_with_keys_id` accepts a funding override
+  (`set_funding_key_for_testing` also refreshes the construction-cached
+  holder pubkeys — the cache is a real trap).
+- **Mid-life numbering**: a live channel registers at ctn N, not 0. Fix: the
+  tap fast-forwards holder/counterparty numbering at registration and before
+  each cross-check; peek-ahead point queries past the synced window are
+  tolerated.
+
+Operational notes: `--server` is a per-subcommand option (must follow
+`daemon`); `use_gossip=true` config is required for non-trampoline peers
+(CLN); `PartialTransaction.serialize_to_network(include_sigs=False)` for the
+raw route; background daemons must run in a real terminal (herdr pane) —
+shell-tool timeouts kill their process groups.
+
 ## Next
 
-- Live regtest channel (Electrum <-> CLN/lnrod) tapped through the same
-  bridge; wire-level mirroring via `Peer._process_message`.
+- Longer soak: many payments, HTLC-heavy rounds, fee updates, a force-close
+  sweep — hunt divergences where they live.
 - Anchors payment basepoint seam (needs channel context in derivation).
-- Strict-mode interop: the recomposed-tx gate is the documented boundary —
-  a VLS-side "sign foreign-host tx" mode (or canonicalization) would be
-  needed for production use beyond the permissive spike.
+- Strict-mode interop: the recomposed-tx gate is the documented boundary.

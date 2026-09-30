@@ -369,6 +369,21 @@ impl MyKeysManager {
         (signer, payment_key)
     }
 
+    /// Fork-local spike support (not for upstream): same as
+    /// [Self::get_channel_keys_with_keys_id], but the funding key can be
+    /// overridden with the host wallet's real key — Electrum's anchors
+    /// channels derive the multisig funding key from the wallet
+    /// funding_root_secret, not from the channel_seed.
+    pub(crate) fn get_channel_keys_with_keys_id_and_funding(
+        &self,
+        keys_id: [u8; 32],
+        funding_override: SecretKey,
+    ) -> (VlsChannelSigner, SecretKey) {
+        let (mut signer, payment_key) = self.get_channel_keys_with_keys_id(keys_id, 0);
+        signer.set_funding_key_for_testing(funding_override);
+        (signer, payment_key)
+    }
+
     /// Raw seed behind `get_expanded_key`'s `ExpandedKey`. Re-derived here (hardened index 5,
     /// as at construction) so the signer can ship it to a remote client, which cannot derive it
     /// itself. Keeps the client's inbound-payment key stable across restarts.

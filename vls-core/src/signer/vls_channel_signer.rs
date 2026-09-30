@@ -59,14 +59,22 @@ pub struct VlsChannelSigner {
     /// Holder HTLC basepoint secret key.
     pub(crate) htlc_base_key: SecretKey,
     /// Commitment seed, used to derive per-commitment secrets/points.
-    pub(crate) commitment_seed: [u8; 32],
-    /// The LDK channel-keys id for this channel.
+    pub(crate) commitment_seed: [u8; 32],    /// The LDK channel-keys id for this channel.
     channel_keys_id: [u8; 32],
     /// Cached holder channel public keys (derived once at construction).
     holder_pubkeys: ChannelPublicKeys,
 }
 
 impl VlsChannelSigner {
+    /// Fork-local spike support (not for upstream): override the funding key
+    /// with the host wallet's real key. Refreshes the cached holder pubkeys,
+    /// which are precomputed at construction.
+    pub fn set_funding_key_for_testing(&mut self, funding_key: SecretKey) {
+        self.funding_key = funding_key;
+        let secp = Secp256k1::new();
+        self.holder_pubkeys.funding_pubkey = PublicKey::from_secret_key(&secp, &self.funding_key);
+    }
+
     /// Construct a signer from individually-derived per-channel secret keys.
     ///
     /// Argument order mirrors the former `make_in_memory_signer` shim for an easy swap.

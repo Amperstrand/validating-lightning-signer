@@ -1775,10 +1775,14 @@ impl Node {
     ///
     /// For the Electrum mirror: the wallet's random per-channel `channel_seed`
     /// is passed as the keys_id; with `KeyDerivationStyle::Electrum` the
-    /// channel keys then match Electrum's derivation byte-for-byte.
+    /// channel keys then match Electrum's derivation byte-for-byte. The
+    /// optional funding override carries the host wallet's real multisig key
+    /// (anchors channels derive it from the wallet funding_root_secret, not
+    /// from the channel_seed).
     pub fn new_channel_with_keys_id(
         &self,
         keys_id: [u8; 32],
+        funding_override: Option<&SecretKey>,
         arc_self: &Arc<Node>,
     ) -> Result<(ChannelId, Option<ChannelSlot>), Status> {
         let channel_id = ChannelId::new(&keys_id);
@@ -1801,8 +1805,12 @@ impl Node {
         }
 
         let channel_value_sat = 0; // Placeholder value, not known yet.
-        let (keys, payment_key) =
-            self.keys_manager.get_channel_keys_with_keys_id(keys_id, channel_value_sat);
+        let (keys, payment_key) = match funding_override {
+            Some(funding_key) => self
+                .keys_manager
+                .get_channel_keys_with_keys_id_and_funding(keys_id, *funding_key),
+            None => self.keys_manager.get_channel_keys_with_keys_id(keys_id, channel_value_sat),
+        };
 
         let stub = ChannelStub {
             node: Arc::downgrade(arc_self),
