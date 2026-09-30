@@ -175,10 +175,23 @@ Also learned: Electrum's `request_force_close` asks the REMOTE to close
 (REQUESTED_FCLOSE) — the local unilateral lever is the peer's, so the M6
 flow used CLN-side `close 1` (unilateral timeout).
 
+## M7a: live revocation validation (done)
+
+The tap now wraps `Channel.receive_revocation` and forwards every revealed
+remote per-commitment secret to VLS's `validate_counterparty_revocation`
+(bridge RPC). On live payments: `tap: revocation validated ctn=9..12`
+interleaved with signature cross-checks, **divergences=0** — VLS
+chain-validates (shachain) every revocation the peer reveals, on real
+traffic. This is the justice-path foundation: with the remote's secrets in
+its shachain, VLS holds everything it needs to produce justice signatures
+for a stale-state broadcast (M7b, needs a developer CLN build +
+snapshot/restore dance).
+
 ## Next
 
-- Old-state broadcast (watchtower scenario): CLN with `--developer` +
-  `dev-sign-last-tx`-style stale commitment, Electrum justice path
-  (revocation keys — the deepest VLS surface).
-- Anchors payment-basepoint seam implementation (sweep support).
+- M7b — old-state broadcast (watchtower scenario): CLN `--developer` +
+  snapshot/restore, Electrum justice path (revocation-key spends — the
+  deepest VLS surface).
+- Anchors payment-basepoint seam implementation (sweep support; the M6
+  finding, known formula).
 - Strict-mode interop: the recomposed-tx gate is the documented boundary.

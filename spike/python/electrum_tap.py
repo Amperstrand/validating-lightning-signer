@@ -99,6 +99,16 @@ class ElectrumTap:
             Channel.sign_next_commitment = sign_next_commitment
             self._original_sign_next_commitment = sign_original
 
+            revoke_original = Channel.receive_revocation
+
+            def receive_revocation(chan, revocation, *args, **kwargs):
+                result = revoke_original(chan, revocation, *args, **kwargs)
+                tap.validate_revocation(chan, revocation)
+                return result
+
+            Channel.receive_revocation = receive_revocation
+            self._original_receive_revocation = revoke_original
+
     def uninstall(self) -> None:
         from electrum.lnchannel import Channel
 
@@ -108,6 +118,33 @@ class ElectrumTap:
         if self._original_sign_next_commitment is not None:
             Channel.sign_next_commitment = self._original_sign_next_commitment
             self._original_sign_next_commitment = None
+        if getattr(self, "_original_receive_revocation", None) is not None:
+            Channel.receive_revocation = self._original_receive_revocation
+            self._original_receive_revocation = None
+
+    def validate_revocation(self, chan, revocation) -> None:
+        from electrum.lnutil import LOCAL, REMOTE
+
+        try:
+            key = chan.config[LOCAL].channel_seed.hex()
+            bridge_channel_id = self.bridge_channels.get(key)
+            if bridge_channel_id is None:
+                return
+            # the revealed secret is for the remote's CURRENT point, i.e.
+            # electrum ctn; VLS numbering is electrum ctn + 1
+            revoke_num = chan.get_latest_ctn(REMOTE) + 1
+            self.client.call(
+                "validate_counterparty_revocation",
+                {
+                    "channel_id": bridge_channel_id,
+                    "revoke_num": revoke_num,
+                    "secret": revocation.per_commitment_secret.hex(),
+                },
+            )
+            print(f"tap: revocation validated ctn={revoke_num}", flush=True)
+        except Exception as exc:
+            self.divergences.append(f"{name_of(chan)} revocation: {exc!r}")
+            print(f"tap: REVOCATION-FAIL {name_of(chan)}: {exc!r}", flush=True)
 
     def ensure_registered(self, chan) -> None:
         from electrum.lnutil import LOCAL

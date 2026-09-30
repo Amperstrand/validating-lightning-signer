@@ -297,6 +297,20 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
                 .map_err(status_msg)?;
             Ok(json!({"signature": hex::encode(signature.serialize_compact())}))
         }
+        "validate_counterparty_revocation" => {
+            let channel_id = ChannelId::new(&hex32(p, "channel_id")?);
+            let revoke_num = u64_field(p, "revoke_num", 0);
+            let secret_bytes = hex32(p, "secret")?;
+            let old_secret = lightning_signer::bitcoin::secp256k1::SecretKey::from_slice(&secret_bytes)
+                .map_err(|e| format!("bad secret: {e}"))?;
+            bridge
+                .node
+                .with_channel(&channel_id, |chan| {
+                    chan.validate_counterparty_revocation(revoke_num, &old_secret)
+                })
+                .map_err(status_msg)?;
+            Ok(json!({"ok": true}))
+        }
         other => Err(format!("unknown method: {other}")),
     }
 }
