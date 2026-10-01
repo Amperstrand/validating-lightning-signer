@@ -52,6 +52,9 @@ class SyncBridgeClient:
             self.sock.close()
 
 
+from derivation_auditor import DerivationAuditor
+
+
 class ElectrumTap:
     def __init__(self, client: SyncBridgeClient, live: bool = False):
         self.client = client
@@ -61,6 +64,9 @@ class ElectrumTap:
         self.comparisons = 0
         self._original_get_secret_and_point = None
         self._original_sign_next_commitment = None
+        self._original_receive_revocation = None
+        self.auditor = DerivationAuditor(client)
+        self.auditor.tap = self
 
     def install(self) -> None:
         from electrum.lnchannel import Channel
@@ -138,6 +144,10 @@ class ElectrumTap:
             def receive_revocation(chan, revocation, *args, **kwargs):
                 result = revoke_original(chan, revocation, *args, **kwargs)
                 tap.validate_revocation(chan, revocation)
+                try:
+                    tap.auditor.checkpoint_commitment(chan)
+                except Exception as exc:
+                    print(f"tap: auditor checkpoint failed: {exc}", flush=True)
                 return result
 
             Channel.receive_revocation = receive_revocation
@@ -195,6 +205,7 @@ class ElectrumTap:
 
         try:
             self.ensure_registered(chan)
+            self.auditor.checkpoint_justice(chan, ctx, per_commitment_secret)
             key = chan.config[LOCAL].channel_seed.hex()
             bridge_channel_id = self.bridge_channels.get(key)
             if bridge_channel_id is None:

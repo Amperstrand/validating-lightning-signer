@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::thread;
 
 use lightning_signer::bitcoin::bip32::DerivationPath;
-use lightning_signer::bitcoin::secp256k1::{PublicKey, Secp256k1};
+use lightning_signer::bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 use lightning_signer::bitcoin::{Network, OutPoint, Transaction, Txid};
 use lightning_signer::channel::{ChannelBase, ChannelId, ChannelSetup, ChannelSlot, CommitmentType};
 use lightning_signer::lightning::ln::chan_utils::ChannelPublicKeys;
@@ -339,6 +339,47 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
                 })
                 .map_err(status_msg)?;
             Ok(json!({"signature": hex::encode(signature.serialize_compact())}))
+        }
+        "derive_and_report" => {
+            let channel_id = ChannelId::new(&hex32(p, "channel_id")?);
+            let revocation_secret_hex = p
+                .get("revocation_secret")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let report = bridge
+                .node
+                .with_channel(&channel_id, |chan| {
+                    let secp_ctx = Secp256k1::new();
+                    let holder_keys = chan.keys.pubkeys(&secp_ctx);
+                    let setup = &chan.setup;
+                    let cp_points = &setup.counterparty_points;
+                    let mut report = json!({
+                        "funding_pubkey": hex::encode(holder_keys.funding_pubkey.serialize()),
+                        "revocation_basepoint": hex::encode(holder_keys.revocation_basepoint.0.serialize()),
+                        "htlc_basepoint": hex::encode(holder_keys.htlc_basepoint.0.serialize()),
+                        "delayed_basepoint": hex::encode(holder_keys.delayed_payment_basepoint.0.serialize()),
+                        "payment_basepoint": hex::encode(holder_keys.payment_point.serialize()),
+                        "cp_funding_pubkey": hex::encode(cp_points.funding_pubkey.serialize()),
+                        "cp_revocation_basepoint": hex::encode(cp_points.revocation_basepoint.0.serialize()),
+                        "cp_delayed_basepoint": hex::encode(cp_points.delayed_payment_basepoint.0.serialize()),
+                        "holder_selected_contest_delay": setup.holder_selected_contest_delay,
+                        "counterparty_selected_contest_delay": setup.counterparty_selected_contest_delay,
+                        "channel_value_sat": setup.channel_value_sat,
+                    });
+                    if let Some(secret_hex) = revocation_secret_hex {
+                        let secret_arr: [u8; 32] = hex::decode(&secret_hex)
+                            .map_err(|e| Status::invalid_argument(format!("revocation_secret hex: {e}")))?
+                            .try_into()
+                            .map_err(|_| Status::invalid_argument("revocation_secret must be 32 bytes"))?;
+                        let pcp_secret = SecretKey::from_slice(&secret_arr)
+                            .map_err(|e| Status::invalid_argument(format!("revocation_secret: {e}")))?;
+                        let pcp = PublicKey::from_secret_key(&secp_ctx, &pcp_secret);
+                        report["per_commitment_point"] = json!(hex::encode(pcp.serialize()));
+                    }
+                    Ok(report)
+                })
+                .map_err(status_msg)?;
+            Ok(report)
         }
         other => Err(format!("unknown method: {other}")),
     }
