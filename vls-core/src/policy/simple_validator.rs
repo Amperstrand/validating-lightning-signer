@@ -2063,44 +2063,24 @@ impl SimpleValidator {
                 // no-initial-htlcs and fee checks above will ensure
                 // that our share is valid.
 
-                // The fundee is only entitled to push_value — plus, on a
-                // spliced channel, the balance they already held in the
-                // prior funding era (BOLTs #1160 starts a fresh
-                // commitment-number era on the new funding, so the
-                // first new-era commitment re-runs these num-0 checks
-                // while legitimately carrying prior-era balances; the
-                // signer itself snapshotted those totals at the splice
-                // swap — snapshot_funding_for_splice).
-                let carried_fundee_sat = estate
-                    .prev_funding_commitment
-                    .as_ref()
-                    .map(|prev| {
-                        // The fundee's prior entitlement: their own last
-                        // commitment's broadcaster value, falling back to
-                        // the holder view's countersigner value when the
-                        // counterparty never signed one on the old funding —
-                        // and floored by the retiring setup's push (the
-                        // entitlement of a funding whose commitments were
-                        // never exchanged before the splice).
-                        let from_commitments =
-                            match (
-                                prev.current_counterparty_info.as_ref(),
-                                prev.current_holder_info.as_ref(),
-                            ) {
-                                (Some(cp_info), _) => cp_info.to_broadcaster_value_sat,
-                                (None, Some(holder_info)) => holder_info.to_countersigner_value_sat,
-                                (None, None) => 0,
-                            };
-                        from_commitments.max(prev.retiring_push_value_msat / 1000)
-                    })
-                    .unwrap_or(0);
-                if counterparty_value_sat > setup.push_value_msat / 1000 + carried_fundee_sat {
+                // The fundee's allowance for the first commitment of a
+                // funding era is exactly the reported push_value: the
+                // CLN fork's splice-era convention (lightning-playground
+                // #268 EC-2) sends the fundee's FULL post-splice balance
+                // there — pre-splice owed[] plus their signed
+                // contribution — selected by channel-opener role. The
+                // signer-side carried-balance term that used to be added
+                // here double-counted that balance against the honest
+                // report (an over-allowance of exactly the carried
+                // amount), and its snapshot floor duplicated what
+                // owed[] already carries upstream; both are dropped
+                // (owner decision 2026-09-30, handoff item 1(b)).
+                if counterparty_value_sat > setup.push_value_msat / 1000 {
                     policy_err!(
                         self,
                         "policy-commitment-initial-funding-value",
-                        "initial commitment may only send push_value_msat ({}) plus prior-era balance ({}) to fundee",
-                        setup.push_value_msat,
-                        carried_fundee_sat
+                        "initial commitment may only send push_value_msat ({}) to fundee",
+                        setup.push_value_msat
                     );
                 }
             }
@@ -2599,7 +2579,7 @@ mod tests {
         assert_policy_err!(
             status,
             "policy-commitment-initial-funding-value",
-            "validate_commitment_tx: initial commitment may only send push_value_msat (0) plus prior-era balance (0) to fundee"
+            "validate_commitment_tx: initial commitment may only send push_value_msat (0) to fundee"
         );
     }
 
