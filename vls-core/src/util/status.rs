@@ -155,3 +155,37 @@ impl From<ValidationError> for Status {
         res
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::policy::error::{policy_error, temporary_policy_error};
+
+    // Sweep rail 6 (#268 axis D residual 1): policy violations must land
+    // on the PERMANENT gRPC class. The vls-proxy retries Code::Temporary
+    // on its transient ladder (a607ba5d classification); a policy error
+    // that regains Temporary status would resurrect the masked-rejection
+    // wedge the proxy fix closed. Only TemporaryPolicy (the genuinely
+    // transient class, one producer: funding-not-buried) may map to 14.
+    #[test]
+    fn policy_errors_are_permanent_not_temporary() {
+        let status: Status =
+            policy_error("policy-commitment-initial-funding-value", "boom").into();
+        assert_eq!(
+            status.code(),
+            Code::FailedPrecondition,
+            "policy errors must classify permanent"
+        );
+
+        let status: Status = temporary_policy_error(
+            "policy-commitment-spends-active-utxo".to_string(),
+            "funding not buried",
+        )
+        .into();
+        assert_eq!(
+            status.code(),
+            Code::Temporary,
+            "the explicitly-temporary class is the only Temporary mapping"
+        );
+    }
+}
