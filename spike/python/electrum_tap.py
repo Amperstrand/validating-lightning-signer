@@ -198,7 +198,7 @@ class ElectrumTap:
         print("tap: cross_check_justice ENTERED", flush=True)
         from electrum import bitcoin as ebitcoin
         from electrum import lnutil
-        from electrum.crypto import sha256d
+        from electrum.crypto import sha256, sha256d
         from electrum.lnutil import LOCAL, REMOTE
         from electrum_ecc import ECPubkey
         from electrum.transaction import PartialTransaction, PartialTxInput, PartialTxOutput
@@ -230,7 +230,7 @@ class ElectrumTap:
                 chan.config[LOCAL].to_self_delay,
                 this_delayed_pub,
             )
-            program = sha256d(witness_script)
+            program = sha256(witness_script)
             spk = bytes([0x00, 0x20]) + program
             # electrum's own derivation for comparison
             from electrum.lnutil import derive_blinded_pubkey, derive_pubkey
@@ -246,7 +246,7 @@ class ElectrumTap:
                 chan.config[LOCAL].to_self_delay,
                 electrum_delayed,
             )
-            electrum_spk = bytes([0x00, 0x20]) + sha256d(electrum_script)
+            electrum_spk = bytes([0x00, 0x20]) + sha256(electrum_script)
             if electrum_spk != spk:
                 print(f"tap: SCRIPT-MISMATCH mine={witness_script.hex()}", flush=True)
                 print(f"tap: SCRIPT-MISMATCH electrum={electrum_script.hex()}", flush=True)

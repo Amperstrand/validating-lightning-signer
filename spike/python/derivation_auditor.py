@@ -156,13 +156,17 @@ class DerivationAuditor:
             electrum = self._electrum_inputs(chan, revocation_secret=per_commitment_secret)
             vls = dict(self._vls_report(bridge_channel_id, revocation_secret=per_commitment_secret))
             ctx_outputs = [o.scriptpubkey.hex() for o in ctx.outputs()]
+            import hashlib
+            script_hex = electrum.get("to_local_script") or ""
+            to_local_spk_hex = "0020" + hashlib.sha256(bytes.fromhex(script_hex)).hexdigest() if script_hex else None
             context = {
                 "revocation_secret": per_commitment_secret.hex()[:16] + "...",
                 "ctx_txid": str(ctx.txid()),
                 "ctx_outputs": ctx_outputs,
-                "electrum_to_local_script": electrum.get("to_local_script"),
+                "electrum_to_local_script": script_hex,
                 "electrum_to_local_spk": electrum.get("to_local_spk"),
-                "on_chain_match": electrum.get("to_local_spk") in ctx_outputs,
+                "to_local_spk_hex": to_local_spk_hex,
+                "on_chain_match": bool(to_local_spk_hex and to_local_spk_hex in ctx_outputs),
             }
             vls["to_self_delay"] = vls.get("holder_selected_contest_delay")
             self._compare(

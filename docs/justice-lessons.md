@@ -108,3 +108,42 @@ This is the genuine cross-implementation gap.
 |---|---|---|
 | `shachain_coverage_tests.rs` | vls-core/src/ | VLS shachain never returns wrong secrets |
 | `justice-replay.sh` | lightning-playground/scripts/ | Full justice choreography, one command |
+
+## Lesson 9 — the instrumentation was the bug (2026-10-02, the retraction)
+
+The entire M7c "justice fails for old commitments" narrative — four
+sub-versions of investigation, a private disclosure repo, a
+"high-confidence" finding — was an artifact of two bugs in our own
+diagnostics, exposed only by carrying the attack simulation through to
+on-chain settlement:
+
+1. **Hash-function confusion**: the tap computed the P2WSH program with
+   `sha256d` (double). P2WSH uses **single** SHA-256. Every
+   SCRIPT-AGREE / SPK-DIFF / "to_local not found" observation compared
+   a phantom scriptpubkey. The witness-script *derivation* was correct
+   the whole time — the M7c-v3 conclusion "both derivation paths agree
+   but neither matches on-chain" was two copies of the same wrong hash
+   agreeing with each other.
+2. **Type-confusion comparison**: the M8 auditor compared a bech32
+   address string against hex scriptpubkeys — `on_chain_match: false`
+   unconditionally, on data that provably matched.
+
+The decisive method: **settle the scenario on-chain and read the
+bytes.** The justice spend's witness script hashed (single SHA-256) to
+exactly the output's program; the revocation signature verified; the
+victim recovered everything (to_remote + justice sweep); the attacker
+got zero. Four sessions of tap-log analysis never crossed the
+instrumentation/protocol boundary that one `getrawtransaction 1`
+crossed immediately.
+
+Rules earned:
+- A derived value that "doesn't match the chain" is a hypothesis about
+  TWO derivations — ours and the protocol's. Verify ours against the
+  chain bytes (hash the actual witness script, decode the actual
+  address) before attributing the mismatch to the implementation
+  under test.
+- Never let instrumentation conclusions skip settlement: an attack
+  simulation isn't done until the funds move (or provably cannot).
+- When two independent tools agree on a mismatch, ask what they
+  share — here: the same author, the same hash confusion, and a
+  comparison layer each wrote fresh.
