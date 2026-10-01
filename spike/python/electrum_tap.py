@@ -278,7 +278,7 @@ class ElectrumTap:
                     print(f"tap: SPK-DIFF out[{i}]={o.scriptpubkey.hex()} val={o.value}", flush=True)
                 print("tap: justice cross-check skipped (to_local not found)", flush=True)
                 return
-            from electrum.transaction import address_to_script
+            from electrum.bitcoin import address_to_script
             dest = address_to_script(
                 ebitcoin.pubkey_to_address("p2wpkh", chan.config[LOCAL].payment_basepoint.pubkey.hex())
             )
