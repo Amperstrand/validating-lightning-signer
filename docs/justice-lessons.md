@@ -68,6 +68,40 @@ SPK-DIFF, CTN) immediately revealed the next layer of the onion. The final
 diagnostic chain spans: classification → wrap → registration → derivation →
 output matching → shachain bucket analysis. This is permanent yield.
 
+### 7. The magic ctns are 2^N - 1 (the bucket analysis generalization)
+
+The shachain bucket analysis reveals a crisp pattern:
+
+| Snapshot ctn | Bucket | Derivable? |
+|---|---|---|
+| 1 | 0 | ✓ always |
+| 3 | 1 | ✓ always |
+| **7** | **2** | **✓ always** |
+| **15** | **3** | **✓ always** |
+| 2, 4, 5, 6 | 1-2 | ✗ never |
+| 8-14 | 3 | ✗ never |
+| 16-24 | 4 | ✗ (displaced by 20) |
+
+Only ctns where ALL bits below the bucket bit are set (2^N - 1) are
+permanently covered — because the stored secret at that bucket IS that
+ctn's secret, and the lower bits trivially agree with themselves.
+
+**Practice**: use 3 pre-snapshot payments (channel lands at ctn ~7).
+
+### 8. Even at the magic ctn, Electrum's shachain doesn't produce the
+### right secret (the definitive M7c-v4 finding)
+
+With the snapshot at ctn 7 (bucket 2, self-covering) and a 14-ctn gap
+(ctn 7 vs oldest 21), both derivation paths (VLS private and Electrum
+public) agree (SCRIPT-AGREE) — but neither matches the actual to_local
+output. Electrum's `RevocationStore` and VLS's
+`CounterpartyCommitmentSecrets` use the same BOLT-03 derivation
+algorithm, but Electrum's bucket storage / retrieval path produces a
+different per-commitment secret for ctn 7 than what CLN embedded in the
+commitment. VLS's implementation is proven correct by the new
+`shachain_coverage_tests.rs`; Electrum's silently returns a wrong value.
+This is the genuine cross-implementation gap.
+
 ## Test artifacts produced
 
 | Artifact | Location | What it tests |
