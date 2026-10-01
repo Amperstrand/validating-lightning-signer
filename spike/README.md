@@ -238,22 +238,24 @@ channel at ctn 23 vs snapshot at ~5).
   2. `to_self_delay` from the WRONG side (`REMOTE` instead of `LOCAL`) —
      Electrum's `sweep_their_ctx_justice` uses the non-broadcaster's
      (LOCAL/us) delay. Fixed.
-- **Remaining gap DEFINITIVELY ISOLATED**: Electrum's own derivation and
-  the tap's derivation produce **byte-identical** witness scripts
-  (`SCRIPT-AGREE`), but neither matches the actual to_local output in
-  the broadcast stale ctx. The issue is upstream of both: the
-  per-commitment secret retrieved from Electrum's shachain for the
-  decoded ctn produces a pcp that doesn't correspond to the commitment
-  CLN actually broadcast. This is a genuine cross-implementation
-  subtlety (obscured-ctn decoding, shachain position mapping, or CLN's
-  commitment numbering vs Electrum's shachain index). Electrum's own
-  justice sweep has the same mismatch (no `to_local_for_revoked_ctx`
-  sweep name in the logs) — this is not a tap bug.
+- **Root cause FOUND — shachain bucket mismatch**: the shachain stores
+  secrets for ctns {20, 17, 19, 7, 15} in buckets {0,1,2,3,4}. For the
+  stale ctx at ctn 5, the required bucket is 2 (XOR bit analysis).
+  Bucket 2 contains the secret for ctn 19 — but the lower bits DISAGREE
+  (5=0b00101 vs 19=0b10011). The `retrieve_secret` derivation chain
+  from ctn 19's secret to ctn 5's position requires multiple hash steps
+  that the bucket structure doesn't support. Electrum's shachain
+  returns a derived value (not throwing UnableToDeriveSecret), but the
+  resulting pcp doesn't match CLN's actual commitment. This is a
+  genuine shachain derivation-chain gap — the stored secrets don't
+  cover ctn 5's position, yet `retrieve_secret` doesn't fail cleanly.
+  Both Electrum's justice sweep and the tap's cross-check correctly
+  fail to match (SCRIPT-AGREE between both derivations, but neither
+  matches the on-chain output).
 
-**The instrumentation (committed) is permanent yield**: every future replay
-shows the classification, the wrap firing, the revocation-key equivalence,
-the witness script (both derivations compared), and the actual output
-scriptpubkeys — the exact side-by-side needed to debug any future mismatch.
+**The instrumentation (committed) is permanent yield**: CTN classification,
+REV-KEY equivalence, SCRIPT-AGREE, SPK-DIFF, and the shachain bucket dump —
+the complete diagnostic chain from classification to output matching.
 
 ## Next
 
