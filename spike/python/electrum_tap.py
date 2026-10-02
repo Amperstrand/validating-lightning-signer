@@ -127,6 +127,20 @@ class ElectrumTap:
             lnsweep_mod.sweep_their_ctx_justice = sweep_their_ctx_justice
             self._original_justice = justice_original
 
+            htlc_justice_original = lnsweep_mod.sweep_their_htlctx_justice
+
+            def sweep_their_htlctx_justice(chan, ctx, htlc_tx):
+                result = htlc_justice_original(chan, ctx, htlc_tx)
+                n = len(result) if isinstance(result, dict) else 0
+                print(f"tap: HTLC-justice wrap CALLED for {name_of(chan)}: {n} sweep infos", flush=True)
+                if n:
+                    for prevout, info in result.items():
+                        print(f"tap: HTLC-justice sweep {info.name} {prevout}", flush=True)
+                return result
+
+            lnsweep_mod.sweep_their_htlctx_justice = sweep_their_htlctx_justice
+            self._original_htlc_justice = htlc_justice_original
+
             sign_original = Channel.sign_next_commitment
 
             def sign_next_commitment(chan, *args, **kwargs):
@@ -165,6 +179,11 @@ class ElectrumTap:
         if getattr(self, "_original_receive_revocation", None) is not None:
             Channel.receive_revocation = self._original_receive_revocation
             self._original_receive_revocation = None
+        if getattr(self, "_original_htlc_justice", None) is not None:
+            from electrum import lnsweep as lnsweep_uninstall
+
+            lnsweep_uninstall.sweep_their_htlctx_justice = self._original_htlc_justice
+            self._original_htlc_justice = None
 
     def validate_revocation(self, chan, revocation) -> None:
         from electrum.lnutil import LOCAL, REMOTE
