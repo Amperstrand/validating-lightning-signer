@@ -109,22 +109,31 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
         })),
         "new_channel" => {
             let channel_seed = hex32(p, "channel_seed")?;
-            let funding_override = match str_field(p, "funding_privkey") {
-                Ok(hexstr) => {
-                    let bytes = hex::decode(hexstr)
-                        .map_err(|e| format!("bad hex in funding_privkey: {e}"))?;
-                    let arr: [u8; 32] =
-                        bytes.try_into().map_err(|_| "funding_privkey must be 32 bytes")?;
-                    Some(
-                        lightning_signer::bitcoin::secp256k1::SecretKey::from_slice(&arr)
-                            .map_err(|e| format!("bad funding_privkey: {e}"))?,
-                    )
+            let mut parse_secret = |field: &str| -> Result<Option<SecretKey>, String> {
+                match str_field(p, field) {
+                    Ok(hexstr) => {
+                        let bytes = hex::decode(hexstr)
+                            .map_err(|e| format!("bad hex in {field}: {e}"))?;
+                        let arr: [u8; 32] =
+                            bytes.try_into().map_err(|_| format!("{field} must be 32 bytes"))?;
+                        Ok(Some(
+                            lightning_signer::bitcoin::secp256k1::SecretKey::from_slice(&arr)
+                                .map_err(|e| format!("bad {field}: {e}"))?,
+                        ))
+                    }
+                    Err(_) => Ok(None),
                 }
-                Err(_) => None,
             };
+            let funding_override = parse_secret("funding_privkey")?;
+            let payment_override = parse_secret("payment_privkey")?;
             let (channel_id, slot) = bridge
                 .node
-                .new_channel_with_keys_id(channel_seed, funding_override.as_ref(), &bridge.node)
+                .new_channel_with_keys_id(
+                    channel_seed,
+                    funding_override.as_ref(),
+                    payment_override.as_ref(),
+                    &bridge.node,
+                )
                 .map_err(status_msg)?;
             let secp = Secp256k1::new();
             let pubkeys = match slot {
@@ -407,4 +416,29 @@ fn pubkey_field(p: &Value, name: &str) -> Result<PublicKey, String> {
 
 fn u64_field(p: &Value, name: &str, default: u64) -> u64 {
     p.get(name).and_then(Value::as_u64).unwrap_or(default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payment_override_round_trips_through_new_channel_report() {
+        let bridge = make_bridge([1u8; 32], Network::Regtest);
+        let payment_priv = SecretKey::from_slice(&[7u8; 32]).unwrap();
+        let expected_pub = PublicKey::from_secret_key(&Secp256k1::new(), &payment_priv);
+        let res = call(
+            &bridge,
+            "new_channel",
+            &json!({
+                "channel_seed": hex::encode([2u8; 32]),
+                "payment_privkey": hex::encode(payment_priv.secret_bytes()),
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            res["pubkeys"]["payment_point"].as_str().unwrap(),
+            hex::encode(expected_pub.serialize())
+        );
+    }
 }

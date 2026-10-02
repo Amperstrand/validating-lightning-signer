@@ -1783,6 +1783,7 @@ impl Node {
         &self,
         keys_id: [u8; 32],
         funding_override: Option<&SecretKey>,
+        payment_override: Option<&SecretKey>,
         arc_self: &Arc<Node>,
     ) -> Result<(ChannelId, Option<ChannelSlot>), Status> {
         let channel_id = ChannelId::new(&keys_id);
@@ -1805,11 +1806,21 @@ impl Node {
         }
 
         let channel_value_sat = 0; // Placeholder value, not known yet.
-        let (keys, payment_key) = match funding_override {
-            Some(funding_key) => self
+        let (keys, payment_key) = match (funding_override, payment_override) {
+            (Some(funding_key), Some(payment_key)) => self
+                .keys_manager
+                .get_channel_keys_with_keys_id_and_funding_and_payment(
+                    keys_id,
+                    *funding_key,
+                    *payment_key,
+                ),
+            (Some(funding_key), None) => self
                 .keys_manager
                 .get_channel_keys_with_keys_id_and_funding(keys_id, *funding_key),
-            None => self.keys_manager.get_channel_keys_with_keys_id(keys_id, channel_value_sat),
+            (None, Some(payment_key)) => self
+                .keys_manager
+                .get_channel_keys_with_keys_id_and_payment(keys_id, *payment_key),
+            (None, None) => self.keys_manager.get_channel_keys_with_keys_id(keys_id, channel_value_sat),
         };
 
         let stub = ChannelStub {

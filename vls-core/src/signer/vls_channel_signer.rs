@@ -75,6 +75,16 @@ impl VlsChannelSigner {
         self.holder_pubkeys.funding_pubkey = PublicKey::from_secret_key(&secp, &self.funding_key);
     }
 
+    /// Fork-local spike support (not for upstream): override the payment key
+    /// with the host wallet's real key. Electrum's anchors channels derive
+    /// the payment basepoint from the wallet static payment secret, not from
+    /// the channel_seed, so the mirror must be told the key.
+    pub fn set_payment_key_for_testing(&mut self, payment_key: SecretKey) {
+        self.payment_key = payment_key;
+        let secp = Secp256k1::new();
+        self.holder_pubkeys.payment_point = PublicKey::from_secret_key(&secp, &self.payment_key);
+    }
+
     /// Construct a signer from individually-derived per-channel secret keys.
     ///
     /// Argument order mirrors the former `make_in_memory_signer` shim for an easy swap.

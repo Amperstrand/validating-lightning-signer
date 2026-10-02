@@ -384,6 +384,34 @@ impl MyKeysManager {
         (signer, payment_key)
     }
 
+    /// Fork-local spike support (not for upstream): overrides only the
+    /// payment key (see the funding variant for the rationale).
+    pub(crate) fn get_channel_keys_with_keys_id_and_payment(
+        &self,
+        keys_id: [u8; 32],
+        payment_override: SecretKey,
+    ) -> (VlsChannelSigner, SecretKey) {
+        let (mut signer, _) = self.get_channel_keys_with_keys_id(keys_id, 0);
+        signer.set_payment_key_for_testing(payment_override);
+        (signer, payment_override)
+    }
+
+    /// Fork-local spike support (not for upstream): additionally overrides
+    /// the payment key — Electrum's anchors channels derive the payment
+    /// basepoint from the wallet static payment secret, not from the
+    /// channel_seed, so the mirror receives it from the host.
+    pub(crate) fn get_channel_keys_with_keys_id_and_funding_and_payment(
+        &self,
+        keys_id: [u8; 32],
+        funding_override: SecretKey,
+        payment_override: SecretKey,
+    ) -> (VlsChannelSigner, SecretKey) {
+        let (mut signer, _) = self.get_channel_keys_with_keys_id(keys_id, 0);
+        signer.set_funding_key_for_testing(funding_override);
+        signer.set_payment_key_for_testing(payment_override);
+        (signer, payment_override)
+    }
+
     /// Raw seed behind `get_expanded_key`'s `ExpandedKey`. Re-derived here (hardened index 5,
     /// as at construction) so the signer can ship it to a remote client, which cannot derive it
     /// itself. Keeps the client's inbound-payment key stable across restarts.
