@@ -9,6 +9,9 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use lightning_signer::lightning::types::payment::PaymentHash;
+use lightning_signer::tx::tx::HTLCInfo2;
+
 use lightning_signer::bitcoin::bip32::DerivationPath;
 use lightning_signer::bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 use lightning_signer::bitcoin::{Network, OutPoint, Transaction, Txid};
@@ -28,6 +31,7 @@ pub struct Bridge {
     pub node: Arc<Node>,
     pub network: Network,
     pub last_signed_ctn: Arc<Mutex<HashMap<String, u64>>>,
+    pub ctn_state_path: Option<std::path::PathBuf>,
 }
 
 pub fn make_bridge(wallet_seed: [u8; 32], network: Network) -> Bridge {
@@ -42,10 +46,22 @@ pub fn make_bridge(wallet_seed: [u8; 32], network: Network) -> Bridge {
         node: Arc::new(Node::new(config, &wallet_seed, vec![], services)),
         network,
         last_signed_ctn: Arc::new(Mutex::new(HashMap::new())),
+        ctn_state_path: None,
     }
 }
 
-pub fn serve(bridge: Bridge, socket_path: &str) -> std::io::Result<()> {
+pub fn serve(mut bridge: Bridge, socket_path: &str) -> std::io::Result<()> {
+    let state_path = std::path::PathBuf::from(format!("{socket_path}.ctn"));
+    if let Ok(text) = std::fs::read_to_string(&state_path) {
+        if let Ok(loaded) = serde_json::from_str::<HashMap<String, u64>>(&text) {
+            let n = loaded.len();
+            *bridge.last_signed_ctn.lock().unwrap() = loaded;
+            bridge.ctn_state_path = Some(state_path.clone());
+            eprintln!("ctn guard state loaded: {n} channels from {}", state_path.display());
+        }
+    } else {
+        bridge.ctn_state_path = Some(state_path.clone());
+    }
     let _ = std::fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path)?;
     eprintln!("vls-bridge listening on {socket_path}");
@@ -255,6 +271,95 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
                 .map_err(status_msg)?;
             Ok(json!({"signature": hex::encode(signature.serialize_compact())}))
         }
+        "sign_counterparty_commitment_full" => {
+            let channel_id = ChannelId::new(&hex32(p, "channel_id")?);
+            let funding_outpoint = OutPoint {
+                txid: Txid::from_str(&str_field(p, "funding_txid")?)
+                    .map_err(|e| format!("bad funding_txid: {e}"))?,
+                vout: u64_field(p, "funding_vout", 0) as u32,
+            };
+            let per_commitment_point = pubkey_field(p, "per_commitment_point")?;
+            let commitment_number = u64_field(p, "ctn", 0);
+            let feerate_per_kw = u64_field(p, "feerate_per_kw", 0) as u32;
+            let to_holder_value_sat = u64_field(p, "to_holder_sat", 0);
+            let to_counterparty_value_sat = u64_field(p, "to_counterparty_sat", 0);
+            let parse_htlcs = |field: &str| -> Result<Vec<HTLCInfo2>, String> {
+                let mut out = Vec::new();
+                if let Some(items) = p.get(field).and_then(Value::as_array) {
+                    for item in items {
+                        let obj = item.as_object().ok_or(format!("{field} entries must be objects"))?;
+                        let value_sat = obj
+                            .get("value_sat")
+                            .and_then(Value::as_u64)
+                            .ok_or(format!("{field} missing value_sat"))?;
+                        let cltv_expiry = obj
+                            .get("cltv_abs")
+                            .and_then(Value::as_u64)
+                            .ok_or(format!("{field} missing cltv_abs"))? as u32;
+                        let hash_hex = obj
+                            .get("payment_hash")
+                            .and_then(Value::as_str)
+                            .ok_or(format!("{field} missing payment_hash"))?;
+                        let hash_bytes: [u8; 32] = hex::decode(hash_hex)
+                            .map_err(|e| format!("bad {field} payment_hash: {e}"))?
+                            .try_into()
+                            .map_err(|_| format!("{field} payment_hash must be 32 bytes"))?;
+                        out.push(HTLCInfo2 {
+                            value_sat,
+                            cltv_expiry,
+                            payment_hash: PaymentHash(hash_bytes),
+                        });
+                    }
+                }
+                Ok(out)
+            };
+            let offered_htlcs = parse_htlcs("offered_htlcs")?;
+            let received_htlcs = parse_htlcs("received_htlcs")?;
+            let ctn_key = hex::encode(channel_id.as_slice());
+            {
+                let mut guard = bridge.last_signed_ctn.lock().unwrap();
+                if let Some(&last) = guard.get(&ctn_key) {
+                    if commitment_number < last {
+                        return Err(format!(
+                            "commitment number replay: {commitment_number} < last signed {last}"
+                        ));
+                    }
+                }
+            }
+            let (signature, htlc_sigs) = bridge
+                .node
+                .with_channel(&channel_id, |chan| {
+                    chan.sign_counterparty_commitment_tx_phase2(
+                        funding_outpoint,
+                        &per_commitment_point,
+                        commitment_number,
+                        feerate_per_kw,
+                        to_holder_value_sat,
+                        to_counterparty_value_sat,
+                        offered_htlcs,
+                        received_htlcs,
+                    )
+                })
+                .map_err(status_msg)?;
+            bridge
+                .last_signed_ctn
+                .lock()
+                .unwrap()
+                .insert(ctn_key, commitment_number);
+            if let Some(path) = &bridge.ctn_state_path {
+                let snapshot = bridge.last_signed_ctn.lock().unwrap().clone();
+                if let Ok(text) = serde_json::to_string(&snapshot) {
+                    let _ = std::fs::write(path, text);
+                }
+            }
+            Ok(json!({
+                "signature": hex::encode(signature.serialize_compact()),
+                "htlc_signatures": htlc_sigs
+                    .iter()
+                    .map(|s| hex::encode(s.serialize_compact()))
+                    .collect::<Vec<_>>(),
+            }))
+        }
         "sync_commitment_state" => {
             let channel_id = ChannelId::new(&hex32(p, "channel_id")?);
             let commit_num = u64_field(p, "commit_num", 0);
@@ -323,6 +428,12 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
                 .lock()
                 .unwrap()
                 .insert(ctn_key, commitment_number);
+            if let Some(path) = &bridge.ctn_state_path {
+                let snapshot = bridge.last_signed_ctn.lock().unwrap().clone();
+                if let Ok(text) = serde_json::to_string(&snapshot) {
+                    let _ = std::fs::write(path, text);
+                }
+            }
             Ok(json!({"signature": hex::encode(signature.serialize_compact())}))
         }
         "validate_counterparty_revocation" => {

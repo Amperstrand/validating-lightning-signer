@@ -388,12 +388,33 @@ class ElectrumTap:
         try:
             self.ensure_registered(chan)
             commitment = chan.get_next_commitment(REMOTE)
+            htlcs = []
+            try:
+                htlcs = chan.hm.get_htlcs_in_next_ctx(REMOTE)
+            except Exception:
+                htlcs = []
+            offered = []
+            received = []
+            for direction, htlc in htlcs:
+                entry = {
+                    "value_sat": htlc.amount_msat // 1000,
+                    "payment_hash": htlc.payment_hash.hex(),
+                    "cltv_abs": getattr(htlc, "cltv_abs", getattr(htlc, "cltv_expiry", 0)),
+                }
+                if str(direction).endswith("SENT"):
+                    offered.append(entry)
+                else:
+                    received.append(entry)
             return {
                 "commitment": commitment,
                 "ctn": chan.get_next_ctn(REMOTE),
                 "pcp": chan.config[REMOTE].next_per_commitment_point,
                 "witscripts": build_witscripts(chan, commitment, chan.config[REMOTE].next_per_commitment_point),
                 "feerate": chan.hm.get_feerate_in_next_ctx(REMOTE),
+                "to_holder_sat": chan.balance(LOCAL, ctx_owner=REMOTE) // 1000,
+                "to_counterparty_sat": chan.balance(REMOTE, ctx_owner=REMOTE) // 1000,
+                "offered_htlcs": offered,
+                "received_htlcs": received,
             }
         except Exception as exc:
             self.divergences.append(f"{name_of(chan)} capture: {exc!r}")
@@ -433,28 +454,37 @@ class ElectrumTap:
             try:
                 self.sync_commitment_state(chan, capture["ctn"], capture["pcp"].hex())
                 bridge_channel_id = self.bridge_channels[chan.config[LOCAL].channel_seed.hex()]
+                prevout = capture["commitment"].inputs()[0].prevout
                 params = {
                     "channel_id": bridge_channel_id,
-                    "tx": capture["commitment"].serialize_to_network(include_sigs=False),
-                    "witscripts": capture["witscripts"],
+                    "funding_txid": prevout.txid.hex(),
+                    "funding_vout": prevout.n,
                     "per_commitment_point": capture["pcp"].hex(),
                     "ctn": capture["ctn"],
                     "feerate_per_kw": capture["feerate"],
+                    "to_holder_sat": capture["to_holder_sat"],
+                    "to_counterparty_sat": capture["to_counterparty_sat"],
+                    "offered_htlcs": capture["offered_htlcs"],
+                    "received_htlcs": capture["received_htlcs"],
                 }
                 if self.fault_inject == "stale_ctn":
                     params["ctn"] = max(0, params["ctn"] - 10)
-                elif self.fault_inject == "tamper_tx":
-                    raw = bytearray(bytes.fromhex(params["tx"]))
-                    raw[len(raw) * 3 // 4] ^= 0x02
-                    params["tx"] = bytes(raw).hex()
-                result = self.client.call("sign_counterparty_commitment_raw", params)
+                elif self.fault_inject == "tamper_value":
+                    params["to_holder_sat"] = params["to_holder_sat"] + 1000
+                result = self.client.call("sign_counterparty_commitment_full", params)
                 if not isinstance(result, dict) or "signature" not in result:
                     self._gate_closed(f"no signature in result: {result!r}")
                     return False
+                n_htlc = len(result.get("htlc_signatures", []))
                 self.gate_log.append(
-                    {"decision": "open", "ctn": capture["ctn"], "fault": self.fault_inject or None}
+                    {
+                        "decision": "open",
+                        "ctn": capture["ctn"],
+                        "fault": self.fault_inject or None,
+                        "htlc_signatures": n_htlc,
+                    }
                 )
-                print(f"GATE: open ctn={capture['ctn']}", flush=True)
+                print(f"GATE: open ctn={capture['ctn']} htlc_sigs={n_htlc}", flush=True)
                 self._write_gate_log()
                 return True
             except Exception as exc:
