@@ -429,34 +429,47 @@ class ElectrumTap:
     def gate_approve(self, chan, capture) -> bool:
         from electrum.lnutil import LOCAL
 
-        try:
-            self.sync_commitment_state(chan, capture["ctn"], capture["pcp"].hex())
-            bridge_channel_id = self.bridge_channels[chan.config[LOCAL].channel_seed.hex()]
-            params = {
-                "channel_id": bridge_channel_id,
-                "tx": capture["commitment"].serialize_to_network(include_sigs=False),
-                "witscripts": capture["witscripts"],
-                "per_commitment_point": capture["pcp"].hex(),
-                "ctn": capture["ctn"],
-                "feerate_per_kw": capture["feerate"],
-            }
-            if self.fault_inject == "stale_ctn":
-                params["ctn"] = max(0, params["ctn"] - 10)
-            elif self.fault_inject == "tamper_tx":
-                raw = bytearray(bytes.fromhex(params["tx"]))
-                raw[len(raw) * 3 // 4] ^= 0x02
-                params["tx"] = bytes(raw).hex()
-            result = self.client.call("sign_counterparty_commitment_raw", params)
-            if not isinstance(result, dict) or "signature" not in result:
-                self._gate_closed(f"no signature in result: {result!r}")
+        for attempt in (1, 2):
+            try:
+                self.sync_commitment_state(chan, capture["ctn"], capture["pcp"].hex())
+                bridge_channel_id = self.bridge_channels[chan.config[LOCAL].channel_seed.hex()]
+                params = {
+                    "channel_id": bridge_channel_id,
+                    "tx": capture["commitment"].serialize_to_network(include_sigs=False),
+                    "witscripts": capture["witscripts"],
+                    "per_commitment_point": capture["pcp"].hex(),
+                    "ctn": capture["ctn"],
+                    "feerate_per_kw": capture["feerate"],
+                }
+                if self.fault_inject == "stale_ctn":
+                    params["ctn"] = max(0, params["ctn"] - 10)
+                elif self.fault_inject == "tamper_tx":
+                    raw = bytearray(bytes.fromhex(params["tx"]))
+                    raw[len(raw) * 3 // 4] ^= 0x02
+                    params["tx"] = bytes(raw).hex()
+                result = self.client.call("sign_counterparty_commitment_raw", params)
+                if not isinstance(result, dict) or "signature" not in result:
+                    self._gate_closed(f"no signature in result: {result!r}")
+                    return False
+                self.gate_log.append(
+                    {"decision": "open", "ctn": capture["ctn"], "fault": self.fault_inject or None}
+                )
+                print(f"GATE: open ctn={capture['ctn']}", flush=True)
+                self._write_gate_log()
+                return True
+            except Exception as exc:
+                if attempt == 1 and "no such channel" in str(exc):
+                    print("tap: bridge lost the channel (restarted?) — re-registering", flush=True)
+                    self.bridge_channels.pop(chan.config[LOCAL].channel_seed.hex(), None)
+                    try:
+                        self.ensure_registered(chan)
+                    except Exception as rexc:
+                        self._gate_closed(f"re-registration failed: {rexc!r}")
+                        return False
+                    continue
+                self._gate_closed(f"{exc!r}")
                 return False
-        except Exception as exc:
-            self._gate_closed(f"{exc!r}")
-            return False
-        self.gate_log.append({"decision": "open", "ctn": capture["ctn"], "fault": self.fault_inject or None})
-        print(f"GATE: open ctn={capture['ctn']}", flush=True)
-        self._write_gate_log()
-        return True
+        return False
 
     def _gate_closed(self, reason) -> None:
         self.gate_log.append(

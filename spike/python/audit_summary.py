@@ -21,7 +21,7 @@ FIELDS = [
 ]
 
 
-def summarize(path: str) -> None:
+def summarize(path: str, check: bool) -> int:
     records = []
     with open(path) as f:
         for line in f:
@@ -30,6 +30,7 @@ def summarize(path: str) -> None:
             except json.JSONDecodeError:
                 continue
 
+    anomalies = 0
     counts = {}
     for r in records:
         counts[(r.get("checkpoint"), r.get("verdict"))] = (
@@ -37,13 +38,15 @@ def summarize(path: str) -> None:
         )
     print(f"== {path}: {len(records)} records")
     for (ckpt, verdict), n in sorted(counts.items(), key=str):
-        print(f"   {ckpt:<20} {verdict:<18} {n}")
+        print(f"   {str(ckpt):<20} {str(verdict):<18} {n}")
 
     justice = [r for r in records if r.get("checkpoint") == "justice"]
     if justice:
         matches = [r.get("context", {}).get("on_chain_match") for r in justice]
         true_n = sum(1 for m in matches if m is True)
         print(f"   on_chain_match: {true_n}/{len(justice)} true")
+        if check and true_n != len(justice):
+            anomalies += len(justice) - true_n
 
         agreements = {}
         for r in justice:
@@ -67,11 +70,26 @@ def summarize(path: str) -> None:
         for r in gate:
             decisions[r["decision"]] = decisions.get(r["decision"], 0) + 1
         print(f"   gate decisions: {decisions}")
+        if check and decisions.get("closed") and not gate_faults_expected(records):
+            print("   NOTE: closed gate decisions present")
+    return anomalies
+
+
+def gate_faults_expected(records: list) -> bool:
+    return any(r.get("fault") for r in records if "decision" in r)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    args = [a for a in sys.argv[1:] if a != "--check"]
+    check = "--check" in sys.argv
+    if not args:
         print(__doc__)
         sys.exit(1)
-    for path in sys.argv[1:]:
-        summarize(path)
+    total = 0
+    for path in args:
+        total += summarize(path, check)
+    if check and total:
+        print(f"ANOMALIES: {total} (exit 1)")
+        sys.exit(1)
+    if check:
+        print("CHECK: clean")
