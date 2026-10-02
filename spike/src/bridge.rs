@@ -2,10 +2,11 @@
 //! Electrum key derivation. Fork-local M2 sidecar skeleton: the future
 //! Electrum plugin taps channel state and speaks this protocol.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use lightning_signer::bitcoin::bip32::DerivationPath;
@@ -26,6 +27,7 @@ use serde_json::{json, Value};
 pub struct Bridge {
     pub node: Arc<Node>,
     pub network: Network,
+    pub last_signed_ctn: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 pub fn make_bridge(wallet_seed: [u8; 32], network: Network) -> Bridge {
@@ -39,6 +41,7 @@ pub fn make_bridge(wallet_seed: [u8; 32], network: Network) -> Bridge {
     Bridge {
         node: Arc::new(Node::new(config, &wallet_seed, vec![], services)),
         network,
+        last_signed_ctn: Arc::new(Mutex::new(HashMap::new())),
     }
 }
 
@@ -290,6 +293,17 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
             let per_commitment_point = pubkey_field(p, "per_commitment_point")?;
             let commitment_number = u64_field(p, "ctn", 0);
             let feerate_per_kw = u64_field(p, "feerate_per_kw", 0) as u32;
+            let ctn_key = hex::encode(channel_id.as_slice());
+            {
+                let mut guard = bridge.last_signed_ctn.lock().unwrap();
+                if let Some(&last) = guard.get(&ctn_key) {
+                    if commitment_number < last {
+                        return Err(format!(
+                            "commitment number replay: {commitment_number} < last signed {last}"
+                        ));
+                    }
+                }
+            }
             let signature = bridge
                 .node
                 .with_channel(&channel_id, |chan| {
@@ -304,6 +318,11 @@ fn call(bridge: &Bridge, method: &str, p: &Value) -> Result<Value, String> {
                     )
                 })
                 .map_err(status_msg)?;
+            bridge
+                .last_signed_ctn
+                .lock()
+                .unwrap()
+                .insert(ctn_key, commitment_number);
             Ok(json!({"signature": hex::encode(signature.serialize_compact())}))
         }
         "validate_counterparty_revocation" => {

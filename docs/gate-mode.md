@@ -28,13 +28,16 @@ testing: `stale_ctn` (ctn-10 replay), `tamper_tx` (one flipped byte at
   candidates; fixed by deriving offered/received HTLC scripts from
   `hm.get_htlcs_in_next_ctx` with both party-orientation fan-outs.
 
-## Known limitation (honest boundary)
+## Sequencing enforcement (added after the initial run)
 
-`stale_ctn` replay is NOT rejected: the raw-sign shim validates
-transaction structure (decode, witscripts, script consistency) but not
-commitment-number sequencing — the M5 `set_next_..._for_testing` sync
-structurally bypasses sequencing enforcement. A production gate would
-need the full protocol handshake in the bridge (the mirror becomes a
-protocol peer) rather than the testing shims. Sequencing enforcement is
-core VLS (present in `sign_counterparty_commitment_tx_phase2` paths)
-but is deliberately side-stepped in this spike's raw-sign fast path.
+The stale-ctn gap is now closed at the bridge layer: every
+`sign_counterparty_commitment_raw` call checks the requested ctn
+against the per-channel last-signed value and rejects strictly-older
+numbers ("commitment number replay: N < last signed M"). Re-signing
+the same ctn is allowed (BOLT-2 retransmission semantics). Verified
+live: the `stale_ctn` fault now produces GATE: CLOSED with the replay
+message, the payment is blocked, the channel survives, and clean
+payments resume. This guard lives in the bridge RPC layer, so the M5
+testing-sync cannot bypass it. The deeper vls-core enforcement
+(phase-2 signing paths) remains the production-grade mechanism; the
+bridge guard is the mirror-architecture equivalent.
