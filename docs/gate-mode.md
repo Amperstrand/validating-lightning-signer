@@ -28,6 +28,37 @@ testing: `stale_ctn` (ctn-10 replay), `tamper_tx` (one flipped byte at
   candidates; fixed by deriving offered/received HTLC scripts from
   `hm.get_htlcs_in_next_ctx` with both party-orientation fan-outs.
 
+## Phase-2 live verification (2026-10-02, later)
+
+The migration is LIVE and verified in both directions:
+
+- **Approval**: a payment flowed through `sign_counterparty_commitment_full`
+  with `GATE: open ctn=19, htlc_signatures=1` followed by
+  `ctn=20, htlc_signatures=0` — the first HTLC signature produced under
+  full vls-core validation (claimable_balances, ctn/pcp checks, tx
+  reconstruction). Payment succeeded end-to-end.
+- **Value rejection**: vls-core's phase-2 rejected incorrect
+  to_holder/to_counterparty values with "commitment totals exceed the
+  funding value" — observed across ~200 closure records when the capture
+  (pre-fix) sent fee-disregarding balance sums. This is the same
+  validation the `tamper_value` fault targets; the closure evidence
+  exists in the gate log with fault provenance as the capture bug
+  rather than the injection.
+
+Two capture bugs found by the live run (both fixed, `0abc4d81`):
+TxOutpoint uses `out_idx` not `n`; values must come from the actual
+commitment outputs (classified by witness script) because
+`chan.balance()` disregards fees by design.
+
+**Status of the clean fault replays**: the injected tamper_value and
+stale_ctn replays under stable infrastructure remain pending — the
+session's tail was eaten by an infra cascade (ai-legion outage → tunnel
+flapping → local tmpfs quota crash → torn gossip_db). The ctn guard
+itself is bridge-layer code identical to the raw path's (live-verified
+there: "commitment number replay: 2 < last signed 11"). Replays are one
+command each under a stable rig: relaunch the daemon with VLS_FAULT
+set, pay, read the closure from /tmp/vls-gate.jsonl.
+
 ## HTLC-signature gating: the precise gap
 
 `htlc_sigs` currently pass through the gate unvalidated. They cannot
