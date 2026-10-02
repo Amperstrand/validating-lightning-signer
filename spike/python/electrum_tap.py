@@ -412,6 +412,7 @@ class ElectrumTap:
             {
                 "channel_seed": local.channel_seed.hex(),
                 "funding_privkey": local.multisig_key.privkey.hex(),
+                "payment_privkey": local.payment_basepoint.privkey.hex(),
             },
         )
         expected = {
@@ -419,9 +420,8 @@ class ElectrumTap:
             "htlc_basepoint": local.htlc_basepoint.pubkey.hex(),
             "delayed_payment_basepoint": local.delayed_basepoint.pubkey.hex(),
             "revocation_basepoint": local.revocation_basepoint.pubkey.hex(),
+            "payment_point": local.payment_basepoint.pubkey.hex(),
         }
-        # payment_point is skipped: anchors payment basepoints need the
-        # channel-context seam documented in the README.
         for field, want in expected.items():
             got = result["pubkeys"][field]
             if got != want:
