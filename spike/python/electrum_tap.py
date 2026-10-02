@@ -405,14 +405,31 @@ class ElectrumTap:
                     offered.append(entry)
                 else:
                     received.append(entry)
+            witscripts_pre = build_witscripts(
+                chan, commitment, chan.config[REMOTE].next_per_commitment_point
+            )
+            to_holder_sat = None
+            to_counterparty_sat = None
+            for o, ws in zip(commitment.outputs(), witscripts_pre):
+                if o.value == 330 or not ws:
+                    continue
+                b = bytes.fromhex(ws)
+                if b[0] == 0x63:
+                    to_counterparty_sat = o.value
+                elif b[0] != 0x76:
+                    to_holder_sat = o.value
+            if to_holder_sat is None:
+                to_holder_sat = chan.balance(LOCAL, ctx_owner=REMOTE) // 1000
+            if to_counterparty_sat is None:
+                to_counterparty_sat = chan.balance(REMOTE, ctx_owner=REMOTE) // 1000
             return {
                 "commitment": commitment,
                 "ctn": chan.get_next_ctn(REMOTE),
                 "pcp": chan.config[REMOTE].next_per_commitment_point,
-                "witscripts": build_witscripts(chan, commitment, chan.config[REMOTE].next_per_commitment_point),
+                "witscripts": witscripts_pre,
                 "feerate": chan.hm.get_feerate_in_next_ctx(REMOTE),
-                "to_holder_sat": chan.balance(LOCAL, ctx_owner=REMOTE) // 1000,
-                "to_counterparty_sat": chan.balance(REMOTE, ctx_owner=REMOTE) // 1000,
+                "to_holder_sat": to_holder_sat,
+                "to_counterparty_sat": to_counterparty_sat,
                 "offered_htlcs": offered,
                 "received_htlcs": received,
             }
@@ -458,7 +475,7 @@ class ElectrumTap:
                 params = {
                     "channel_id": bridge_channel_id,
                     "funding_txid": prevout.txid.hex(),
-                    "funding_vout": prevout.n,
+                    "funding_vout": prevout.out_idx,
                     "per_commitment_point": capture["pcp"].hex(),
                     "ctn": capture["ctn"],
                     "feerate_per_kw": capture["feerate"],
