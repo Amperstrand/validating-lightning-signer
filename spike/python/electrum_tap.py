@@ -8,6 +8,7 @@ future Electrum plugin.
 """
 
 import json
+import os
 import socket
 
 
@@ -67,6 +68,9 @@ class ElectrumTap:
         self._original_receive_revocation = None
         self.auditor = DerivationAuditor(client)
         self.auditor.tap = self
+        self.gate_enabled = os.environ.get("VLS_GATE") == "1"
+        self.fault_inject = os.environ.get("VLS_FAULT", "")
+        self.gate_log = []
 
     def install(self) -> None:
         from electrum.lnchannel import Channel
@@ -145,6 +149,8 @@ class ElectrumTap:
 
             def sign_next_commitment(chan, *args, **kwargs):
                 capture = tap.capture_commitment(chan)
+                if capture is not None and tap.gate_enabled and not tap.gate_approve(chan, capture):
+                    raise RuntimeError("VLS gate rejected the commitment; signature suppressed")
                 sig_64, htlc_sigs = sign_original(chan, *args, **kwargs)
                 if capture is not None:
                     tap.cross_check_signature(chan, sig_64, capture)
@@ -420,6 +426,49 @@ class ElectrumTap:
             for d in self.divergences[-5:]:
                 print(f"tap:   {d}", flush=True)
 
+    def gate_approve(self, chan, capture) -> bool:
+        from electrum.lnutil import LOCAL
+
+        try:
+            self.sync_commitment_state(chan, capture["ctn"], capture["pcp"].hex())
+            bridge_channel_id = self.bridge_channels[chan.config[LOCAL].channel_seed.hex()]
+            params = {
+                "channel_id": bridge_channel_id,
+                "tx": capture["commitment"].serialize_to_network(include_sigs=False),
+                "witscripts": capture["witscripts"],
+                "per_commitment_point": capture["pcp"].hex(),
+                "ctn": capture["ctn"],
+                "feerate_per_kw": capture["feerate"],
+            }
+            if self.fault_inject == "stale_ctn":
+                params["ctn"] = max(0, params["ctn"] - 10)
+            elif self.fault_inject == "tamper_tx":
+                raw = bytearray(bytes.fromhex(params["tx"]))
+                raw[len(raw) * 3 // 4] ^= 0x02
+                params["tx"] = bytes(raw).hex()
+            result = self.client.call("sign_counterparty_commitment_raw", params)
+            if not isinstance(result, dict) or "signature" not in result:
+                self._gate_closed(f"no signature in result: {result!r}")
+                return False
+        except Exception as exc:
+            self._gate_closed(f"{exc!r}")
+            return False
+        self.gate_log.append({"decision": "open", "ctn": capture["ctn"], "fault": self.fault_inject or None})
+        print(f"GATE: open ctn={capture['ctn']}", flush=True)
+        self._write_gate_log()
+        return True
+
+    def _gate_closed(self, reason) -> None:
+        self.gate_log.append(
+            {"decision": "closed", "reason": str(reason)[:300], "fault": self.fault_inject or None}
+        )
+        print(f"GATE: CLOSED — {reason}", flush=True)
+        self._write_gate_log()
+
+    def _write_gate_log(self) -> None:
+        with open("/tmp/vls-gate.jsonl", "a") as f:
+            f.write(json.dumps(self.gate_log[-1]) + "\n")
+
     def register_channel(self, chan, name: str) -> str:
         from electrum.lnutil import LOCAL
 
@@ -633,6 +682,32 @@ def build_witscripts(chan, commitment, pcp):
         lnutil.make_commitment_output_to_anchor_witness_script(remote.multisig_key.pubkey),
         lnutil.make_commitment_output_to_anchor_witness_script(local.multisig_key.pubkey),
     ]
+    try:
+        htlc_records = chan.hm.get_htlcs_in_next_ctx(REMOTE)
+    except Exception:
+        htlc_records = []
+    has_anchors = chan.has_anchors()
+    for _direction, htlc in htlc_records:
+        cltv = getattr(htlc, "cltv_abs", getattr(htlc, "cltv_expiry", None))
+        for rev_base, owner_bp, other_bp in (
+            (local.revocation_basepoint.pubkey, local.htlc_basepoint.pubkey, remote.htlc_basepoint.pubkey),
+            (remote.revocation_basepoint.pubkey, remote.htlc_basepoint.pubkey, local.htlc_basepoint.pubkey),
+        ):
+            for is_received in (True, False):
+                try:
+                    candidates.append(
+                        lnutil.make_htlc_output_witness_script(
+                            is_received_htlc=is_received,
+                            remote_revocation_pubkey=lnutil.derive_blinded_pubkey(rev_base, pcp),
+                            remote_htlc_pubkey=lnutil.derive_pubkey(owner_bp, pcp),
+                            local_htlc_pubkey=lnutil.derive_pubkey(other_bp, pcp),
+                            payment_hash=htlc.payment_hash,
+                            cltv_abs=cltv,
+                            has_anchors=has_anchors,
+                        )
+                    )
+                except Exception:
+                    pass
     witscripts = []
     for idx, o in enumerate(commitment.outputs()):
         spk = o.scriptpubkey
