@@ -1,0 +1,40 @@
+{"decision": "open", "ctn": 0, "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'transaction format: decode_commitment_tx: tx output[2]: missing witscript for p2wsh'}\")", "fault": null}
+{"decision": "open", "ctn": 1, "fault": null}
+{"decision": "open", "ctn": 2, "fault": null}
+{"decision": "open", "ctn": 3, "fault": null}
+{"decision": "open", "ctn": 4, "fault": null}
+{"decision": "open", "ctn": 5, "fault": null}
+{"decision": "open", "ctn": 6, "fault": null}
+{"decision": "open", "ctn": 7, "fault": "stale_ctn"}
+{"decision": "open", "ctn": 8, "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError('sign_counterparty_commitment_raw: {\\'code\\': -32000, \\'message\\': \"transaction format: decode_commitment_tx: tx output[3]: script pubkey doesn\\'t match inner script: OP_0 OP_PUSHBYTES_32 4fb1349fa1ad8be326efc32f88bfc208ddf0e29841ceb1f884ed36b0c89cea4a != OP_0 OP_PUSHBYTES_32 4fb1349fa1", "fault": "tamper_tx"}
+{"decision": "closed", "reason": "RuntimeError('sign_counterparty_commitment_raw: {\\'code\\': -32000, \\'message\\': \"transaction format: decode_commitment_tx: tx output[3]: script pubkey doesn\\'t match inner script: OP_0 OP_PUSHBYTES_32 4fb1349fa1ad8be326efc32f88bfc208ddf0e29841ceb1f884ed36b0c89cea4a != OP_0 OP_PUSHBYTES_32 4fb1349fa1", "fault": "tamper_tx"}
+{"decision": "closed", "reason": "RuntimeError('sign_counterparty_commitment_raw: {\\'code\\': -32000, \\'message\\': \"transaction format: decode_commitment_tx: tx output[3]: script pubkey doesn\\'t match inner script: OP_0 OP_PUSHBYTES_32 4fb1349fa1ad8be326efc32f88bfc208ddf0e29841ceb1f884ed36b0c89cea4a != OP_0 OP_PUSHBYTES_32 4fb1349fa1", "fault": "tamper_tx"}
+{"decision": "closed", "reason": "RuntimeError('sign_counterparty_commitment_raw: {\\'code\\': -32000, \\'message\\': \"transaction format: decode_commitment_tx: tx output[3]: script pubkey doesn\\'t match inner script: OP_0 OP_PUSHBYTES_32 4fb1349fa1ad8be326efc32f88bfc208ddf0e29841ceb1f884ed36b0c89cea4a != OP_0 OP_PUSHBYTES_32 4fb1349fa1", "fault": "tamper_tx"}
+{"decision": "closed", "reason": "RuntimeError('sign_counterparty_commitment_raw: {\\'code\\': -32000, \\'message\\': \"transaction format: decode_commitment_tx: tx output[3]: script pubkey doesn\\'t match inner script: OP_0 OP_PUSHBYTES_32 4fb1349fa1ad8be326efc32f88bfc208ddf0e29841ceb1f884ed36b0c89cea4a != OP_0 OP_PUSHBYTES_32 4fb1349fa1", "fault": "tamper_tx"}
+{"decision": "open", "ctn": 9, "fault": null}
+{"decision": "open", "ctn": 10, "fault": null}
