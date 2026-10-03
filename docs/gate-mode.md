@@ -62,13 +62,21 @@ channel, all recorded in /tmp/vls-gate.jsonl:
 - Recovery: after both rejections, a clean payment succeeded with the
   gate open (ctn 4, htlc_signatures 1) — the channel was unharmed.
 
-**Tolerance finding**: the first tamper replay (+1000 sat) PASSED the
-gate — vls-core's totals check has a tolerance window equal to the
-commitment fee headroom (~1-2k sat at regtest feerates). A small
-value tamper inside the fee margin is not distinguishable by the
-totals check alone; the finer `claimable_balances` enforcement would
-need balance-tracked mirror state (beyond the M5 numbering sync). The
-fault magnitude is now 500k to make the replay unambiguous.
+**Tolerance finding (completed with the one-shot replay)**: a +1000-sat
+to_holder tamper passes BOTH validation layers — the totals check
+(fee-headroom window) and the claimable_balances delta (tested via a
+one-shot injection against a clean honest baseline: injected at ctn 8
+over the ctn-7 baseline, gate OPENED). The tolerance is structural:
+commitment fees vary between rounds, so value-shift validation must
+tolerate fee-scale differences — a sub-fee tamper is indistinguishable
+from fee variation. Practical detection floor ≈ the commitment fee
+(~1-2k sat at regtest feerates; scale with real feerates). Tampering at
+~0.5% of channel value and above is rejected immediately (500k sat:
+instant closure, verified).
+
+Fault tooling: `VLS_FAULT_ONCE=1` disarms after the first injection
+(one-shot semantics for baseline-vs-tamper experiments);
+`VLS_FAULT_TAMPER_SAT` sets the magnitude (default 500000).
 
 ## HTLC-signature gating: the precise gap
 

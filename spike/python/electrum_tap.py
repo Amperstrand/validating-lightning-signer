@@ -70,6 +70,8 @@ class ElectrumTap:
         self.auditor.tap = self
         self.gate_enabled = os.environ.get("VLS_GATE") == "1"
         self.fault_inject = os.environ.get("VLS_FAULT", "")
+        self.fault_once = os.environ.get("VLS_FAULT_ONCE") == "1"
+        self.fault_tamper_sat = int(os.environ.get("VLS_FAULT_TAMPER_SAT", "500000"))
         self.gate_log = []
 
     def install(self) -> None:
@@ -487,7 +489,15 @@ class ElectrumTap:
                 if self.fault_inject == "stale_ctn":
                     params["ctn"] = max(0, params["ctn"] - 10)
                 elif self.fault_inject == "tamper_value":
-                    params["to_holder_sat"] = params["to_holder_sat"] + 500000
+                    params["to_holder_sat"] = (
+                        params["to_holder_sat"] + self.fault_tamper_sat
+                    )
+                    if self.fault_once:
+                        print(
+                            f"GATE: one-shot tamper of +{self.fault_tamper_sat} injected; disarming",
+                            flush=True,
+                        )
+                        self.fault_inject = ""
                 result = self.client.call("sign_counterparty_commitment_full", params)
                 if not isinstance(result, dict) or "signature" not in result:
                     self._gate_closed(f"no signature in result: {result!r}")
