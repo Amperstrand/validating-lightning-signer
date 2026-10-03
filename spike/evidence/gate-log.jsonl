@@ -38,3 +38,424 @@
 {"decision": "closed", "reason": "RuntimeError('sign_counterparty_commitment_raw: {\\'code\\': -32000, \\'message\\': \"transaction format: decode_commitment_tx: tx output[3]: script pubkey doesn\\'t match inner script: OP_0 OP_PUSHBYTES_32 4fb1349fa1ad8be326efc32f88bfc208ddf0e29841ceb1f884ed36b0c89cea4a != OP_0 OP_PUSHBYTES_32 4fb1349fa1", "fault": "tamper_tx"}
 {"decision": "open", "ctn": 9, "fault": null}
 {"decision": "open", "ctn": 10, "fault": null}
+{"decision": "open", "ctn": 11, "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_raw: {'code': -32000, 'message': 'commitment number replay: 2 < last signed 11'}\")", "fault": "stale_ctn"}
+{"decision": "open", "ctn": 12, "fault": null}
+{"decision": "open", "ctn": 13, "fault": null}
+{"decision": "open", "ctn": 14, "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sync_commitment_state: {'code': -32000, 'message': 'no such channel: 54ba1ad7a432665edcfbfe44bf91b389a4e452a3a3ef57fecb2fe15d97468d2a'}\")", "fault": null}
+{"decision": "open", "ctn": 15, "fault": null}
+{"decision": "open", "ctn": 16, "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "AttributeError(\"'TxOutpoint' object has no attribute 'n'\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": null}
+{"decision": "open", "ctn": 19, "fault": null, "htlc_signatures": 1}
+{"decision": "open", "ctn": 20, "fault": null, "htlc_signatures": 0}
+{"decision": "open", "ctn": 0, "fault": "tamper_value", "htlc_signatures": 0}
+{"decision": "open", "ctn": 1, "fault": "tamper_value", "htlc_signatures": 0}
+{"decision": "open", "ctn": 2, "fault": "tamper_value", "htlc_signatures": 1}
+{"decision": "open", "ctn": 3, "fault": "tamper_value", "htlc_signatures": 0}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": "tamper_value"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": "tamper_value"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": "tamper_value"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": "tamper_value"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": "tamper_value"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": "tamper_value"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment totals exceed the funding value'}\")", "fault": "tamper_value"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment number replay: 0 < last signed 3'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment number replay: 0 < last signed 3'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment number replay: 0 < last signed 3'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment number replay: 0 < last signed 3'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment number replay: 0 < last signed 3'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment number replay: 0 < last signed 3'}\")", "fault": "stale_ctn"}
+{"decision": "closed", "reason": "RuntimeError(\"sign_counterparty_commitment_full: {'code': -32000, 'message': 'commitment number replay: 0 < last signed 3'}\")", "fault": "stale_ctn"}
+{"decision": "open", "ctn": 4, "fault": null, "htlc_signatures": 1}
+{"decision": "open", "ctn": 5, "fault": null, "htlc_signatures": 0}
+{"decision": "open", "ctn": 6, "fault": null, "htlc_signatures": 1}
+{"decision": "open", "ctn": 7, "fault": null, "htlc_signatures": 0}
+{"decision": "open", "ctn": 8, "fault": null, "htlc_signatures": 1}
+{"decision": "open", "ctn": 9, "fault": null, "htlc_signatures": 0}
