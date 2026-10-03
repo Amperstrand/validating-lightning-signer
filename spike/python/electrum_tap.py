@@ -487,7 +487,7 @@ class ElectrumTap:
                 if self.fault_inject == "stale_ctn":
                     params["ctn"] = max(0, params["ctn"] - 10)
                 elif self.fault_inject == "tamper_value":
-                    params["to_holder_sat"] = params["to_holder_sat"] + 1000
+                    params["to_holder_sat"] = params["to_holder_sat"] + 500000
                 result = self.client.call("sign_counterparty_commitment_full", params)
                 if not isinstance(result, dict) or "signature" not in result:
                     self._gate_closed(f"no signature in result: {result!r}")

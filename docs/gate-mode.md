@@ -50,14 +50,25 @@ TxOutpoint uses `out_idx` not `n`; values must come from the actual
 commitment outputs (classified by witness script) because
 `chan.balance()` disregards fees by design.
 
-**Status of the clean fault replays**: the injected tamper_value and
-stale_ctn replays under stable infrastructure remain pending — the
-session's tail was eaten by an infra cascade (ai-legion outage → tunnel
-flapping → local tmpfs quota crash → torn gossip_db). The ctn guard
-itself is bridge-layer code identical to the raw path's (live-verified
-there: "commitment number replay: 2 < last signed 11"). Replays are one
-command each under a stable rig: relaunch the daemon with VLS_FAULT
-set, pay, read the closure from /tmp/vls-gate.jsonl.
+**Fault replays (2026-10-02, completed)** — clean provenance, fresh
+channel, all recorded in /tmp/vls-gate.jsonl:
+
+- `tamper_value` (+500k to to_holder): GATE: CLOSED — "commitment
+  totals exceed the funding value" (`fault: tamper_value`), signature
+  suppressed, payment blocked.
+- `stale_ctn` (ctn−10): GATE: CLOSED — "commitment number replay: 0 <
+  last signed 3" (`fault: stale_ctn`) — the bridge ctn guard firing
+  through the phase-2 handler.
+- Recovery: after both rejections, a clean payment succeeded with the
+  gate open (ctn 4, htlc_signatures 1) — the channel was unharmed.
+
+**Tolerance finding**: the first tamper replay (+1000 sat) PASSED the
+gate — vls-core's totals check has a tolerance window equal to the
+commitment fee headroom (~1-2k sat at regtest feerates). A small
+value tamper inside the fee margin is not distinguishable by the
+totals check alone; the finer `claimable_balances` enforcement would
+need balance-tracked mirror state (beyond the M5 numbering sync). The
+fault magnitude is now 500k to make the replay unambiguous.
 
 ## HTLC-signature gating: the precise gap
 
