@@ -459,3 +459,15 @@
 {"decision": "open", "ctn": 7, "fault": null, "htlc_signatures": 0}
 {"decision": "open", "ctn": 8, "fault": null, "htlc_signatures": 1}
 {"decision": "open", "ctn": 9, "fault": null, "htlc_signatures": 0}
+{"decision": "open", "ctn": 0, "fault": null, "htlc_signatures": 0}
+{"decision": "open", "ctn": 1, "fault": null, "htlc_signatures": 0}
+{"decision": "open", "ctn": 2, "fault": null, "htlc_signatures": 1}
+{"decision": "open", "ctn": 3, "fault": null, "htlc_signatures": 0}
+{"decision": "open", "ctn": 4, "fault": null, "htlc_signatures": 1}
+{"decision": "open", "ctn": 5, "fault": null, "htlc_signatures": 0}
+{"decision": "open", "ctn": 6, "fault": null, "htlc_signatures": 1}
+{"decision": "open", "ctn": 7, "fault": null, "htlc_signatures": 0}
+{"decision": "open", "ctn": 8, "fault": null, "htlc_signatures": 1}
+{"decision": "open", "ctn": 9, "fault": null, "htlc_signatures": 0}
+{"decision": "open", "ctn": 10, "fault": null, "htlc_signatures": 1}
+{"decision": "open", "ctn": 11, "fault": null, "htlc_signatures": 0}

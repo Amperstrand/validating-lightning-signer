@@ -62,21 +62,27 @@ channel, all recorded in /tmp/vls-gate.jsonl:
 - Recovery: after both rejections, a clean payment succeeded with the
   gate open (ctn 4, htlc_signatures 1) — the channel was unharmed.
 
-**Tolerance finding (completed with the one-shot replay)**: a +1000-sat
-to_holder tamper passes BOTH validation layers — the totals check
-(fee-headroom window) and the claimable_balances delta (tested via a
-one-shot injection against a clean honest baseline: injected at ctn 8
-over the ctn-7 baseline, gate OPENED). The tolerance is structural:
-commitment fees vary between rounds, so value-shift validation must
-tolerate fee-scale differences — a sub-fee tamper is indistinguishable
-from fee variation. Practical detection floor ≈ the commitment fee
-(~1-2k sat at regtest feerates; scale with real feerates). Tampering at
-~0.5% of channel value and above is rejected immediately (500k sat:
-instant closure, verified).
+**Tolerance finding (empirically bracketed)**: one-shot tampons against
+clean honest baselines, injections verified in the daemon log each
+time: +1000 sat PASSED (ctn 8, faulttest wallet), +2000 sat PASSED
+(ctn 10, sweep wallet), +500000 sat CLOSED ("commitment totals exceed
+the funding value", fault replay). The detection floor lies in
+(2,000, 500,000] sat for a 5M-sat channel — between 0.04% and 10% of
+channel value. The tolerance is structural: fees vary between
+commitments, so value validation must accept fee-scale shifts. A
+tighter pin (5k/10k/50k probes) needs a stable-rig window; each probe
+is: kill daemons, tmux-launch with VLS_FAULT_ONCE=1 and the magnitude,
+pay, verify the injection print, read the gate record. Tooling:
+VLS_FAULT_ONCE (disarm after first injection), VLS_FAULT_TAMPER_SAT
+(magnitude, default 500000).
 
-Fault tooling: `VLS_FAULT_ONCE=1` disarms after the first injection
-(one-shot semantics for baseline-vs-tamper experiments);
-`VLS_FAULT_TAMPER_SAT` sets the magnitude (default 500000).
+**Operational trap (found the hard way)**: rig-new-wallet.sh starts
+its daemon via setsid — NOT under the tmux session. Killing the tmux
+session leaves that daemon serving on the RPC socket; subsequent tmux
+fault daemons idle unused and the "fault test" silently measures a
+clean payment. Always rig-kill-daemons.sh (pattern kill) before any
+fault-daemon launch, and require the "one-shot tamper ... injected"
+print as proof-of-injection before trusting a result.
 
 ## HTLC-signature gating: the precise gap
 
