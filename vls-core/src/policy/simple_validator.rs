@@ -2034,16 +2034,30 @@ impl SimpleValidator {
                         // and floored by the retiring setup's push (the
                         // entitlement of a funding whose commitments were
                         // never exchanged before the splice).
-                        let from_commitments =
+                        let (from_commitments, unexchanged_era) =
                             match (
                                 prev.current_counterparty_info.as_ref(),
                                 prev.current_holder_info.as_ref(),
                             ) {
-                                (Some(cp_info), _) => cp_info.to_broadcaster_value_sat,
-                                (None, Some(holder_info)) => holder_info.to_countersigner_value_sat,
-                                (None, None) => 0,
+                                (Some(cp_info), _) => (cp_info.to_broadcaster_value_sat, false),
+                                (None, Some(holder_info)) => {
+                                    (holder_info.to_countersigner_value_sat, false)
+                                }
+                                (None, None) => (0, true),
                             };
-                        from_commitments.max(prev.retiring_push_value_msat / 1000)
+                        // The retiring push floors the fundee's carried
+                        // entitlement ONLY when no commitment was ever
+                        // exchanged on the retiring funding (an immediate
+                        // splice: the push is then the fundee's sole
+                        // prior-era entitlement). Once a commitment was
+                        // exchanged, its recorded balance — including one
+                        // spent below the push — is the authoritative
+                        // prior-era state.
+                        if unexchanged_era {
+                            prev.retiring_push_value_msat / 1000
+                        } else {
+                            from_commitments
+                        }
                     })
                     .unwrap_or(0);
                 if counterparty_value_sat > setup.push_value_msat / 1000 + carried_fundee_sat {

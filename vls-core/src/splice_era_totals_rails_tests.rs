@@ -310,3 +310,111 @@ fn rail_splice_era_carried_push_floor_for_unexchanged_era() {
         res.err()
     );
 }
+
+// spent-down rail (RED before the floor-restriction fix): the retiring push
+// must NOT floor a carried balance that an exchanged prior-era commitment
+// already records below the push. The fundee received push_sat at open,
+// spent down to spent_down_sat (< push_sat), then the channel spliced:
+// carried is spent_down_sat — the push floor applies only to the
+// never-exchanged era (see the rail above).
+#[test]
+fn rail_splice_era_spent_down_balance_is_not_floored_by_retiring_push() {
+    let node_ctx = test_node_ctx(1);
+    const PUSH_MSAT: u64 = 500_000;
+    const SPENT_DOWN_SAT: u64 = 400; // dust-safe (>= 354) and below push_sat (500)
+    let push_sat = PUSH_MSAT / 1000;
+    assert!(SPENT_DOWN_SAT < push_sat, "rail needs a spent-down balance below the push");
+
+    let mut chan_ctx = {
+        let mut ctx = crate::util::test_utils::test_chan_ctx_with_push_val(
+            &node_ctx,
+            1,
+            1_000_000,
+            PUSH_MSAT,
+        );
+        let stype = crate::node::SpendType::P2wpkh;
+        let incoming = 1_000_000 + 2_000_000;
+        let fee = 1000;
+        let change = incoming - 1_000_000 - fee;
+        let mut tx_ctx = crate::util::test_utils::TestFundingTxContext::new();
+        tx_ctx.add_wallet_input(&node_ctx, stype, 1, incoming);
+        tx_ctx.add_wallet_output(&node_ctx, stype, 1, change);
+        let outpoint_ndx = tx_ctx.add_channel_outpoint(&node_ctx, &ctx, 1_000_000);
+        let mut tx = tx_ctx.to_tx();
+        crate::util::test_utils::funding_tx_setup_channel(&node_ctx, &mut ctx, &tx, outpoint_ndx);
+
+        // advance the commitment numbering exactly like fund_test_channel:
+        // validate the initial (num 0) holder commitment, which the
+        // push-val construction pays to the fundee as an allowed underpay.
+        let mut commit_tx_ctx =
+            crate::util::test_utils::channel_initial_holder_commitment(&node_ctx, &ctx);
+        let (csig, hsigs) = counterparty_sign_holder_commitment(&node_ctx, &ctx, &mut commit_tx_ctx);
+        validate_holder_commitment(&node_ctx, &ctx, &commit_tx_ctx, &csig, &hsigs)
+            .expect("valid initial holder commitment");
+        // (no funding-tx witvec validation here: the push-carrying channel
+        // output trips the dual-funding guard in validate_onchain_tx, same
+        // as the unexchanged-era rail above)
+        ctx
+    };
+    let channel_id = chan_ctx.channel_id.clone();
+
+    // era-A exchanged commitment recording the fundee spent down to
+    // SPENT_DOWN_SAT (a payment back to the funder; legal at num >= 1).
+    establish_era_a_counterparty_balance(&node_ctx, &mut chan_ctx, SPENT_DOWN_SAT);
+
+    let _outpoint_b = splice_a_to_b(&node_ctx, &mut chan_ctx);
+    let new_value = chan_ctx.setup.channel_value_sat;
+    let new_push_sat = chan_ctx.setup.push_value_msat / 1000;
+    assert_eq!(new_push_sat, push_sat, "harness carries the push into the new setup");
+
+    node_ctx
+        .node
+        .with_channel(&channel_id, |chan| {
+            chan.enforcement_state.set_next_counterparty_commit_num_for_testing(
+                0,
+                remote_point(ERA_B_REMOTE_POINT_NDX),
+            );
+            Ok(())
+        })
+        .expect("numbering install");
+
+    // must-accept: spent-down balance + new push signs in strict policy.
+    let entitlement = SPENT_DOWN_SAT + new_push_sat;
+    let res = sign_current_view_counterparty_commitment(
+        &node_ctx,
+        &channel_id,
+        &remote_point(ERA_B_REMOTE_POINT_NDX),
+        0,
+        new_value - 3755 - entitlement,
+        entitlement,
+    );
+    assert!(
+        res.is_ok(),
+        "spent-down balance + push must sign: {:?}",
+        res.err()
+    );
+
+    // must-refuse: an overpay that the old unconditional push floor would
+    // have admitted (spent_down + 2*push is inside push + max(spent_down,
+    // push)) must now be rejected — the exchanged commitment is
+    // authoritative, the floor does not resurrect spent funds.
+    let overpaid = SPENT_DOWN_SAT + new_push_sat + 100;
+    assert!(
+        overpaid <= push_sat + push_sat,
+        "overpay must sit inside the old floor's cap to prove the fix"
+    );
+    let res = sign_current_view_counterparty_commitment(
+        &node_ctx,
+        &channel_id,
+        &remote_point(ERA_B_REMOTE_POINT_NDX),
+        0,
+        new_value - 3755 - overpaid,
+        overpaid,
+    );
+    let err = res.expect_err("over the spent-down balance + push must be refused");
+    assert!(
+        err.message().contains("initial commitment may only send push_value_msat"),
+        "refusal must be the initial-funding policy, got: {}",
+        err.message()
+    );
+}
