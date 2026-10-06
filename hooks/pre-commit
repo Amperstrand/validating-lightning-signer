@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Pre-commit hook: gitleaks staged scan.
+# Install with: git config core.hooksPath hooks
+# gitleaks (optional but recommended): go install github.com/zricethezav/gitleaks/v8@v8.30.1
+#   — same pinned version as CI; set GITLEAKS_REQUIRED=1 to fail-closed when absent.
+# NOTE: if a .gitleaks.toml is ever added here, it MUST start with
+#   [extend]\nuseDefault = true — otherwise it silently replaces the
+#   entire default ruleset (org-sweep finding, 2026-10-07).
+set -euo pipefail
+
+if command -v gitleaks >/dev/null 2>&1; then
+    echo "🔍 gitleaks: scanning staged changes..."
+    gitleaks protect --staged --redact --verbose
+elif [ -n "${GITLEAKS_REQUIRED:-}" ]; then
+    echo "❌ gitleaks not found and GITLEAKS_REQUIRED is set"
+    echo "   install: go install github.com/zricethezav/gitleaks/v8@v8.30.1"
+    exit 1
+else
+    echo "⚠️  gitleaks not installed — skipping staged secret scan"
+    echo "   install: go install github.com/zricethezav/gitleaks/v8@v8.30.1"
+fi
