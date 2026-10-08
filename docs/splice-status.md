@@ -25,7 +25,7 @@ verified_cases = 12
 total_cases = 12
 modes = ["permissive", "strict"]
 last_delivered = 2026-08-30
-last_strict_verified = 2026-09-30
+last_strict_verified = 2026-10-08
 delivery_commit = "dc5b77e73e93896f5f9af371ef3304b27ca9ec5c"
 
 [cln]
@@ -62,6 +62,7 @@ fuzz_suite = "cd fuzz && RUSTFLAGS=--cfg=fuzzing cargo test"
 2026-09-02 = "permissive full matrix 59/0 incl. test_splicing 12/12"
 2026-09-03 = "strict 12 passed in 385.42s @ the 1800s bound"
 2026-09-30 = "strict 12/12 manifest green, 19P/0F before a 1800s reap in the non-manifest EC-7 late force-close remainder (abort_after_sigs_sent itself green post 63aa71b6) — CLN inr2-splice-harness-v26.06.8@5e799b8f2 (full 3-bug fundee fix: units + channel-role + prior-balance, = upstream PR 9591 splice-fundee-msat semantics), vlsd bins splice-initial-allowance-exact@4a82f3b8 (PR-A/B/C + 63aa71b6 EC-7 close fix + 7effd825 carried-term drop: allowance = reported push exactly), ARM cln:socket 54 starts; native arm rc=0; D1 FINAL same day (playground #268 owner decision, negative-guard-redesign pair: CLN negative-guard-redesign-v26@988251455 + twin -ff branch negative-guard-redesign@50b3b6bf8 — host total now includes pending-at-setup HTLCs attributable to the fundee — and vls negative-guard-redesign@fd710500 — WARN stray-host detectors + fundee-splice-out rail): manifest 12/12 strict in a COMPLETED 326.80s run, ARM cln:socket 50 starts, vls-core 687/0, unit rails 3x + RED/GREEN A/B; EC-7 family deselected there (pre-existing base stall, reproduced identically with D1-free control bins @5ff8c8d8), non-manifest rbf_htlc_sigs teardown gossip error; -ff lineage full file under D1 18/19 (sole failure = the pre-existing -ff gossip drift, present in the pre-D1 soak)"
+2026-10-08 = "strict 24/24 rc=0 in a COMPLETED 395.32s full-file run (manifest 12/12 within), ARM cln:socket — the single canonical union branch (d1-integration + verification-row docs) vlsd@342683a3, CLN inr2-splice-harness-v26.06.9@c29c545ae (upstream v26.06.9 patch base; #125 machinery dropped as superseded by .9 upstream crash-resume series; #124/#130 tolerance loop, #270 wedge series, lightning PRs #1-3, D1 absolute-balance carried; stamps aligned v26.06.9-32-gc29c545) — same-day battery green: two_chan strict rc=0, permissive full-matrix rc=0, edges rc=0, crash-window rc=0, vls-core 669/0; re-verified on the union after the merge (first pass on the pre-union base: 24/24 in 540.22s)"
 ```
 
 ## The 12-case ladder
