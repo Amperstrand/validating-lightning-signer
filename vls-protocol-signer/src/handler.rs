@@ -1296,7 +1296,26 @@ impl Handler for ChannelHandler {
                         Ok((point, secret))
                     });
 
-                let (point, old_secret) = res?;
+                let (point, old_secret) = match res {
+                    Ok(v) => v,
+                    Err(status)
+                        if unsafe_signet_derived_signing()
+                            && self.node.network_kind()
+                                == lightning_signer::bitcoin::Network::Signet =>
+                    {
+                        log::error!(
+                            "UNSAFE SIGNET-ONLY FALLBACK: derived per-commitment point for                              UNKNOWN channel (idx {}, no persister record). Trusts the client's \
+                             commitment index WITHOUT validation. NEVER run this on mainnet.",
+                            commitment_number
+                        );
+                        self.node.derived_per_commitment_point(
+                            &self.channel_id,
+                            commitment_number,
+                            self.protocol_version < PROTOCOL_VERSION_NO_SECRET,
+                        )?
+                    }
+                    Err(e) => return Err(e.into()),
+                };
 
                 let old_secret_reply =
                     old_secret.clone().map(|s| DisclosedSecret(s[..].try_into().unwrap()));
@@ -1943,15 +1962,34 @@ fn sign_penalty_to_us(
     }))
 }
 
+fn unsafe_signet_derived_signing() -> bool {
+    // Deliberately loud opt-in: VLS_UNSAFE_SIGNET_DERIVED_SIGNING=I_UNDERSTAND_THIS_IS_SIGNET_ONLY
+    std::env::var("VLS_UNSAFE_SIGNET_DERIVED_SIGNING")
+        .map(|v| v == "I_UNDERSTAND_THIS_IS_SIGNET_ONLY")
+        .unwrap_or(false)
+}
+
 fn sign_channel_announcement(
     node: &Node,
     channel_id: &ChannelId,
     announcement: &Octets,
 ) -> Result<(Signature, Signature)> {
     let message = announcement[256 + 2..].to_vec();
-    let bitcoin_sig = node.with_channel(channel_id, |chan| {
+    let bitcoin_sig = match node.with_channel(channel_id, |chan| {
         Ok(chan.sign_channel_announcement_with_funding_key(&message))
-    })?;
+    }) {
+        Ok(sig) => sig,
+        Err(status)
+            if unsafe_signet_derived_signing()
+                && node.network_kind() == lightning_signer::bitcoin::Network::Signet =>
+        {
+            log::error!(
+                "UNSAFE SIGNET-ONLY FALLBACK: signing channel announcement for UNKNOWN channel                  (no persister record) with seed-derived funding key. This trusts the request                  WITHOUT channel validation. NEVER run this on mainnet."
+            );
+            node.sign_with_derived_funding_key(channel_id, &message)?
+        }
+        Err(e) => return Err(e.into()),
+    };
     let node_sig = node.sign_channel_update(&message)?;
     Ok((Signature(node_sig.serialize_compact()), Signature(bitcoin_sig.serialize_compact())))
 }

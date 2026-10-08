@@ -53,6 +53,25 @@ pub async fn main() {
     let args = our_args.signer_args;
 
     let network = args.network;
+    // Boot-time hard gate for the UNSAFE signet derived-signing fallback:
+    // refuse to start if the env is set on any network other than signet.
+    if std::env::var("VLS_UNSAFE_SIGNET_DERIVED_SIGNING").is_ok() && network != Network::Signet {
+        panic!(
+            "VLS_UNSAFE_SIGNET_DERIVED_SIGNING is set but network is {:?}. \
+This fallback signs announcements for channels the signer has no record of, \
+without validation. It is SIGNET-ONLY by design. Remove the env var or \
+switch to signet.",
+            network
+        );
+    }
+    if std::env::var("VLS_UNSAFE_SIGNET_DERIVED_SIGNING").is_ok() {
+        println!("********************************************************************************");
+        println!("* WARNING: VLS_UNSAFE_SIGNET_DERIVED_SIGNING is ENABLED                        *");
+        println!("* The signer will sign channel announcements for channels it has NO RECORD of, *");
+        println!("* using seed-derived keys, WITHOUT validation. Experimental signet recovery    *");
+        println!("* ONLY. Do NOT run this on mainnet. Funds WILL be at risk.                     *");
+        println!("********************************************************************************");
+    }
     let datadir = args.datadir.clone().unwrap_or(format!(
         "{}/{DEFAULT_DIR}",
         dirs::home_dir().expect("Home directory not found").to_str().unwrap()

@@ -1307,6 +1307,60 @@ impl Node {
         trace_node_state!(state);
     }
 
+    /// UNSAFE, SIGNET-ONLY companion to sign_with_derived_funding_key:
+    /// per-commitment point (and optionally the idx-2 revocation secret)
+    /// derived from the node seed + channel_id with NO persister record.
+    /// Same gating and warnings as the funding-key fallback.
+    pub fn derived_per_commitment_point(
+        &self,
+        channel_id: &ChannelId,
+        idx: u64,
+        with_secret: bool,
+    ) -> Result<(bitcoin::secp256k1::PublicKey, Option<SecretKey>), Status> {
+        let cid = channel_id.clone();
+        let (keys, _) = self.keys_manager.get_channel_keys_with_id(cid, 0);
+        let point = keys
+            .get_per_commitment_point(idx, &self.secp_ctx)
+            .map_err(|_| Status::internal("derived per-commitment point failed"))?;
+        let secret = if with_secret && idx >= 2 {
+            let raw = keys
+                .release_commitment_secret(idx - 2)
+                .map_err(|_| Status::internal("derived commitment secret failed"))?;
+            Some(
+                SecretKey::from_slice(&raw)
+                    .map_err(|_| Status::internal("derived commitment secret invalid"))?,
+            )
+        } else {
+            None
+        };
+        Ok((point, secret))
+    }
+
+    /// Public network accessor for cross-crate gating (e.g. the UNSAFE
+    /// signet derived-signing fallback in vls-protocol-signer).
+    pub fn network_kind(&self) -> Network {
+        self.network()
+    }
+
+    /// UNSAFE, SIGNET-ONLY: sign `message` with a funding key derived purely
+    /// from the node seed + channel_id, WITHOUT any persister channel record.
+    /// Exists solely for the VLS_UNSAFE_SIGNET_DERIVED_SIGNING recovery
+    /// fallback (fresh signer vs channels known to CLN after a persister
+    /// reset). MUST NEVER be reachable on mainnet — the handler gates on
+    /// network == Signet and vlsd refuses to boot with the env set on any
+    /// other network.
+    pub fn sign_with_derived_funding_key(
+        &self,
+        channel_id: &ChannelId,
+        message: &[u8],
+    ) -> Result<secp256k1::ecdsa::Signature, Status> {
+        let cid = channel_id.clone();
+        let (keys, _) = self.keys_manager.get_channel_keys_with_id(cid, 0);
+        let ann_hash = Sha256dHash::hash(message);
+        let encmsg = secp256k1::Message::from_digest(ann_hash.to_byte_array());
+        Ok(self.secp_ctx.sign_ecdsa(&encmsg, &keys.funding_key(None)))
+    }
+
     pub(crate) fn get_node_secret(&self) -> SecretKey {
         self.keys_manager.get_node_secret()
     }
