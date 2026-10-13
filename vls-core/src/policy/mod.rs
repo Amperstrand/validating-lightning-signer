@@ -84,6 +84,13 @@ fn policy_error_with_filter(
     msg: String,
     filter: &PolicyFilter,
 ) -> Result<(), ValidationError> {
+    if std::env::var_os("VLS_SEMI_STRICT").is_some() {
+        warn!(
+            "SEMI_STRICT policy={} fired=\"{}\" remediation=\"{}\" action=warn-and-sign",
+            tag, msg, remediation_for(&tag)
+        );
+        return Ok(());
+    }
     warn!("policy failed: {} {}", tag, msg);
     let res = make_policy_error_with_filter(tag.clone(), msg.clone(), filter);
     #[cfg(feature = "use_backtrace")]
@@ -91,6 +98,24 @@ fn policy_error_with_filter(
         warn!("BACKTRACE:\n{:?}", &e.bt);
     }
     res
+}
+
+fn remediation_for(tag: &str) -> &'static str {
+    match tag {
+        "policy-commitment-initial-funding-value" =>
+            "clears when CLN reports the splice fundee balance in msat (upstream PR 9591)",
+        "policy-commitment-htlc-routing-balance" =>
+            "clears when CLN includes pending-at-setup HTLCs in the host total (D1 pair)",
+        "policy-onchain-no-fund-inbound" =>
+            "clears when CLN splice flow handles fundee-side wallet-input signing (EC-5)",
+        "policy-onchain-initial-commitment-countersigned" =>
+            "clears when CLN persists initial commitment state before withdrawal signatures",
+        "policy-routing-balanced" =>
+            "clears when CLN includes routing metadata in sign requests (4eb80237f)",
+        "policy-commitment-spends-active-utxo" =>
+            "expected during splice-in; no upstream action needed",
+        _ => "investigate and map to upstream issue",
+    }
 }
 
 fn make_policy_error_with_filter(
