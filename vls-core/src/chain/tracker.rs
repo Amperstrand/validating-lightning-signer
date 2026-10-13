@@ -803,6 +803,10 @@ pub fn max_target(network: Network) -> Target {
     let upper = match network {
         Network::Regtest => 0x7fffffu128 << (128 - 24),
         Network::Testnet => 0xffffu128 << (128 - 48),
+        // inr2 patch 0005 (ported from docker/vls/patches/0005-vls-signet-max-target.patch):
+        // upstream main panics on VLS_NETWORK=signet (tracker.rs unreachable) — signet
+        // shares testnet's target upper bound.
+        Network::Signet => 0xffffu128 << (128 - 48),
         Network::Bitcoin => 0xffffu128 << (128 - 48),
         _ => unreachable!(),
     };
