@@ -306,6 +306,7 @@ impl<C: 'static + Client> SignerLoop<C> {
                 // HsmdInitReplyFailure(error_code = 99) — a dirty signal on
                 // the permanent-error channel for a message that is not a
                 // channel request at all. Preinit is oneway by nature.
+                #[cfg(feature = "developer")]
                 Message::HsmdDevPreinit(_) => {
                     if !self.is_root() {
                         error!(
