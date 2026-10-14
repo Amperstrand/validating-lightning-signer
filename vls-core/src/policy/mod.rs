@@ -135,6 +135,13 @@ fn temporary_policy_error_with_filter(
     msg: String,
     filter: &PolicyFilter,
 ) -> Result<(), ValidationError> {
+    if std::env::var_os("VLS_SEMI_STRICT").is_some() {
+        warn!(
+            "SEMI_STRICT policy={} fired=\"{}\" remediation=\"{}\" action=warn-and-sign",
+            tag, msg, remediation_for(&tag)
+        );
+        return Ok(());
+    }
     if filter.filter(&tag) == FilterResult::Error {
         Err(temporary_policy_error(tag, msg))
     } else {
