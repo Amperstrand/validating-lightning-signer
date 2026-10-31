@@ -6,6 +6,13 @@ cache:
     - bin
 
 variables:
+  # rustup precedence is: RUSTUP_TOOLCHAIN env > rust-toolchain.toml >
+  # default. The root rust-toolchain.toml pins 1.98, which silently
+  # reroutes any image whose cargo is a rustup shim (the official rust
+  # images): rust-msrv(*) would test 1.98 instead of 1.85.0, and the
+  # nightly jobs (fuzz -Z flags, embedded alloc_error_handler) would
+  # break on stable. Jobs whose image deliberately differs set
+  # RUSTUP_TOOLCHAIN explicitly (#23).
   # Full clone. vls-util/build.rs derives GIT_DESC from `git describe --match=v*.*`,
   # and the tests in vls-proxy/src/socket_main.rs assert it looks like a version.
   # Under the runner's default shallow fetch the tag is not reachable from an
@@ -93,6 +100,7 @@ fuzz-channel:
     - rust-msrv
   timeout: 90m
   variables:
+    RUSTUP_TOOLCHAIN: "nightly"
     RUNNER_SCRIPT_TIMEOUT: 80m
     COVFUZZ_USE_REGISTRY: "true"
     COVFUZZ_CORPUS_NAME: "channel"
@@ -190,6 +198,8 @@ rust-msrv:
   rules: *skip_on_renovate
   stage: build
   image: rust:1.85.0
+  variables:
+    RUSTUP_TOOLCHAIN: "1.85.0"
   cache:
     key: vls-compile-1_85
     paths:
@@ -207,6 +217,8 @@ rust-msrv-lss:
   rules: *skip_on_renovate
   stage: build
   image: rust:1.85.0
+  variables:
+    RUSTUP_TOOLCHAIN: "1.85.0"
   cache:
     key: vls-compile-lss-1_85
     paths:
@@ -229,6 +241,7 @@ embedded:
     paths:
       - .cache/cargo
   variables:
+    RUSTUP_TOOLCHAIN: "nightly-2026-02-26"
     RUSTFLAGS: "-C link-arg=-Tlink.x"
     CARGO_TARGET_THUMBV7M_NONE_EABI_RUNNER: "qemu-system-arm -cpu cortex-m3 -machine mps2-an385 -nographic -semihosting-config enable=on,target=native -kernel"
   script:
@@ -241,6 +254,8 @@ stm32:
   rules: *skip_on_renovate
   stage: build
   image: $VLS_REGISTRY/rust-qemu:$RUST_QEMU_NIGHTLY_VERSION
+  variables:
+    RUSTUP_TOOLCHAIN: "nightly-2026-02-26"
   cache:
     key: vls-stm32
     paths:
@@ -255,6 +270,8 @@ wasm:
   rules: *skip_on_renovate
   stage: build
   image: $VLS_REGISTRY/rust-qemu:$RUST_QEMU_NIGHTLY_VERSION
+  variables:
+    RUSTUP_TOOLCHAIN: "nightly-2026-02-26"
   cache:
     key: vls-wasm
     paths:

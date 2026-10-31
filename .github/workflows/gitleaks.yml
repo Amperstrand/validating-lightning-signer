@@ -31,10 +31,18 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="8.30.1"
+          # Hosted runners run unprivileged: /usr/local/bin is root-owned
+          # and `tar -C /usr/local/bin` dies with Permission denied
+          # before any scan (issue #21). Extract into a user-writable
+          # dir and prepend it to PATH for this step.
+          BINDIR="$HOME/bin"
+          mkdir -p "$BINDIR"
           curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors \
             "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
             -o /tmp/gitleaks.tgz
-          tar -xzf /tmp/gitleaks.tgz -C /usr/local/bin gitleaks
+          tar -xzf /tmp/gitleaks.tgz -C "$BINDIR" gitleaks
+          export PATH="$BINDIR:$PATH"
+          gitleaks version
           CONFIG=""
           [ -f .gitleaks.toml ] && CONFIG="--config .gitleaks.toml"
           RANGE=""

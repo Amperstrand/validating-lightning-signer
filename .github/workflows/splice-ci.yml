@@ -56,9 +56,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # Cache the roots this workflow actually builds: the root
+          # workspace and vls-core-test (excluded from it, own
+          # Cargo.lock, built by the restore step). fuzz is never
+          # built here — its replay lives in splice-fuzz.yml (#19).
           workspaces: |
             .
-            fuzz
+            vls-core-test
 
       - name: Splice unit tests (sign_splice)
         run: cargo test -p vls-core --features test_utils splice
