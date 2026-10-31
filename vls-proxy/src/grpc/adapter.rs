@@ -33,7 +33,6 @@ const DUMMY_REQUEST_ID: u64 = u64::MAX;
 pub struct ProtocolAdapter {
     receiver: Arc<Mutex<Receiver<ChannelRequest>>>,
     requests: Arc<Mutex<Requests>>,
-    #[allow(unused)]
     shutdown_trigger: Trigger,
     shutdown_signal: Listener,
     init_message_cache: Arc<std::sync::Mutex<InitMessageCache>>,
@@ -134,6 +133,7 @@ impl ProtocolAdapter {
     pub fn start_stream_reader(&self, mut stream: Streaming<SignerResponse>) -> JoinHandle<()> {
         let requests = self.requests.clone();
         let shutdown_signal = self.shutdown_signal.clone();
+        let shutdown_trigger = self.shutdown_trigger.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -165,6 +165,22 @@ impl ProtocolAdapter {
                                 }
 
                                 if resp.request_id == DUMMY_REQUEST_ID {
+                                    // A permanently failing replayed init must not
+                                    // be discarded: the signer can never initialize
+                                    // on this connection (rejected cached init,
+                                    // unavailable persistence), so reconnects would
+                                    // replay the same failing init forever while
+                                    // ordinary requests pend — the silent node wedge.
+                                    // Shut the proxy down so the node fails loudly
+                                    // and hsmd gets restarted (issue #17).
+                                    if let Some(err_text) = permanent_error {
+                                        error!(
+                                            "replayed init failed permanently: {} — shutting down",
+                                            err_text
+                                        );
+                                        shutdown_trigger.trigger();
+                                        break;
+                                    }
                                     // TODO do something clever with the init reply message
                                     continue;
                                 }
@@ -227,6 +243,88 @@ impl ProtocolAdapter {
             capabilities: 0,
         });
         SignerRequest { request_id, message: req.message.clone(), context }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grpc::signer_loop::InitMessageCache;
+    use std::sync::{Arc, Mutex};
+    use tokio::net::TcpListener;
+    use tokio::sync::mpsc;
+    use tokio::time::{timeout, Duration};
+    use vlsd::grpc::hsmd::hsmd_client::HsmdClient;
+    use vlsd::grpc::hsmd::hsmd_server::HsmdServer;
+    use vlsd::grpc::hsmd::SignerResponse;
+
+    async fn spawn_hsmd_service(service: HsmdService) -> std::net::SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        let incoming = futures::stream::poll_fn(move |cx| match listener.poll_accept(cx) {
+            std::task::Poll::Ready(Ok((stream, _))) => std::task::Poll::Ready(Some(Ok(stream))),
+            std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Some(Err(e))),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        });
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(HsmdServer::new(service))
+                .serve_with_incoming(incoming)
+                .await
+                .expect("hsmd test service");
+        });
+        addr
+    }
+
+    fn seeded_init_cache() -> Arc<Mutex<InitMessageCache>> {
+        let cache = Arc::new(Mutex::new(InitMessageCache::new()));
+        // content is opaque to the adapter; only presence matters
+        cache.lock().unwrap().init_message = Some(vec![0x0b, 0x00]);
+        cache
+    }
+
+    #[tokio::test]
+    async fn replayed_init_permanent_failure_triggers_shutdown() {
+        let (shutdown_trigger, shutdown_signal) = triggered::trigger();
+        let service =
+            HsmdService::new(shutdown_trigger, shutdown_signal.clone(), seeded_init_cache());
+        let addr = spawn_hsmd_service(service).await;
+
+        let mut client = HsmdClient::connect(format!("http://{}", addr)).await.expect("connect");
+        let (tx, rx) = mpsc::channel(1);
+        let outbound = futures::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|resp| (resp, rx))
+        });
+        let mut response_stream =
+            client.signer_stream(outbound).await.expect("signer_stream").into_inner();
+
+        // The writer must first replay the cached init at DUMMY_REQUEST_ID.
+        let first = timeout(Duration::from_secs(30), response_stream.next())
+            .await
+            .expect("timed out waiting for the replayed init")
+            .expect("stream open")
+            .expect("replayed init ok");
+        assert_eq!(first.request_id, u64::MAX);
+
+        // A permanent refusal of the replayed init must shut the proxy
+        // down: the old reader discarded it at the dummy-ID check and the
+        // reconnect loop replayed the failing init forever while ordinary
+        // requests pend — the silent node wedge (issue #17).
+        if tx
+            .send(SignerResponse {
+                request_id: u64::MAX,
+                message: vec![],
+                error: "persistence unavailable".to_string(),
+                is_temporary_failure: false,
+            })
+            .await
+            .is_err()
+        {
+            panic!("refusal receiver gone before delivery");
+        }
+
+        let fired = timeout(Duration::from_secs(30), shutdown_signal).await;
+        assert!(fired.is_ok(), "a permanently failing replayed init must trigger shutdown");
     }
 }
 

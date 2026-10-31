@@ -56,13 +56,25 @@ impl SignerPort for GrpcSignerPort {
             // Wait for the signer reply
             // Can fail if the adapter shut down
             let reply = reply_rx.await.map_err(|_| Error::Transport)?;
+            if let Some(err_text) = reply.error {
+                // Permanent signer refusal: fail THIS call with the refusal
+                // text. Returning the (empty) `reply` as Ok parse-panicked
+                // the async chain front (NodePortFront's TipInfo/BlockChunk/
+                // AddBlock) and killed the follower task without a restart
+                // (issue #17).
+                error!("signer permanent error: {}", err_text);
+                return Err(Error::Protocol(ProtocolError::Io(format!(
+                    "vls signer error: {}",
+                    err_text
+                ))));
+            }
             if reply.is_temporary_failure {
                 // Retry with backoff
                 info!("temporary error, retrying");
                 return Err(Error::TransportTransient);
             }
 
-            return Ok(reply.reply);
+            Ok(reply.reply)
         })
         .retry(backoff())
         .when(|e| *e == Error::TransportTransient)
@@ -543,5 +555,38 @@ mod tests {
             }
             other => panic!("expected HsmdInitReplyFailure, got {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn signer_port_permanent_error_fails_the_call() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let port = GrpcSignerPort::new(tx);
+        let request = msgs::NodeInfo {}.as_vec();
+
+        let responder = tokio::spawn(async move {
+            let creq = rx.recv().await.expect("request arrives");
+            if creq
+                .reply_tx
+                .send(ChannelReply {
+                    reply: vec![],
+                    is_temporary_failure: false,
+                    error: Some("persistence unavailable".to_string()),
+                })
+                .is_err()
+            {
+                panic!("reply receiver gone before delivery");
+            }
+        });
+
+        // A permanent refusal must surface as Err carrying the refusal
+        // text; the old Ok(empty) return parse-panicked the chain front
+        // (issue #17).
+        match port.handle_message(request).await {
+            Err(Error::Protocol(ProtocolError::Io(text))) => {
+                assert!(text.contains("persistence unavailable"), "text: {}", text);
+            }
+            other => panic!("expected permanent-refusal Err, got {:?}", other),
+        }
+        responder.await.expect("responder finished");
     }
 }

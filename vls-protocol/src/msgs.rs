@@ -1497,6 +1497,21 @@ mod tests {
     }
 
     #[test]
+    fn hsmd_init_reply_failure_is_registered_in_types_csv() {
+        // issue #17: the wire registry must track msgs.rs — id 115
+        // (HsmdInitReplyFailure) was missing from types.csv.
+        let csv = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/types.csv"))
+            .expect("types.csv readable");
+        let expected =
+            alloc::format!("msgtype,hsmd_init_reply_failure,{},done", HsmdInitReplyFailure::TYPE);
+        assert!(
+            csv.lines().any(|l| l.trim() == expected),
+            "types.csv has no row for id {} (HsmdInitReplyFailure); the registry is out of sync with the wire protocol",
+            HsmdInitReplyFailure::TYPE
+        );
+    }
+
+    #[test]
     fn roundtrip_test() {
         let msg = SignChannelAnnouncementReply {
             node_signature: Signature([0; 64]),
