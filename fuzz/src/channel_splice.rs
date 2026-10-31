@@ -391,4 +391,33 @@ mod tests {
         let mut fuzz = SpliceChannelFuzz::new();
         fuzz.run(vec![SpliceAction::SameNumDifferentFunding]);
     }
+
+    #[test]
+    fn regression_corpus_replays() {
+        // issue #22: splice-fuzz CI counted these files but never fed
+        // them to the harness; replay each through the same
+        // arbitrary-decode + run path the libfuzzer target uses, so a
+        // reintroduced crash (or a corrupted corpus input) fails
+        // `RUSTFLAGS="--cfg=fuzzing" cargo test`, not just the sanity
+        // count.
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("regression/splice_channel");
+        let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+            .map(|entry| entry.expect("dir entry").path())
+            .filter(|p| p.is_file())
+            .collect();
+        paths.sort();
+        assert!(!paths.is_empty(), "regression corpus is empty");
+        for path in &paths {
+            let bytes =
+                std::fs::read(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let actions = <Vec<SpliceAction> as Arbitrary>::arbitrary_take_rest(
+                arbitrary::Unstructured::new(&bytes),
+            )
+            .unwrap_or_else(|e| panic!("{}: not a splice_channel input: {e}", path.display()));
+            let mut fuzz = SpliceChannelFuzz::new();
+            fuzz.run(actions);
+        }
+    }
 }
