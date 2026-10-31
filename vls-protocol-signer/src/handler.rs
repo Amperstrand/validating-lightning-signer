@@ -499,13 +499,22 @@ impl RootHandler {
             // assembly and signonly= consumers saw our inputs as unsigned.
             // Taproot wallet inputs carry a lone schnorr signature and cannot
             // use PSBT_IN_PARTIAL_SIG (BIP-371); they stay witness-only.
+            let mut partial_attached = false;
             if wallet_inputs[i] {
                 if let Some((pubkey, sig)) = wallet_key_sig_from_stack(&stack) {
                     psbt.inputs[i].partial_sigs.insert(pubkey.into(), sig);
                     psbt.inputs[i].bip32_derivation.insert(pubkey, wallet_key_source(&pubkey));
+                    partial_attached = true;
                 }
             }
-            psbt.inputs[i].final_script_witness = Some(Witness::from_slice(&stack));
+            // BIP-174: final and partial are exclusive — a finalized input
+            // carries no partial sigs/key-origin data. Inputs exposed as
+            // partially signed stay unfinalized for the PSBT assembler;
+            // inputs that cannot be partial (taproot per BIP-371, p2wsh
+            // unilateral closes) remain witness-final.
+            if !partial_attached {
+                psbt.inputs[i].final_script_witness = Some(Witness::from_slice(&stack));
+            }
         }
         Ok(())
     }
@@ -2224,6 +2233,12 @@ mod tests {
         let input = &signed.inputs[0];
 
         assert_eq!(input.partial_sigs.len(), 1, "wallet input must carry a partial signature");
+        // BIP-174 (Codex P1 on #15): an input carrying partial sigs/key-origin
+        // data must NOT also be finalized — final and partial are exclusive.
+        assert!(
+            input.final_script_witness.is_none(),
+            "partially signed wallet input must stay unfinalized (BIP-174)"
+        );
         let (pubkey, sig) = input.partial_sigs.iter().next().expect("partial signature");
 
         // BIP-174 partial signature = DER || sighash byte
@@ -2252,8 +2267,12 @@ mod tests {
         let expected_fp = hash160::Hash::hash(&pubkey.inner.serialize());
         assert_eq!(fingerprint.as_bytes()[..], expected_fp.as_byte_array()[..4]);
 
-        let witness = input.final_script_witness.as_ref().expect("final witness preserved");
-        assert_eq!(witness.len(), 2);
+        // BIP-174 (Codex P1 on #15): partial and final are exclusive — the
+        // wallet input carries partials and must NOT carry a final witness.
+        assert!(
+            input.final_script_witness.is_none(),
+            "partially signed wallet input must not carry a final witness (BIP-174)"
+        );
     }
 
     #[test]
@@ -2342,7 +2361,8 @@ mod tests {
         let signed = &reply.psbt.0.inner;
 
         assert_eq!(signed.inputs[0].partial_sigs.len(), 1);
-        assert!(signed.inputs[0].final_script_witness.is_some());
+        // BIP-174: the partially signed wallet input stays unfinalized
+        assert!(signed.inputs[0].final_script_witness.is_none());
         assert!(
             signed.inputs[1].partial_sigs.is_empty(),
             "foreign input must not gain a partial signature"
