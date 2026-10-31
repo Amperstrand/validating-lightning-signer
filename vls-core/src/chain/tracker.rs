@@ -806,7 +806,12 @@ pub fn max_target(network: Network) -> Target {
         // inr2 patch 0005 (ported from docker/vls/patches/0005-vls-signet-max-target.patch):
         // upstream main panics on VLS_NETWORK=signet (tracker.rs unreachable) — signet
         // shares testnet's target upper bound.
-        Network::Signet => 0xffffu128 << (128 - 48),
+        // inr2 amendment 2026-10-31 (dogfood3): testnet's bound is itself too low for
+        // signet-as-deployed — signet's challenge-signer PoW is nominal and the live
+        // chain ran difficulty 0.048 (bits 1d14cd85, target ~20x the testnet bound),
+        // which wedged the tracker at 326591 for weeks (misread as prune starvation).
+        // Signet needs the regtest-grade bound.
+        Network::Signet => 0x7fffffu128 << (128 - 24),
         Network::Bitcoin => 0xffffu128 << (128 - 48),
         _ => unreachable!(),
     };
