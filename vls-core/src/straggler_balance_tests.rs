@@ -225,6 +225,121 @@ mod tests {
             .expect("straggler accepted despite the cross-funding snapshot");
     }
 
+    // Issue #18 (PR #11 review debt): an old-funding num-0
+    // retransmission during the splice window must NOT count the
+    // snapshot of that SAME funding as prior-era carried balance. In
+    // the no-commitment-snapshot case both the retiring view's push and
+    // the snapshot's unexchanged-era floor are the retiring push P, so
+    // the buggy check allowed the old commitment to pay the fundee up
+    // to 2P. The successor funding's first commitment still carries
+    // the prior era legitimately (push + P).
+    #[test]
+    fn splice_window_old_funding_num0_cannot_recount_own_snapshot() {
+        let node_ctx = test_node_ctx(1);
+        let mut chan_ctx = fund_test_channel(&node_ctx, 1_000_000);
+        let channel_id = chan_ctx.channel_id.clone();
+
+        // A real retiring push P, installed post-open so the fund-time
+        // num-0 validation is unaffected.
+        let push_sat: u64 = 100_000;
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                chan.setup.push_value_msat = push_sat * 1000;
+                Ok(())
+            })
+            .expect("set retiring push");
+        chan_ctx.setup.push_value_msat = push_sat * 1000;
+
+        let old_setup = chan_ctx.setup.clone();
+
+        let mut tx_ctx = TestFundingTxContext::new();
+        tx_ctx.inputs.push(bitcoin::TxIn {
+            previous_output: old_setup.funding_outpoint,
+            script_sig: bitcoin::ScriptBuf::new(),
+            sequence: bitcoin::Sequence::MAX,
+            witness: bitcoin::Witness::default(),
+        });
+        chan_ctx.setup.channel_value_sat += 95_450;
+        let vout =
+            tx_ctx.add_channel_outpoint(&node_ctx, &chan_ctx, chan_ctx.setup.channel_value_sat);
+        let splice_tx = tx_ctx.to_tx();
+        let new_outpoint = bitcoin::OutPoint { txid: splice_tx.compute_txid(), vout };
+        assert!(
+            funding_tx_setup_channel(&node_ctx, &mut chan_ctx, &splice_tx, vout).is_none(),
+            "splice accepted"
+        );
+
+        // The no-commitment-snapshot case: an immediate splice, nothing
+        // exchanged on the retiring funding (the snapshot carries only
+        // the retiring push floor).
+        node_ctx
+            .node
+            .with_channel(&channel_id, |chan| {
+                let mut snap =
+                    chan.enforcement_state.prev_funding_commitment.take().expect("window open");
+                snap.current_holder_info = None;
+                snap.current_holder_signatures = None;
+                snap.next_holder_info = None;
+                snap.current_counterparty_info = None;
+                chan.enforcement_state.prev_funding_commitment = Some(snap);
+                Ok(())
+            })
+            .expect("seed unexchanged-era snapshot");
+
+        let remote_point = node_ctx
+            .node
+            .with_channel(&channel_id, |chan| chan.get_per_commitment_point(0))
+            .expect("per-commitment point");
+
+        // The old-funding num-0 retransmission claims P + extra for the
+        // fundee — over the retiring view's own push but under the 2P
+        // the buggy check allowed. Must be refused with carried balance 0.
+        let refusal = node_ctx.node.with_channel(&channel_id, |chan| {
+            chan.sign_counterparty_commitment_tx_phase2(
+                old_setup.funding_outpoint,
+                &remote_point,
+                0,
+                3755,
+                1_000_000 - 3755 - (push_sat + 50_000),
+                push_sat + 50_000,
+                vec![],
+                vec![],
+            )
+        });
+        let err = refusal
+            .err()
+            .expect("old-funding num-0 retransmission must not count its own snapshot as carried balance");
+        assert!(
+            err.message().contains(&format!(
+                "push_value_msat ({}) plus prior-era balance (0)",
+                push_sat * 1000
+            )),
+            "unexpected refusal: {}",
+            err.message()
+        );
+
+        // The successor funding's num-0 still carries the prior era:
+        // push (P) + carried (P) is legal there.
+        let legal = node_ctx.node.with_channel(&channel_id, |chan| {
+            chan.sign_counterparty_commitment_tx_phase2(
+                new_outpoint,
+                &remote_point,
+                0,
+                3755,
+                1_095_450 - 3755 - 2 * push_sat,
+                2 * push_sat,
+                vec![],
+                vec![],
+            )
+        });
+        assert!(
+            legal.is_ok(),
+            "new-funding num-0 must still carry prior-era balance, got {:?}",
+            legal.err().map(|e| e.message().to_string())
+        );
+    }
+
     // Mutant-killer precision rail (the vls-mutants MISSED trio on
     // holder/counterparty_commit_info_for): Ok/Err rails cannot see a
     // resolver that returns None or wrong-era data — min_opt treats a
