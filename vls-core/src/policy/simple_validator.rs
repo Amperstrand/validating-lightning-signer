@@ -2026,6 +2026,13 @@ impl SimpleValidator {
                 let carried_fundee_sat = estate
                     .prev_funding_commitment
                     .as_ref()
+                    // The carried term is the PRIOR funding's balance only:
+                    // an old-funding num-0 retransmission routes through the
+                    // retiring setup, whose outpoint IS the snapshot's —
+                    // counting that same funding's snapshot on top of its own
+                    // push would let the old commitment pay the fundee up to
+                    // 2P (issue #18).
+                    .filter(|prev| prev.outpoint != setup.funding_outpoint)
                     .map(|prev| {
                         // The fundee's prior entitlement: their own last
                         // commitment's broadcaster value, falling back to

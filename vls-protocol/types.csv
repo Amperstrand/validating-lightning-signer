@@ -22,6 +22,7 @@ msgtype,hsmd_get_channel_basepoints_reply,110,done
 msgtype,hsmd_init,11,done
 msgtype,hsmd_init_reply_v2,113,done
 msgtype,hsmd_init_reply_v4,114,done
+msgtype,hsmd_init_reply_failure,115,done
 msgtype,hsmd_sign_delayed_payment_to_us,12,done
 msgtype,hsmd_sign_tx_reply,112,done
 msgtype,hsmd_sign_remote_htlc_to_us,13,done
