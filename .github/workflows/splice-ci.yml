@@ -36,6 +36,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check docs/splice-status.md consistency
         run: ./contrib/check-splice-status.sh
+      - name: Check-splice-status fixture tests (external cross-check)
+        run: ./contrib/check-splice-status-test.sh
 
   deterministic-splice:
     name: deterministic splice suites

@@ -98,10 +98,28 @@ last_strict="$(key status.last_strict_verified)"
 if [[ "${SPLICE_STATUS_CHECK_CLN:-0}" == "1" ]]; then
     url="https://raw.githubusercontent.com/$fork_repo/$strict_rev/$suite_file"
     remote="$(curl -fsSL "$url" 2>/dev/null)" || fail "could not fetch $url (bad pin or network)"
-    while IFS= read -r case; do
-        grep -qF "def $case(" <<< "$remote" || fail "case $case not found in $fork_repo@$strict_rev:$suite_file — pin drifted"
-    done < <(grep -E '^\| [0-9]+ \| `test_' "$manifest" | awk -F'`' '{print $2}')
-    echo "external check: $rows cases confirmed in $fork_repo@$strict_rev"
+
+    table_cases() { grep -E '^\| [0-9]+ \| `test_' "$manifest" | awk -F'`' '{print $2}'; }
+    remote_cases() { grep -oE 'def test_[A-Za-z0-9_]+\(' <<< "$remote" | sed 's/^def //; s/($//'; }
+
+    # unique-set comparison, both directions (issue #20): the old
+    # per-entry grep accepted any SUBSET of the remote suite — a pinned
+    # revision that ADDED splice cases, or a duplicated table row
+    # covering an omitted one, passed silently.
+    dup_cases="$(table_cases | sort | uniq -d)"
+    [[ -z "$dup_cases" ]] \
+        || fail "duplicate case rows in the table: $(echo "$dup_cases" | tr '\n' ' ')"
+
+    only_table="$(table_cases | sort -u | comm -23 - <(remote_cases | sort -u))"
+    [[ -z "$only_table" ]] \
+        || fail "cases in the table but missing from $fork_repo@$strict_rev:$suite_file — pin drifted: $(echo "$only_table" | tr '\n' ' ')"
+
+    only_remote="$(table_cases | sort -u | comm -13 - <(remote_cases | sort -u))"
+    [[ -z "$only_remote" ]] \
+        || fail "splice cases defined in $fork_repo@$strict_rev:$suite_file but absent from the table: $(echo "$only_remote" | tr '\n' ' ')"
+
+    unique_rows="$(table_cases | sort -u | wc -l)"
+    echo "external check: $unique_rows unique cases match $fork_repo@$strict_rev exactly (both directions)"
 fi
 
 echo "splice-status OK: $verified/$total cases, CLN $delivery_rev -> $fork_repo/$fork_branch@$strict_rev, table+log consistent"
