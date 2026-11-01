@@ -22,9 +22,10 @@ use vls_protocol::msgs::SignBolt12V2Reply;
 use vls_protocol::psbt::PsbtWrapper;
 
 use bitcoin::bech32::Fe32;
-use bitcoin::bip32::{DerivationPath, KeySource};
+use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, KeySource};
 use bitcoin::blockdata::script;
 use bitcoin::consensus::deserialize;
+use bitcoin::hashes::{hash160, Hash as _};
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1;
 #[cfg(feature = "std")]
@@ -413,6 +414,8 @@ impl RootHandler {
         let secp_ctx = Secp256k1::new();
         let mut uniclosekeys = Vec::new();
         let mut ipaths = Vec::new();
+        // wallet-key inputs are eligible for PSBT partial signatures below; unilateral-close inputs are not
+        let mut wallet_inputs = Vec::new();
         for input in tx.input.iter() {
             if let Some(utxo) = utxos.iter().find(|u| {
                 u.txid == input.previous_output.txid && u.outnum == input.previous_output.vout
@@ -437,9 +440,11 @@ impl RootHandler {
                 } else {
                     uniclosekeys.push(None)
                 }
+                wallet_inputs.push(utxo.close_info.is_none());
             } else {
                 ipaths.push(DerivationPath::from(vec![]));
                 uniclosekeys.push(None);
+                wallet_inputs.push(false);
             }
         }
 
@@ -482,12 +487,57 @@ impl RootHandler {
         let witvec = self.node.unchecked_sign_onchain_tx(&tx, &ipaths, &prev_outs, uniclosekeys)?;
 
         for (i, stack) in witvec.into_iter().enumerate() {
-            if !stack.is_empty() {
-                psbt.inputs[i].final_script_witness = Some(Witness::from_slice(&stack));
+            if stack.is_empty() {
+                continue;
             }
+            // CLN parity: the stock hsmd sign_our_inputs records each wallet-key
+            // signature as a PSBT partial signature plus a bip32 keypath
+            // (CLN bitcoin/psbt.c psbt_input_add_pubkey: self-fingerprint +
+            // path [0]; wally_psbt_sign fills partial_signatures). Attaching
+            // only final_script_witness leaves the input finalized per
+            // BIP-174 with no visible partial signature, so multi-party PSBT
+            // assembly and signonly= consumers saw our inputs as unsigned.
+            // Taproot wallet inputs carry a lone schnorr signature and cannot
+            // use PSBT_IN_PARTIAL_SIG (BIP-371); they stay witness-only.
+            if wallet_inputs[i] {
+                if let Some((pubkey, sig)) = wallet_key_sig_from_stack(&stack) {
+                    psbt.inputs[i].partial_sigs.insert(pubkey.into(), sig);
+                    psbt.inputs[i].bip32_derivation.insert(pubkey, wallet_key_source(&pubkey));
+                }
+            }
+            psbt.inputs[i].final_script_witness = Some(Witness::from_slice(&stack));
         }
         Ok(())
     }
+}
+
+/// Extract the (pubkey, signature) pair from a wallet-key witness stack.
+/// Wallet-key stacks are exactly [ecdsa_sig, compressed_pubkey] (see
+/// Node::unchecked_sign_onchain_tx, which inserts the signature at index 0
+/// over the pubkey placeholder). Unilateral-close/p2wsh stacks carry extra
+/// script elements and taproot stacks a lone schnorr sig, so the strict
+/// 2-element shape excludes them.
+fn wallet_key_sig_from_stack(stack: &[Vec<u8>]) -> Option<(PublicKey, bitcoin::ecdsa::Signature)> {
+    if stack.len() != 2 || stack[1].len() != 33 || !(stack[1][0] == 2 || stack[1][0] == 3) {
+        return None;
+    }
+    if stack[0].first() != Some(&0x30) {
+        return None;
+    }
+    let pubkey = PublicKey::from_slice(&stack[1]).ok()?;
+    let sig = bitcoin::ecdsa::Signature::from_slice(&stack[0]).ok()?;
+    Some((pubkey, sig))
+}
+
+/// The bip32 keypath CLN's hsmd records for a wallet input pubkey: the key's
+/// own hash160 prefix as fingerprint and the placeholder path [0]
+/// (CLN bitcoin/psbt.c psbt_input_add_pubkey).
+fn wallet_key_source(pubkey: &PublicKey) -> KeySource {
+    let fingerprint_bytes =
+        <[u8; 4]>::try_from(&hash160::Hash::hash(&pubkey.serialize()).as_byte_array()[..4])
+            .expect("hash160 is 20 bytes");
+    let path = DerivationPath::from(vec![ChildNumber::from_normal_idx(0).expect("zero is normal")]);
+    (Fingerprint::from(fingerprint_bytes), path)
 }
 
 impl InitHandler {
@@ -2094,6 +2144,217 @@ mod tests {
             55, 71, 237, 36, 128, 102, 148, 61,
         ];
         ecdsa::Signature::from_compact(&sig).expect("signature");
+    }
+
+    #[test]
+    fn sign_withdrawal_populates_partial_signatures() {
+        // CLN parity (LP #310 item B): the stock hsmd records each wallet-key
+        // signature as partial_signatures + bip32_derivation
+        // (psbt.c psbt_input_add_pubkey + wally_psbt_sign). The finalized-
+        // witness-only form made signonly=-selected inputs look unsigned to
+        // partial-signature consumers.
+        use crate::approver::PositiveApprover;
+        use bitcoin::amount::Amount;
+        use bitcoin::hashes::{hash160, Hash as _};
+        use bitcoin::locktime::absolute::LockTime;
+        use bitcoin::psbt::Psbt;
+        use bitcoin::secp256k1::Message as SecpMessage;
+        use bitcoin::sighash::SighashCache;
+        use bitcoin::transaction::Version;
+        use bitcoin::Txid;
+        use bitcoin::Witness;
+        use bitcoin::{Sequence, TxIn, TxOut};
+        use std::sync::Arc;
+
+        let harness = SignerTestHarnessBuilder::new()
+            .with_network(Network::Regtest)
+            .with_approver(Arc::new(PositiveApprover()))
+            .build();
+        let handler = harness.root_handler();
+        let node = handler.node().clone();
+
+        let keyindex = 5u32;
+        let wallet_spk = node
+            .get_native_address(&to_derivation_path(&[keyindex]))
+            .expect("wallet address")
+            .script_pubkey();
+        let input_amount = Amount::from_sat(100_000);
+
+        let tx = Transaction {
+            version: Version(2),
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint { txid: Txid::all_zeros(), vout: 1 },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::MAX,
+                witness: Witness::default(),
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(90_000),
+                script_pubkey: wallet_spk.clone(),
+            }],
+        };
+        let mut psbt = Psbt::from_unsigned_tx(tx).expect("psbt from unsigned tx");
+        psbt.inputs[0].witness_utxo =
+            Some(TxOut { value: input_amount, script_pubkey: wallet_spk.clone() });
+
+        let utxo = Utxo {
+            txid: Txid::all_zeros(),
+            outnum: 1,
+            amount: input_amount.to_sat(),
+            keyindex,
+            is_p2sh: false,
+            script: Octets(wallet_spk.to_bytes()),
+            close_info: None,
+            is_in_coinbase: false,
+        };
+
+        let reply = handler
+            .handle(Message::SignWithdrawal(msgs::SignWithdrawal {
+                utxos: Array(vec![utxo]),
+                psbt: WithSize(StreamedPSBT::new(psbt)),
+            }))
+            .expect("sign withdrawal reply");
+        let reply = reply
+            .as_any()
+            .downcast_ref::<msgs::SignWithdrawalReply>()
+            .expect("expected SignWithdrawalReply");
+        let signed = &reply.psbt.0.inner;
+        assert_eq!(signed.inputs.len(), 1);
+        let input = &signed.inputs[0];
+
+        assert_eq!(input.partial_sigs.len(), 1, "wallet input must carry a partial signature");
+        let (pubkey, sig) = input.partial_sigs.iter().next().expect("partial signature");
+
+        // BIP-174 partial signature = DER || sighash byte
+        assert_eq!(sig.sighash_type, EcdsaSighashType::All);
+        let sig_vec = sig.to_vec();
+        let der = ecdsa::Signature::from_der(&sig_vec[..sig_vec.len() - 1]).expect("der signature");
+
+        let sighash = SighashCache::new(&signed.unsigned_tx)
+            .p2wpkh_signature_hash(0, &wallet_spk, input_amount, EcdsaSighashType::All)
+            .expect("sighash");
+        Secp256k1::new()
+            .verify_ecdsa(
+                &SecpMessage::from_slice(sighash.as_byte_array()).expect("sighash message"),
+                &der,
+                &pubkey.inner,
+            )
+            .expect("partial signature verifies");
+
+        // CLN hsmd parity: self-fingerprint + placeholder path [0]
+        let (fingerprint, dpath) =
+            input.bip32_derivation.get(&pubkey.inner).expect("bip32 derivation on wallet input");
+        assert_eq!(
+            dpath,
+            &DerivationPath::from(vec![ChildNumber::from_normal_idx(0).expect("zero is normal")])
+        );
+        let expected_fp = hash160::Hash::hash(&pubkey.inner.serialize());
+        assert_eq!(fingerprint.as_bytes()[..], expected_fp.as_byte_array()[..4]);
+
+        let witness = input.final_script_witness.as_ref().expect("final witness preserved");
+        assert_eq!(witness.len(), 2);
+    }
+
+    #[test]
+    fn sign_withdrawal_partial_signatures_skip_foreign_inputs() {
+        // The signonly= shape: only selected inputs get an hsm_utxo entry;
+        // inputs without a matching utxo must stay untouched.
+        use crate::approver::PositiveApprover;
+        use bitcoin::amount::Amount;
+        use bitcoin::key::CompressedPublicKey;
+        use bitcoin::locktime::absolute::LockTime;
+        use bitcoin::psbt::Psbt;
+        use bitcoin::secp256k1::SecretKey;
+        use bitcoin::transaction::Version;
+        use bitcoin::Txid;
+        use bitcoin::Witness;
+        use bitcoin::{Sequence, TxIn, TxOut};
+        use std::sync::Arc;
+
+        let harness = SignerTestHarnessBuilder::new()
+            .with_network(Network::Regtest)
+            .with_approver(Arc::new(PositiveApprover()))
+            .build();
+        let handler = harness.root_handler();
+        let node = handler.node().clone();
+
+        let keyindex = 3u32;
+        let wallet_spk = node
+            .get_native_address(&to_derivation_path(&[keyindex]))
+            .expect("wallet address")
+            .script_pubkey();
+
+        let secp_ctx = Secp256k1::new();
+        let foreign_sk = SecretKey::from_slice(&[7u8; 32]).expect("valid scalar");
+        let foreign_pk = CompressedPublicKey(foreign_sk.public_key(&secp_ctx));
+        let foreign_spk = Address::p2wpkh(&foreign_pk, Network::Regtest).script_pubkey();
+
+        let tx = Transaction {
+            version: Version(2),
+            lock_time: LockTime::ZERO,
+            input: vec![
+                TxIn {
+                    previous_output: OutPoint { txid: Txid::all_zeros(), vout: 1 },
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence::MAX,
+                    witness: Witness::default(),
+                },
+                TxIn {
+                    previous_output: OutPoint { txid: Txid::all_zeros(), vout: 2 },
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence::MAX,
+                    witness: Witness::default(),
+                },
+            ],
+            output: vec![TxOut {
+                value: Amount::from_sat(90_000),
+                script_pubkey: wallet_spk.clone(),
+            }],
+        };
+        let mut psbt = Psbt::from_unsigned_tx(tx).expect("psbt from unsigned tx");
+        psbt.inputs[0].witness_utxo =
+            Some(TxOut { value: Amount::from_sat(50_000), script_pubkey: wallet_spk.clone() });
+        psbt.inputs[1].witness_utxo =
+            Some(TxOut { value: Amount::from_sat(50_000), script_pubkey: foreign_spk.clone() });
+
+        let utxo = Utxo {
+            txid: Txid::all_zeros(),
+            outnum: 1,
+            amount: 50_000,
+            keyindex,
+            is_p2sh: false,
+            script: Octets(wallet_spk.to_bytes()),
+            close_info: None,
+            is_in_coinbase: false,
+        };
+
+        let reply = handler
+            .handle(Message::SignWithdrawal(msgs::SignWithdrawal {
+                utxos: Array(vec![utxo]),
+                psbt: WithSize(StreamedPSBT::new(psbt)),
+            }))
+            .expect("sign withdrawal reply");
+        let reply = reply
+            .as_any()
+            .downcast_ref::<msgs::SignWithdrawalReply>()
+            .expect("expected SignWithdrawalReply");
+        let signed = &reply.psbt.0.inner;
+
+        assert_eq!(signed.inputs[0].partial_sigs.len(), 1);
+        assert!(signed.inputs[0].final_script_witness.is_some());
+        assert!(
+            signed.inputs[1].partial_sigs.is_empty(),
+            "foreign input must not gain a partial signature"
+        );
+        assert!(
+            signed.inputs[1].bip32_derivation.is_empty(),
+            "foreign input must not gain a keypath"
+        );
+        assert!(
+            signed.inputs[1].final_script_witness.is_none(),
+            "foreign input must stay unsigned"
+        );
     }
 
     #[test]

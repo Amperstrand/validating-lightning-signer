@@ -54,6 +54,11 @@ impl SignerTestHarnessBuilder {
         self
     }
 
+    pub fn with_approver(mut self, approver: Arc<dyn Approve>) -> Self {
+        self.approver = approver;
+        self
+    }
+
     /// Build the harness.
     pub fn build(self) -> SignerTestHarness<MemoryKVVStore, JsonFormat> {
         let memory_store = self.persister.unwrap_or_else(|| MemoryKVVStore::new(self.signer_id));
