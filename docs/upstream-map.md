@@ -57,16 +57,31 @@ hang observed live. Best-first upstream candidates.
 Files: `vls-proxy/src/grpc/adapter.rs`, `vlsd/src/grpc/signer.rs`,
 `vls-protocol-signer/src/handler.rs`.
 
-## D. Trace-only — feature `splice_trace`, zero semantic delta
+## D. Trace-only — feature `splice_trace`, near-zero semantic delta
 
 Largest volume, fully separable behind the feature flag; instrumentation
 compiles to nothing when off (one relaxed atomic load per site when on
 without `VLS_TRACE_DIR`).
 
+Delta disclosure: not literally zero — `c99a64b0`'s wrapper-fn pattern
+makes `containing_function!()` emit `_inner` names, and the same commit
+updates 8 policy-failure expectations
+(`sign_counterparty_commitment_tx` → `…_inner`): an observable
+error-string change for any client or test inspecting policy-failure
+error strings (fork tests were updated in-commit). Preserving original
+function identity would remove the delta; as mapped, disclose it in the
+MR description.
+
 - Schema + envelope: `7eb737f4` (vls-trace/1 → `lightning-trace/1` via
-  `c606e469`) — **no-secret-by-construction** (no trace API accepts key
-  material; owner directive 2026-09-01) — this property is the
-  upstreamability argument for the whole group.
+  `c606e469`) — **no-secret-by-convention** (no trace API is *meant* to
+  accept key material; owner directive 2026-09-01). Precision: this is a
+  convention enforced by review, not by construction —
+  `artifact_other`/`artifact_message` (`vls-core/src/trace/artifact.rs`)
+  accept arbitrary strings with no secret-shaped validation and
+  `TraceArtifact.raw`/`.decoded` are `pub`, so the rule lives in the
+  module doc comment. Upstreaming as-is relies on that convention; a
+  narrowing pass (validator or private fields) would make it
+  construction-enforced and is the stronger form of the argument.
 - Instrumented choke points + wrapper-fn pattern: `c99a64b0`
 - Live-run plumbing, self-deadlock fix, pid-named sinks:
   `9c2b59b4`, `a20ad771`, `23af16f7`
@@ -144,13 +159,22 @@ upstreamable separately as a dependency-bump fix.
 | `VLS_DELAY_MS` latency knob (vlsd) | `b528121e` | Dev tooling; owner decision (guard-gated MR or keep fork-local) |
 | Root `Cargo.lock` churn | various | Rides the MRs' dep bumps |
 
-## Suggested MR order (smallest-risk first, each independently landable)
+## Suggested MR order (smallest-risk first; NOT all independently landable)
+
+Dependency correction: B's `b41be620` (`prev_setup` on `ChannelEntry`)
+and A's `b7c82769`/`f6f264f5` modify fields/paths introduced by E's
+`f06a1df1` — B and A are NOT independently landable before E's
+foundational arc against the stated base `adc1b333`. E goes first (or
+those three commits split out as an E-prerequisite MR).
 
 1. C — transport robustness (no semantic dependencies)
-2. B — persistence fields (additive, serde-defaulted)
-3. A — policy fixes (design discussion; strongest items: `4c82e753`,
+2. E — core engine, split by the seven arcs above; the `f06a1df1`
+   foundational arc lands FIRST (B and A's commits depend on its
+   fields/paths)
+3. B — persistence fields (additive, serde-defaulted; rides E's
+   `f06a1df1` fields)
+4. A — policy fixes (design discussion; strongest items: `4c82e753`,
    `b7c82769`, `f8c00726`)
-4. E — core engine, split by the seven arcs above
 5. F — rails riding their targets (already inside the arcs' commits
    where co-located; standalone files land with the matching arc)
 6. G — fuzz harness + corpus
